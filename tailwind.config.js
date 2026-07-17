@@ -1,0 +1,98 @@
+/** @type {import('tailwindcss').Config} */
+export default {
+  content: [
+    "./index.html",
+    "./src/**/*.{js,ts,jsx,tsx}",
+  ],
+  darkMode: "class",
+  theme: {
+    extend: {
+      colors: {
+        "surface-container": "var(--color-surface-container)",
+        "on-surface-variant": "var(--color-on-surface-variant)",
+        "on-primary-container": "var(--color-on-primary-container)",
+        "surface": "var(--color-surface)",
+        "on-secondary": "var(--color-on-secondary)",
+        "on-secondary-fixed-variant": "var(--color-on-secondary-fixed-variant)",
+        "surface-container-high": "var(--color-surface-container-high)",
+        "secondary-fixed-dim": "var(--color-secondary-fixed-dim)",
+        "on-error": "var(--color-on-error)",
+        "outline-variant": "var(--color-outline-variant)",
+        "on-tertiary-fixed-variant": "var(--color-on-tertiary-fixed-variant)",
+        "secondary-fixed": "var(--color-secondary-fixed)",
+        "on-surface": "var(--color-on-surface)",
+        "on-primary": "var(--color-on-primary)",
+        "surface-container-lowest": "var(--color-surface-container-lowest)",
+        "primary-container": "var(--color-primary-container)",
+        "primary-fixed": "var(--color-primary-fixed)",
+        "on-secondary-container": "var(--color-on-secondary-container)",
+        "secondary-container": "var(--color-secondary-container)",
+        "surface-dim": "var(--color-surface-dim)",
+        "surface-container-low": "var(--color-surface-container-low)",
+        "background": "var(--color-background)",
+        "secondary": "var(--color-secondary)",
+        "tertiary-container": "var(--color-tertiary-container)",
+        "error-container": "var(--color-error-container)",
+        "outline": "var(--color-outline)",
+        "surface-bright": "var(--color-surface-bright)",
+        "primary-fixed-dim": "var(--color-primary-fixed-dim)",
+        "on-primary-fixed": "var(--color-on-primary-fixed)",
+        "tertiary-fixed-dim": "var(--color-tertiary-fixed-dim)",
+        "error": "var(--color-error)",
+        "tertiary": "var(--color-tertiary)",
+        "primary": "var(--color-primary)",
+        "tertiary-fixed": "var(--color-tertiary-fixed)",
+        "on-tertiary-fixed": "var(--color-on-tertiary-fixed)",
+        "on-tertiary": "var(--color-on-tertiary)",
+        "surface-tint": "var(--color-surface-tint)",
+        "surface-container-highest": "var(--color-surface-container-highest)",
+        "inverse-on-surface": "var(--color-inverse-on-surface)",
+        "on-error-container": "var(--color-on-error-container)",
+        "on-background": "var(--color-on-background)",
+        "surface-variant": "var(--color-surface-variant)",
+        "on-secondary-fixed": "var(--color-on-secondary-fixed)",
+        "on-tertiary-container": "var(--color-on-tertiary-container)",
+        "on-primary-fixed-variant": "var(--color-on-primary-fixed-variant)",
+        "inverse-primary": "var(--color-inverse-primary)",
+        "inverse-surface": "var(--color-inverse-surface)"
+      },
+      borderRadius: {
+        "DEFAULT": "0.125rem",
+        "lg": "0.25rem",
+        "xl": "0.5rem",
+        "full": "0.75rem"
+      },
+      spacing: {
+        "stack-md": "16px",
+        "stack-sm": "8px",
+        "section-gap": "80px",
+        "gutter": "24px",
+        "container-padding": "40px",
+        "unit": "8px",
+        "stack-lg": "32px"
+      },
+      fontFamily: {
+        "headline-md": ["Be Vietnam Pro", "sans-serif"],
+        "display-lg": ["Be Vietnam Pro", "sans-serif"],
+        "body-md": ["Be Vietnam Pro", "sans-serif"],
+        "display-lg-mobile": ["Be Vietnam Pro", "sans-serif"],
+        "label-caps": ["Be Vietnam Pro", "sans-serif"],
+        "headline-sm": ["Be Vietnam Pro", "sans-serif"],
+        "body-lg": ["Be Vietnam Pro", "sans-serif"]
+      },
+      fontSize: {
+        "headline-md": ["32px", { "lineHeight": "40px", "fontWeight": "600" }],
+        "display-lg": ["72px", { "lineHeight": "84px", "letterSpacing": "-0.02em", "fontWeight": "700" }],
+        "body-md": ["16px", { "lineHeight": "24px", "fontWeight": "400" }],
+        "display-lg-mobile": ["40px", { "lineHeight": "48px", "letterSpacing": "-0.01em", "fontWeight": "700" }],
+        "label-caps": ["12px", { "lineHeight": "16px", "letterSpacing": "0.1em", "fontWeight": "600" }],
+        "headline-sm": ["24px", { "lineHeight": "32px", "fontWeight": "600" }],
+        "body-lg": ["20px", { "lineHeight": "30px", "fontWeight": "400" }]
+      }
+    },
+  },
+  plugins: [
+    require('@tailwindcss/forms'),
+    require('@tailwindcss/container-queries'),
+  ],
+}
