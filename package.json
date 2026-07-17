@@ -6,13 +6,15 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
+    "start": "npx serve dist -s -l tcp://0.0.0.0:${PORT:-3000}",
     "lint": "oxlint",
     "preview": "vite preview"
   },
   "dependencies": {
     "react": "^19.2.7",
     "react-dom": "^19.2.7",
-    "react-router-dom": "^7.18.1"
+    "react-router-dom": "^7.18.1",
+    "serve": "^14.2.4"
   },
   "devDependencies": {
     "@tailwindcss/container-queries": "^0.1.1",
