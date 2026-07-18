@@ -35,6 +35,8 @@
 ## 🟥 BƯỚC 0 — NỀN TẢNG (BLOCKING — làm trước mọi thứ)
 
 > Đây là **cửa go/no-go của cả dự án**. Nếu bước 0 chưa qua, mọi việc khác là xây trên cát ([15 §15.0](15-audit-lo-hong-va-cai-tien.md)).
+>
+> 📗 **Runbook chi tiết cho 0.2–0.4: [17 — Bước 0: chạy backend trên Mac](17-buoc-0-chay-backend-mac.md)** — từng lệnh macOS/zsh để đội kỹ thuật Esuhai dựng backend HanDichThuat trên Mac Studio (Metal/MPS, không CUDA): xin quyền repo → môi trường PyTorch-MPS → model + VoiceVox → chạy & kiểm health → **chẩn đoán/vá port Metal** → sidecar GGUF → tách ngõ VI≠JA → **bắt tay phiên live + đo độ trễ** (kèm script Python) → xác minh 3 giả định (on_script/block dịch/TTS đa ngôn ngữ) → **mẫu báo cáo gửi lại**.
 
 | # | Việc | File / Nơi | DoD (đạt khi) | Người |
 |---|------|-----------|---------------|:---:|
