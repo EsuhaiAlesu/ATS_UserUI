@@ -101,6 +101,8 @@
 → Chi tiết: [12.8](12-thu-vien-mau-giao-dien.md), [14 §14.2](14-proyaku-pre-in-post-event.md), [15 §15.5](15-audit-lo-hong-va-cai-tien.md).
 
 ### A5 · Diễn tập & Lưới an toàn (KHÔNG bỏ qua)
+
+> 📕 **Runbook vận hành đầy đủ: [18 — A5: Diễn tập & Dự phòng/Failover](18-a5-dien-tap-du-phong.md)** — tài liệu ngày lễ (in khổ A5, dán mọi trạm): vai trò + bộ đàm · lịch D-7→D-day · **ma trận 13 test + cổng ký gắn vào `/prep`** · quy trình T-minus · **cue sheet run-of-show** (SCRIPTED/LIVE/FREEZE, khi nào phiên dịch người dẫn) · phối hợp phiên dịch người · **sổ tay dự phòng: thang xuống cấp + cây quyết định + cutover Mac #2** · tiêu chí ABORT · cô lập mạng · **thẻ cue bỏ túi từng vai**. Mọi đường lỗi kết ở mic người + màn FREEZE(G)/SLATE(B), không bao giờ trắng màn/demo.
 | # | Việc | DoD | Người |
 |---|------|-----|:---:|
 | A5.1 | **Green Room** chạy thử trên **bản ghi diễn văn thật**; tinh **ASR/VAD/endpoint với mic sân khấu thật** | Có glossary cố định + số đo latency thật tại chỗ | 🧑‍💻⚙️🎤 |
