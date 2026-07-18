@@ -62,7 +62,7 @@
 | A1.4 | **Nút CUT-TO-SAFE** độc lập pipeline (FREEZE dòng-cuối / SLATE) — phím L/G/B + nút thanh điều khiển, broadcast mọi màn | `LiveSessionContext.tsx`, `BilingualStream.tsx` | 1 nút/phím đưa màn về an toàn tức thì | ✅ |
 | A1.5 | **Session bus 3 màn** (BroadcastChannel) — pop-out `?display=1` **mirror phiên live**, không còn chiếu demo | `LiveSessionContext.tsx`, `BilingualStream.tsx` | ✅ đã verify màn cạnh hiện STANDBY, không demo. **Lưu ý: cùng trình duyệt/máy**; đa-máy cần feed backend | ✅ (cùng máy) |
 | A1.6 | **Production proxy**: `vite preview` nay proxy `/api` same-origin | `vite.config.ts` (`preview.proxy`) | Bản build chạy `npm run preview` kết nối được backend cùng máy | ✅ |
-| A1.7 | **Namespace `lid` theo epoch** khi reconnect | `LiveSessionContext.tsx` | Lịch sử "đóng băng" không bị ghi đè bởi lid trùng | ⬜ F5 |
+| A1.7 | **Namespace `lid` theo epoch** khi reconnect (`${epoch}:${lid}`) | `LiveSessionContext.tsx` | Lịch sử "đóng băng" không bị ghi đè bởi lid trùng | ✅ |
 
 → Chi tiết: [04](04-man-hinh-phu-de.md), [05](05-ban-dieu-khien.md), [08](08-san-pham-va-do-tin-cay.md), [15 §15.1 F/§15.5](15-audit-lo-hong-va-cai-tien.md).
 
@@ -80,9 +80,9 @@
 ### A3 · Bàn điều khiển & niềm tin vận hành
 | # | Việc | File | DoD |
 |---|------|------|-----|
-| A3.1 | **Đấu nối event đang bị bỏ** (`on_script/name_fix/timing/corrected`) vào state | `LiveSessionContext.tsx` (`handleEvent`) | Không còn `default: break` nuốt tín hiệu |
+| A3.1 | ✅ **Đấu nối event đang bị bỏ** (`timing/on_script/name_fix/speech_lang/context/speaking`) vào state | `LiveSessionContext.tsx` (`handleEvent`) | ✅ Không còn `default: break` nuốt tín hiệu |
 | A3.2 | **Master Annunciator** (một trạng thái chủ đạo, đọc từ xa) | `AudioRouting.tsx` | STANDBY/WARMING/LIVE/DEGRADED/FAULT rõ, đổi màu |
-| A3.3 | **Trust HUD tối thiểu** (SCRIPT-MATCH% vs LIVE, name_fix, độ trễ) | `AudioRouting.tsx` | Người vận hành thấy máy tự tin tới đâu |
+| A3.3 | 🔧 **Trust HUD tối thiểu** (SCRIPT-MATCH%, name_fix, độ trễ, hướng, TTS, ngữ cảnh) | `AudioRouting.tsx` | ✅ Bản đầu đã có (hiện khi active); còn: sparkline độ trễ, ngưỡng màu, gợi ý Fast Mode |
 | A3.4 | **VU + chuông NO-SIGNAL** · **guard STOP (hold)** · **dọn banner lỗi thô** | `AudioRouting.tsx` | Mic chết → báo; STOP không bấm nhầm; không rò `SyntaxError` |
 | A3.5 | **Pre-flight "Green Room" checklist** chặn START | `AudioRouting.tsx` | START chỉ bật khi: backend online · mic có tín hiệu · model warm · VI≠JA · test tone · glossary/script nạp |
 
