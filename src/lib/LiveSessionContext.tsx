@@ -6,6 +6,10 @@ import type { LiveConfig, LiveEvent } from './api';
 // While reconnecting we KEEP the last subtitles frozen and never fall back to the demo.
 export type LiveStatus = 'idle' | 'connecting' | 'warming' | 'ready' | 'listening' | 'reconnecting' | 'error';
 
+// Operator "take-to-safe" control for the audience wall (A1.4):
+//  live  = normal · freeze = hold the last lines static · slate = branded STANDBY/black.
+export type AudienceCut = 'live' | 'freeze' | 'slate';
+
 export interface LiveLine {
     lid: string;
     lang: string;
@@ -18,6 +22,16 @@ interface Warming {
     step: number;
     steps: number;
     detail: string;
+}
+
+// The session snapshot broadcast to mirror windows (edge LED displays) over the cross-window bus.
+interface BusState {
+    status: LiveStatus;
+    warming: Warming | null;
+    error: string | null;
+    everStarted: boolean;
+    hadSession: boolean;
+    lines: LiveLine[];
 }
 
 interface LiveSessionValue {
@@ -42,6 +56,11 @@ interface LiveSessionValue {
      * back on the LED wall).
      */
     everStarted: boolean;
+    /** True if this window is a read-only MIRROR of another window's session (edge display). */
+    mirrored: boolean;
+    /** Take-to-safe control for the audience wall; broadcast to every window (A1.4). */
+    audienceCut: AudienceCut;
+    setAudienceCut: (cut: AudienceCut) => void;
     start: (config: LiveConfig) => void;
     stop: () => void;
 }
@@ -64,6 +83,12 @@ export const LiveSessionProvider: React.FC<{ children: React.ReactNode }> = ({ c
     const [error, setError] = useState<string | null>(null);
     const [hadSession, setHadSession] = useState(false);
     const [everStarted, setEverStarted] = useState(false);
+    const [mirrored, setMirrored] = useState(false);
+    const [audienceCut, setAudienceCutState] = useState<AudienceCut>('live');
+
+    const isPublisherRef = useRef(false);                 // this window owns the live session
+    const busRef = useRef<BroadcastChannel | null>(null);
+    const latestStateRef = useRef<BusState | null>(null);
 
     const wsRef = useRef<WebSocket | null>(null);
     const configRef = useRef<LiveConfig | null>(null);   // last config, replayed on reconnect
@@ -89,6 +114,51 @@ export const LiveSessionProvider: React.FC<{ children: React.ReactNode }> = ({ c
         probe();
         const id = setInterval(probe, 5000);
         return () => { cancelled = true; clearInterval(id); };
+    }, []);
+
+    // Cross-window session bus (A1.5) + audience cut (A1.4). Lets pop-out edge-display windows
+    // MIRROR the operator's live session instead of booting their own idle session (which showed
+    // the demo). NOTE: BroadcastChannel is same-browser/same-origin only — LED walls driven by
+    // SEPARATE machines need a backend display feed instead (see docs/ux-roadmap/16 §A1.5).
+    useEffect(() => {
+        if (typeof BroadcastChannel === 'undefined') return;
+        const bus = new BroadcastChannel('proyaku-session');
+        busRef.current = bus;
+        bus.onmessage = (e) => {
+            const msg = e.data as { type?: string; payload?: BusState; cut?: AudienceCut } | null;
+            if (!msg) return;
+            if (msg.type === 'hello') {
+                if (isPublisherRef.current && latestStateRef.current) {
+                    bus.postMessage({ type: 'state', payload: latestStateRef.current });
+                }
+            } else if (msg.type === 'cut' && msg.cut) {
+                setAudienceCutState(msg.cut);
+            } else if (msg.type === 'state' && !isPublisherRef.current && msg.payload) {
+                const s = msg.payload;
+                setMirrored(true);
+                setStatus(s.status);
+                setWarming(s.warming);
+                setError(s.error);
+                setEverStarted(s.everStarted);
+                setHadSession(s.hadSession);
+                setLines(s.lines);
+            }
+        };
+        bus.postMessage({ type: 'hello' });   // ask any existing publisher for the current state
+        return () => { bus.close(); busRef.current = null; };
+    }, []);
+
+    // Publisher: keep the shared snapshot fresh and broadcast it to mirror windows on change.
+    useEffect(() => {
+        latestStateRef.current = { status, warming, error, everStarted, hadSession, lines };
+        if (isPublisherRef.current) {
+            busRef.current?.postMessage({ type: 'state', payload: latestStateRef.current });
+        }
+    }, [status, warming, error, everStarted, hadSession, lines]);
+
+    const setAudienceCut = useCallback((cut: AudienceCut) => {
+        setAudienceCutState(cut);
+        busRef.current?.postMessage({ type: 'cut', cut });   // apply on every window
     }, []);
 
     const upsertLine = useCallback((evt: LiveEvent, kind: 'transcript' | 'line') => {
@@ -207,6 +277,8 @@ export const LiveSessionProvider: React.FC<{ children: React.ReactNode }> = ({ c
 
     const start = useCallback((config: LiveConfig) => {
         clearReconnect();
+        isPublisherRef.current = true;   // this window owns the session and publishes it to mirrors
+        setMirrored(false);
         if (wsRef.current) {
             const old = wsRef.current;
             wsRef.current = null;               // detach so its onclose can't trigger a reconnect
@@ -229,7 +301,8 @@ export const LiveSessionProvider: React.FC<{ children: React.ReactNode }> = ({ c
     }, [clearReconnect]);
 
     const value: LiveSessionValue = {
-        backendOnline, status, warming, level, speech, lines, error, hadSession, everStarted, start, stop,
+        backendOnline, status, warming, level, speech, lines, error, hadSession, everStarted,
+        mirrored, audienceCut, setAudienceCut, start, stop,
     };
     return <LiveSessionContext.Provider value={value}>{children}</LiveSessionContext.Provider>;
 };

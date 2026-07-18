@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { isSessionActive, useLiveSession } from '../lib/LiveSessionContext';
-import type { LiveLine } from '../lib/LiveSessionContext';
+import type { LiveLine, AudienceCut } from '../lib/LiveSessionContext';
 import { useStickyScroll } from '../lib/useStickyScroll';
 
 interface Props {
@@ -104,15 +104,20 @@ const SubtitleColumn: React.FC<{
 
 const BilingualStream: React.FC<Props> = ({ isEmbedded = false }) => {
     const session = useLiveSession();
+    const { setAudienceCut } = session;   // stable (useCallback) — safe to use in the keydown effect
     const live = isSessionActive(session.status);
     // Once a session has started this run, NEVER fall back to the scripted demo loop.
     // Show live subtitles (or the last frozen ones during a reconnect/fault) instead.
     const showLive = live || session.hadSession;
-    // After a STOP/EMERGENCY STOP (session ended) we show a neutral STANDBY slate — never
-    // the demo, which would put the CEO's name + a canned translation back on the LED wall.
-    const showStandby = !showLive && session.everStarted;
 
     const [searchParams] = useSearchParams();
+    // Edge-display window (opened via pop-out with &display=1): mirrors the operator's session
+    // over the bus and must NEVER show the scripted demo, even before the first line arrives.
+    const isDisplay = searchParams.get('display') === '1';
+    const cut = session.audienceCut;                                 // operator take-to-safe (A1.4)
+    const showDemo = !showLive && !session.everStarted && !isDisplay;
+    // Neutral STANDBY slate: operator 'slate' cut, or a stopped/fresh-display screen — never demo.
+    const showStandby = cut === 'slate' || (!showLive && (session.everStarted || isDisplay));
 
     // URL seeds the initial layout so each monitor's window opens in the right
     // mode (e.g. /stream?lang=vi on the left screen). After load, the on-screen
@@ -141,9 +146,11 @@ const BilingualStream: React.FC<Props> = ({ isEmbedded = false }) => {
     const [currentIndex, setCurrentIndex] = useState(-1);
     const [typedChars, setTypedChars] = useState(0);
 
+    const [frozenLines, setFrozenLines] = useState<LiveLine[] | null>(null);
+
     // Demo timer — only runs before the FIRST session start this page-load (never again after).
     useEffect(() => {
-        if (showLive || session.everStarted) return;
+        if (!showDemo) return;
         let timeoutId: ReturnType<typeof setTimeout>;
 
         const advanceSubtitle = (index: number) => {
@@ -167,11 +174,11 @@ const BilingualStream: React.FC<Props> = ({ isEmbedded = false }) => {
         timeoutId = setTimeout(() => advanceSubtitle(0), 1000);
 
         return () => clearTimeout(timeoutId);
-    }, [showLive, session.everStarted]);
+    }, [showDemo]);
 
     // Typewriter effect interval (demo mode)
     useEffect(() => {
-        if (showLive || session.everStarted || currentIndex < 0) return;
+        if (!showDemo || currentIndex < 0) return;
 
         const currentItem = translationStream[currentIndex];
         if (typedChars < currentItem.vn.length) {
@@ -180,13 +187,23 @@ const BilingualStream: React.FC<Props> = ({ isEmbedded = false }) => {
             }, 30);
             return () => clearTimeout(typeTimer);
         }
-    }, [showLive, session.everStarted, currentIndex, typedChars]);
+    }, [showDemo, currentIndex, typedChars]);
 
-    const viLive = langLines(session.lines, 'vi');
-    const jaLive = langLines(session.lines, 'ja');
+    // 'freeze' snapshots the current lines and holds them static until the operator goes 'live'.
+    // `prev ?? session.lines` keeps the FIRST snapshot even as new lines arrive (no re-snapshot).
+    useEffect(() => {
+        if (cut === 'freeze') setFrozenLines((prev) => prev ?? session.lines);
+        else setFrozenLines(null);
+    }, [cut, session.lines]);
+    const displayLines = frozenLines ?? session.lines;
+
+    const viLive = langLines(displayLines, 'vi');
+    const jaLive = langLines(displayLines, 'ja');
 
     const statusText =
-        session.status === 'connecting' ? 'CONNECTING…'
+        cut === 'slate' ? 'MÀN AN TOÀN (SLATE)'
+        : cut === 'freeze' ? 'GIỮ HÌNH (FREEZE)'
+        : session.status === 'connecting' ? 'CONNECTING…'
         : session.status === 'reconnecting' ? 'MẤT KẾT NỐI — ĐANG KẾT NỐI LẠI…'
         : session.status === 'warming'
             ? `WARMING UP ${session.warming?.step ?? 0}/${session.warming?.steps ?? 0} ${session.warming?.detail ?? ''}`.trim()
@@ -239,7 +256,7 @@ const BilingualStream: React.FC<Props> = ({ isEmbedded = false }) => {
         const jp = lang === 'ja';
         return (
             <SubtitleColumn side={buttonSide} padClass={padClass} jp={jp} dep={jp ? jaDep : viDep}>
-                {showLive ? renderLiveColumn(jp ? jaLive : viLive) : (session.everStarted ? null : renderDemoColumn(jp ? 'jp' : 'vn'))}
+                {showLive ? renderLiveColumn(jp ? jaLive : viLive) : (showDemo ? renderDemoColumn(jp ? 'jp' : 'vn') : null)}
             </SubtitleColumn>
         );
     };
@@ -259,8 +276,9 @@ const BilingualStream: React.FC<Props> = ({ isEmbedded = false }) => {
     const openLanguageWindows = () => {
         const w = Math.round((window.screen.availWidth || window.innerWidth) / 2);
         const h = window.screen.availHeight || window.innerHeight;
-        const vi = window.open('/stream?lang=vi', 'stream-vi', `popup=yes,width=${w},height=${h},left=0,top=0`);
-        const ja = window.open('/stream?lang=ja', 'stream-ja', `popup=yes,width=${w},height=${h},left=${w},top=0`);
+        // &display=1 → the pop-out mirrors the operator's live session over the bus and never shows demo.
+        const vi = window.open('/stream?lang=vi&display=1', 'stream-vi', `popup=yes,width=${w},height=${h},left=0,top=0`);
+        const ja = window.open('/stream?lang=ja&display=1', 'stream-ja', `popup=yes,width=${w},height=${h},left=${w},top=0`);
         if (!vi || !ja) {
             setPopupBlocked(true);
         } else {
@@ -287,7 +305,8 @@ const BilingualStream: React.FC<Props> = ({ isEmbedded = false }) => {
         };
     }, []);
 
-    // Keyboard shortcuts: 1=both, 2=stacked, 3=VN only, 4=JA only, S=swap sides.
+    // Keyboard shortcuts: 1=both 2=stacked 3=VN 4=JA · S=swap · P=pop-out ·
+    // L=live G=freeze B=safe-slate (take-to-safe, broadcast to every screen).
     useEffect(() => {
         const onKey = (e: KeyboardEvent) => {
             switch (e.key) {
@@ -297,13 +316,16 @@ const BilingualStream: React.FC<Props> = ({ isEmbedded = false }) => {
                 case '4': setMode('ja'); break;
                 case 's': case 'S': setSwap((v) => !v); break;
                 case 'p': case 'P': openLanguageWindows(); break;
+                case 'l': case 'L': setAudienceCut('live'); break;
+                case 'g': case 'G': setAudienceCut('freeze'); break;
+                case 'b': case 'B': setAudienceCut('slate'); break;
                 default: return;
             }
             setControlsVisible(true);
         };
         window.addEventListener('keydown', onKey);
         return () => window.removeEventListener('keydown', onKey);
-    }, []);
+    }, [setAudienceCut]);
 
     const canvasClass = fill ? 'audience-fill' : 'audience-display';
 
@@ -361,9 +383,10 @@ const BilingualStream: React.FC<Props> = ({ isEmbedded = false }) => {
                     </div>
                 )}
 
-                {/* Neutral STANDBY slate after a STOP/EMERGENCY STOP — NEVER the scripted demo. */}
+                {/* Neutral STANDBY slate — after STOP, on a fresh display, or on a 'slate' cut.
+                    Opaque so it truly covers the wall (take-to-safe). NEVER the scripted demo. */}
                 {showStandby && (
-                    <div className="absolute inset-0 z-30 flex flex-col items-center justify-center gap-4 pointer-events-none">
+                    <div className="absolute inset-0 z-30 flex flex-col items-center justify-center gap-4 pointer-events-none bg-primary-container">
                         <span className="material-symbols-outlined text-secondary opacity-80" style={{ fontSize: '44px' }}>pause_circle</span>
                         <span className="font-label-caps text-lg md:text-2xl text-secondary tracking-[0.3em] uppercase opacity-90">PROYAKU — CHỜ TÍN HIỆU</span>
                         <span className="jp-text font-label-caps text-sm text-on-surface-variant tracking-widest opacity-70">スタンバイ · STANDBY</span>
@@ -417,6 +440,22 @@ const BilingualStream: React.FC<Props> = ({ isEmbedded = false }) => {
                         >
                             open_in_new
                         </button>
+                        <div className="w-px h-6 bg-outline-variant mx-1"></div>
+                        {/* Take-to-safe (A1.4): broadcast to every screen. */}
+                        {([
+                            ['live', 'play_arrow', 'Live (L)'],
+                            ['freeze', 'ac_unit', 'Giữ hình / Freeze (G)'],
+                            ['slate', 'block', 'Màn an toàn / Slate (B)'],
+                        ] as [AudienceCut, string, string][]).map(([c, icon, title]) => (
+                            <button
+                                key={c}
+                                title={title}
+                                onClick={() => session.setAudienceCut(c)}
+                                className={`material-symbols-outlined text-xl px-2 py-1 rounded-full transition-colors ${cut === c ? 'text-on-secondary bg-secondary' : 'text-on-surface-variant hover:text-secondary'}`}
+                            >
+                                {icon}
+                            </button>
+                        ))}
                     </div>
                 )}
 
