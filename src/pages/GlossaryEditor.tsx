@@ -16,6 +16,10 @@ const SEED: GlossaryEntry[] = [
     { vi: 'Success in Shigoto', ja: '', type: 'term', asr_hotword: true, note: 'Shigoto = 仕事' },
     { vi: 'PROYAKU', ja: '', type: 'name', asr_hotword: true, note: 'Tên sản phẩm' },
     { vi: 'quý công ty', ja: '御社', reading: 'おんしゃ', type: 'keigo', asr_hotword: true, note: 'kính ngữ' },
+    // A4.3 — GHIM CỨNG con số 20: bias hotword + auto-sửa các biến thể nghe nhầm.
+    // ASR-confidence gating cho con số là việc của backend (Bước 0) — đây là lớp bảo vệ FE.
+    { vi: 'kỷ niệm 20 năm', ja: '20周年', reading: 'にじゅうしゅうねん', type: 'term', asr_hotword: true, misheard: ['kỷ niệm 12 năm', 'kỉ niệm 20 năm', 'kỷ niệm hai mươi năm'], note: 'GHIM số 20 — tuyệt đối không nghe nhầm 12/22' },
+    { vi: '20 năm', ja: '20年', type: 'term', asr_hotword: true, misheard: ['12 năm', 'hai mươi năm', '22 năm'], note: 'số cốt lõi của lễ' },
 ];
 
 const csvToArr = (s: string) => s.split(/[,;]/).map((x) => x.trim()).filter(Boolean);

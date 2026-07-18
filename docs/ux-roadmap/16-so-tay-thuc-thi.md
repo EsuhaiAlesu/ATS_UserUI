@@ -93,7 +93,7 @@
 |---|------|------|-----|
 | A4.1 | ✅ **Glossary & Names editor** + **khoá tên riêng** (Lê Long Sơn, Kaizen Yoshida School, Esuhai, keigo 御社…) | `GlossaryEditor.tsx` `/glossary` + `getFile/saveFile` | ✅ Sửa/khoá/lưu term về `data/glossary.json`; seed tên trọng yếu chạy cả khi offline. **Cần backend `/api/file`** để lưu thật + verify tên trên LED trước lễ |
 | A4.2 | ✅ **Nạp kịch bản + biên dịch trước từng dòng + duyệt tay** | `ScriptPrep.tsx` `/script` + `getScript/saveScript` + `pretranslate` | ✅ Dán→tách dòng, sửa/duyệt tay (draft⇄approved), lưu `data/script.json`. Dịch tự động = **thử nghiệm, dò block từ `/api/blocks` sống**, cần backend + verify shape trong Bước 0. Duyệt tay là chốt chất lượng |
-| A4.3 | **Ghim cứng con số 20 (周年)** + gate số/tên theo độ tin cậy ASR | logic | Không tin ASR cho con số cốt lõi |
+| A4.3 | ◑ **Ghim cứng con số 20 (周年)** + gate số/tên theo độ tin cậy ASR | FE: seed glossary (`GlossaryEditor`); **gate ASR = backend** | ◑ FE xong: seed "kỷ niệm 20 năm/20周年" + "20 năm" hotword + auto-sửa 12/22→20. **Còn: gating theo confidence là việc backend (Bước 0)** |
 | A4.4 | *(Đã có)* **Voice Studio** — chọn giọng + Pronunciation Clinic | `VoiceStudio.tsx` | ✅ dùng cho phòng họp; **gala: thu sẵn kính ngữ bằng giọng người** |
 
 → Chi tiết: [12.8](12-thu-vien-mau-giao-dien.md), [14 §14.2](14-proyaku-pre-in-post-event.md), [15 §15.5](15-audit-lo-hong-va-cai-tien.md).
