@@ -255,3 +255,84 @@ export async function getGlossary(): Promise<GlossaryEntry[]> {
 
 export const saveGlossary = (entries: GlossaryEntry[]) =>
     saveFile(GLOSSARY_PATH, JSON.stringify(entries, null, 2));
+
+// ---------------------------------------------------------------- Event script (pre-approved bilingual lines)
+
+// One rehearsed line. The Cascade Matcher reuses `dst` verbatim when the live source
+// matches `src` with high confidence — so `status: 'approved'` lines are the quality ceiling.
+export interface ScriptEntry {
+    id: string;
+    src_lang: string;      // 'vi' | 'ja'
+    src: string;           // what the speaker says
+    dst_lang: string;      // 'ja' | 'vi'
+    dst: string;           // the human-approved translation shown on the wall
+    status: 'draft' | 'approved';
+    note?: string;
+}
+
+const SCRIPT_PATH = 'data/script.json';
+
+export async function getScript(): Promise<ScriptEntry[]> {
+    const { content } = await getFile(SCRIPT_PATH);
+    const parsed = JSON.parse(content || '[]');
+    return Array.isArray(parsed) ? (parsed as ScriptEntry[]) : [];
+}
+
+export const saveScript = (entries: ScriptEntry[]) =>
+    saveFile(SCRIPT_PATH, JSON.stringify(entries, null, 2));
+
+// Minimal shape of POST /api/run's response (API.md §4 / RunResult).
+interface RunResult {
+    nodes?: Record<string, { status?: string; error?: string | null; output?: unknown }>;
+    results?: unknown[];
+    error?: string;
+}
+
+function extractText(v: unknown): string | null {
+    if (typeof v === 'string') return v;
+    if (Array.isArray(v)) { for (const x of v) { const t = extractText(x); if (t) return t; } return null; }
+    if (v && typeof v === 'object') {
+        const o = v as Record<string, unknown>;
+        for (const k of ['text', 'dst', 'translation', 'output', 'ja', 'vi']) {
+            if (typeof o[k] === 'string') return o[k] as string;
+        }
+        for (const val of Object.values(o)) { const t = extractText(val); if (t) return t; }
+    }
+    return null;
+}
+
+/**
+ * Best-effort ONE-SHOT pre-translation of a single line via POST /api/run.
+ *
+ * ⚠️ UNVERIFIED against a running backend. The graph's text-SOURCE node is not in the
+ * documented contract (API.md §4 lists stt/mt/tts only), so we DISCOVER it from the live
+ * `/api/blocks` registry — the schema is the single source of truth (API.md §2). If no
+ * text-source block exists we throw a clear message rather than guess a type. Confirm this
+ * path on the Mac Studio in Bước 0 before relying on it; manual review stays the safety net.
+ */
+export async function pretranslate(text: string, sourceLang: string, targetLang: string, mtModel = 'NLLB-600M'): Promise<string> {
+    const { blocks } = await getBlocks();
+    const mt = blocks.find((b) => b.type === 'mt')
+        ?? blocks.find((b) => /translat|(^|[^a-z])mt([^a-z]|$)|nllb/i.test(`${b.type} ${b.label}`));
+    const textSrc = blocks.find((b) => b.type === 'text')
+        ?? blocks.find((b) => b.params?.some((p) => p.type === 'text' || p.type === 'textarea')
+            && /text|input|source|prompt|note/i.test(b.type));
+    if (!mt) throw new Error('Backend không có block dịch (mt) — kiểm tra /api/blocks.');
+    if (!textSrc) throw new Error('Backend không có block nguồn văn bản — không thể dịch tự động. Nhập/duyệt tay.');
+
+    const textParam = textSrc.params?.find((p) => p.type === 'text' || p.type === 'textarea')?.name ?? 'text';
+    const graph = {
+        nodes: [
+            { id: 'src', type: textSrc.type, params: { [textParam]: text }, enabled: true },
+            { id: 'mt', type: mt.type, params: { model: mtModel, target_lang: targetLang, source_lang: sourceLang }, enabled: true },
+        ],
+        wires: [{ from: 'src', to: 'mt' }],
+    };
+    const res = await postJson<RunResult>('/run', graph);
+    if (res.error) throw new Error(res.error);
+    const node = res.nodes?.['mt'];
+    if (node?.status === 'error') throw new Error(node.error ?? 'Block dịch lỗi.');
+    const out = extractText(node?.output) ?? extractText(res.results);
+    if (!out) throw new Error('Không đọc được bản dịch từ kết quả (shape output cần xác nhận).');
+    return out;
+}

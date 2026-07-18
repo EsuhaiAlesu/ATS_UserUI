@@ -228,6 +228,9 @@ const AudioRouting: React.FC = () => {
                         <Link to="/glossary" className="flex items-center gap-4 text-on-surface-variant dark:text-on-surface-variant p-3 font-label-caps text-label-caps hover:bg-surface-container-high">
                             <span className="material-symbols-outlined">menu_book</span> Glossary / Tên riêng
                         </Link>
+                        <Link to="/script" className="flex items-center gap-4 text-on-surface-variant dark:text-on-surface-variant p-3 font-label-caps text-label-caps hover:bg-surface-container-high">
+                            <span className="material-symbols-outlined">theater_comedy</span> Kịch bản / Duyệt dịch
+                        </Link>
                     </div>
                 </aside>
 
