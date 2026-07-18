@@ -234,9 +234,10 @@
     transition: all 1s cubic-bezier(0.16, 1, 0.3, 1);
 }
 .fade-older {
-    opacity: 0.4;
-    filter: blur(0.5px);
-    transform: translateY(-10px) scale(0.98);
+    /* A2.2: the just-spoken line must stay readable (>=4.5:1) — no blur, higher opacity. */
+    opacity: 0.85;
+    filter: none;
+    transform: translateY(-6px);
     transition: all 1s cubic-bezier(0.16, 1, 0.3, 1);
 }
 .fade-current {
@@ -273,4 +274,27 @@
 }
 .ceremonial-bg {
     background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)' opacity='0.02'/%3E%3C/svg%3E");
+}
+
+/* A2.4 / accessibility: honour the OS "Reduce Motion" setting — disable the decorative and
+   in-reading-path animations, and show each element in its final (settled) state. */
+@media (prefers-reduced-motion: reduce) {
+    .particle,
+    .pulse-dot,
+    .listening-pulse,
+    .connecting-line,
+    .animate-splash-content,
+    .reveal-text {
+        animation: none !important;
+    }
+    .fade-current,
+    .fade-older,
+    .fade-oldest {
+        animation: none !important;
+        filter: none !important;
+        transform: none !important;
+        transition: opacity 0.2s linear !important;
+    }
+    .reveal-text { opacity: 1 !important; transform: none !important; }
+    * { scroll-behavior: auto !important; }
 }

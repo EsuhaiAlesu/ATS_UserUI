@@ -44,15 +44,21 @@ const translationStream = [
     }
 ];
 
-const serifStyle = { fontFamily: "'Times New Roman', Times, serif" } as const;
-
-// Newest line is large & highlighted; everything older stays readable so the
-// operator/audience can scroll back through the session history.
+// A2.3: audience subtitles use a heavy SANS for distance legibility (EBU/BBC), not Times New Roman.
+// VN falls back to the app's Be Vietnam Pro; JA uses Noto Sans JP via the column's `jp-text`.
+// A2.2: newest line is the BRIGHTEST (gold `text-secondary`) — not the muted mauve it used to be;
+// older lines stay ≥4.5:1 with no blur so the audience can still read the last sentence.
 const lineClass = (age: number) => {
-    if (age === 0) return 'fade-current font-serif text-3xl md:text-4xl text-secondary leading-relaxed tracking-wide mt-4';
-    if (age === 1) return 'fade-older font-serif text-xl md:text-2xl text-on-surface-variant opacity-60';
-    return 'font-serif text-xl md:text-2xl text-on-surface-variant opacity-40';
+    if (age === 0) return 'fade-current font-bold text-secondary leading-snug tracking-wide mt-4';
+    if (age === 1) return 'fade-older font-semibold text-on-surface opacity-90 leading-snug';
+    return 'font-semibold text-on-surface-variant opacity-70 leading-snug';
 };
+
+// A2.1: caption size scales with the viewport (so it fills a 10m LED wall) × an operator zoom.
+const lineFontSize = (age: number, scale: number) =>
+    age === 0
+        ? `calc(clamp(1.8rem, 5.6vh, 6rem) * ${scale})`
+        : `calc(clamp(1.1rem, 3.2vh, 3.2rem) * ${scale})`;
 
 // All non-empty lines of one language, oldest first (full history, no cap).
 const langLines = (lines: LiveLine[], lang: string) =>
@@ -118,6 +124,22 @@ const BilingualStream: React.FC<Props> = ({ isEmbedded = false }) => {
     const showDemo = !showLive && !session.everStarted && !isDisplay;
     // Neutral STANDBY slate: operator 'slate' cut, or a stopped/fresh-display screen — never demo.
     const showStandby = cut === 'slate' || (!showLive && (session.everStarted || isDisplay));
+
+    // A2.1: operator caption-zoom (keys +/-/0), persisted per window.
+    const [capScale, setCapScale] = useState(() => {
+        const s = Number(localStorage.getItem('proyaku_capscale'));
+        return s >= 0.5 && s <= 3 ? s : 1;
+    });
+    useEffect(() => { try { localStorage.setItem('proyaku_capscale', String(capScale)); } catch { /* ignore */ } }, [capScale]);
+
+    // A2.3: the ceremonial palette only works in dark — force it on the standalone display route.
+    useEffect(() => {
+        if (isEmbedded) return;
+        const el = document.documentElement;
+        const had = el.classList.contains('dark');
+        el.classList.add('dark');
+        return () => { if (!had) el.classList.remove('dark'); };
+    }, [isEmbedded]);
 
     // URL seeds the initial layout so each monitor's window opens in the right
     // mode (e.g. /stream?lang=vi on the left screen). After load, the on-screen
@@ -213,12 +235,17 @@ const BilingualStream: React.FC<Props> = ({ isEmbedded = false }) => {
         : session.hadSession ? 'MẤT TÍN HIỆU — GIỮ DÒNG CUỐI'
         : 'DEMO MODE';
 
-    const renderLiveColumn = (items: LiveLine[]) =>
+    const renderLiveColumn = (items: LiveLine[], jp: boolean) =>
         items.map((line, i) => {
             const age = items.length - 1 - i;
             return (
-                <p key={line.lid} className={lineClass(age)} style={serifStyle}>
-                    <span className={age === 0 ? 'text-on-primary-container' : undefined}>{line.text}</span>
+                <p
+                    key={line.lid}
+                    lang={jp ? 'ja' : 'vi'}
+                    className={lineClass(age)}
+                    style={{ fontSize: lineFontSize(age, capScale), lineBreak: jp ? 'strict' : undefined }}
+                >
+                    {line.text}
                 </p>
             );
         });
@@ -233,13 +260,18 @@ const BilingualStream: React.FC<Props> = ({ isEmbedded = false }) => {
                 ? typedChars
                 : Math.floor((typedChars / item.vn.length) * item.jp.length);
             return (
-                <p key={`${side}-${index}`} className={lineClass(currentIndex - index)} style={side === 'vn' ? serifStyle : undefined}>
+                <p
+                    key={`${side}-${index}`}
+                    lang={side === 'jp' ? 'ja' : 'vi'}
+                    className={lineClass(currentIndex - index)}
+                    style={{ fontSize: lineFontSize(currentIndex - index, capScale), lineBreak: side === 'jp' ? 'strict' : undefined }}
+                >
                     {isCurrent ? (
                         <span className="relative inline-block w-full">
                             {/* Invisible text defines the height */}
                             <span className="opacity-0">{text}</span>
                             {/* Absolute text is the typewriter effect */}
-                            <span className="absolute top-0 left-0 w-full text-on-primary-container">{text.substring(0, typed)}</span>
+                            <span className="absolute top-0 left-0 w-full">{text.substring(0, typed)}</span>
                         </span>
                     ) : (
                         text
@@ -256,7 +288,7 @@ const BilingualStream: React.FC<Props> = ({ isEmbedded = false }) => {
         const jp = lang === 'ja';
         return (
             <SubtitleColumn side={buttonSide} padClass={padClass} jp={jp} dep={jp ? jaDep : viDep}>
-                {showLive ? renderLiveColumn(jp ? jaLive : viLive) : (showDemo ? renderDemoColumn(jp ? 'jp' : 'vn') : null)}
+                {showLive ? renderLiveColumn(jp ? jaLive : viLive, jp) : (showDemo ? renderDemoColumn(jp ? 'jp' : 'vn') : null)}
             </SubtitleColumn>
         );
     };
@@ -319,6 +351,9 @@ const BilingualStream: React.FC<Props> = ({ isEmbedded = false }) => {
                 case 'l': case 'L': setAudienceCut('live'); break;
                 case 'g': case 'G': setAudienceCut('freeze'); break;
                 case 'b': case 'B': setAudienceCut('slate'); break;
+                case '+': case '=': setCapScale((s) => Math.min(3, +(s + 0.1).toFixed(2))); break;
+                case '-': case '_': setCapScale((s) => Math.max(0.5, +(s - 0.1).toFixed(2))); break;
+                case '0': setCapScale(1); break;
                 default: return;
             }
             setControlsVisible(true);
@@ -390,6 +425,15 @@ const BilingualStream: React.FC<Props> = ({ isEmbedded = false }) => {
                         <span className="material-symbols-outlined text-secondary opacity-80" style={{ fontSize: '44px' }}>pause_circle</span>
                         <span className="font-label-caps text-lg md:text-2xl text-secondary tracking-[0.3em] uppercase opacity-90">PROYAKU — CHỜ TÍN HIỆU</span>
                         <span className="jp-text font-label-caps text-sm text-on-surface-variant tracking-widest opacity-70">スタンバイ · STANDBY</span>
+                    </div>
+                )}
+
+                {/* A2.4 "Waiting for the speaker" — live but no line yet (not a blank/broken wall). */}
+                {showLive && !showStandby && viLive.length === 0 && jaLive.length === 0 && (
+                    <div className="absolute inset-0 z-20 flex flex-col items-center justify-center gap-3 pointer-events-none">
+                        <span className="material-symbols-outlined text-secondary opacity-70 listening-pulse" style={{ fontSize: '44px' }}>hearing</span>
+                        <span className="font-bold text-2xl md:text-4xl text-secondary opacity-90">Đang chờ diễn giả…</span>
+                        <span className="jp-text text-lg md:text-xl text-on-surface-variant opacity-70">お待ちください</span>
                     </div>
                 )}
 
