@@ -4,6 +4,7 @@ import AudioRouting from './pages/AudioRouting'
 import RevealMoment from './pages/RevealMoment'
 import BilingualStream from './pages/BilingualStream'
 import VoiceStudio from './pages/VoiceStudio'
+import GlossaryEditor from './pages/GlossaryEditor'
 import Home from './pages/Home'
 import SplashScreen from './components/SplashScreen'
 import { LiveSessionProvider } from './lib/LiveSessionContext'
@@ -27,6 +28,7 @@ const App: React.FC = () => {
             <Route path="/reveal" element={<RevealMoment />} />
             <Route path="/stream" element={<BilingualStream />} />
             <Route path="/voices" element={<VoiceStudio />} />
+            <Route path="/glossary" element={<GlossaryEditor />} />
           </Routes>
         )}
       </div>

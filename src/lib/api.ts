@@ -224,3 +224,34 @@ export const recordVoice = (seconds: number, model?: string) =>
 export const learnVoice = (reference: string, heard: string) =>
     postJson<{ added: { misheard: string; term: string }[]; count: number }>(
         '/voice/learn', { reference, heard });
+
+// ---------------------------------------------------------------- Project files & glossary
+
+// Read/write a project text file (.json .jsonl .md .txt .srt .csv), sandboxed to the project root.
+export const getFile = (path: string) =>
+    getJson<{ path: string; content: string }>(`/file?path=${encodeURIComponent(path)}`);
+
+export const saveFile = (path: string, content: string) =>
+    postJson<{ ok: boolean; path: string; bytes: number }>('/file', { path, content });
+
+// One glossary term. `ja` blank = keep the source verbatim (do not translate — for names).
+export interface GlossaryEntry {
+    vi: string;
+    ja: string;
+    reading?: string;      // katakana/hiragana reading to control pronunciation
+    type?: string;         // name | company | keigo | tech | award | term | keep | other
+    asr_hotword?: boolean; // bias the recognizer toward this term (protects proper nouns)
+    misheard?: string[];   // variants auto-corrected to the canonical form
+    note?: string;
+}
+
+const GLOSSARY_PATH = 'data/glossary.json';
+
+export async function getGlossary(): Promise<GlossaryEntry[]> {
+    const { content } = await getFile(GLOSSARY_PATH);
+    const parsed = JSON.parse(content || '[]');
+    return Array.isArray(parsed) ? (parsed as GlossaryEntry[]) : [];
+}
+
+export const saveGlossary = (entries: GlossaryEntry[]) =>
+    saveFile(GLOSSARY_PATH, JSON.stringify(entries, null, 2));
