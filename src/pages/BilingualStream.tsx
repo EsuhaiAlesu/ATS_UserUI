@@ -105,6 +105,12 @@ const SubtitleColumn: React.FC<{
 const BilingualStream: React.FC<Props> = ({ isEmbedded = false }) => {
     const session = useLiveSession();
     const live = isSessionActive(session.status);
+    // Once a session has started this run, NEVER fall back to the scripted demo loop.
+    // Show live subtitles (or the last frozen ones during a reconnect/fault) instead.
+    const showLive = live || session.hadSession;
+    // After a STOP/EMERGENCY STOP (session ended) we show a neutral STANDBY slate — never
+    // the demo, which would put the CEO's name + a canned translation back on the LED wall.
+    const showStandby = !showLive && session.everStarted;
 
     const [searchParams] = useSearchParams();
 
@@ -135,9 +141,9 @@ const BilingualStream: React.FC<Props> = ({ isEmbedded = false }) => {
     const [currentIndex, setCurrentIndex] = useState(-1);
     const [typedChars, setTypedChars] = useState(0);
 
-    // Demo timer — only runs while there is no live session.
+    // Demo timer — only runs before the FIRST session start this page-load (never again after).
     useEffect(() => {
-        if (live) return;
+        if (showLive || session.everStarted) return;
         let timeoutId: ReturnType<typeof setTimeout>;
 
         const advanceSubtitle = (index: number) => {
@@ -161,11 +167,11 @@ const BilingualStream: React.FC<Props> = ({ isEmbedded = false }) => {
         timeoutId = setTimeout(() => advanceSubtitle(0), 1000);
 
         return () => clearTimeout(timeoutId);
-    }, [live]);
+    }, [showLive, session.everStarted]);
 
     // Typewriter effect interval (demo mode)
     useEffect(() => {
-        if (live || currentIndex < 0) return;
+        if (showLive || session.everStarted || currentIndex < 0) return;
 
         const currentItem = translationStream[currentIndex];
         if (typedChars < currentItem.vn.length) {
@@ -174,17 +180,20 @@ const BilingualStream: React.FC<Props> = ({ isEmbedded = false }) => {
             }, 30);
             return () => clearTimeout(typeTimer);
         }
-    }, [live, currentIndex, typedChars]);
+    }, [showLive, session.everStarted, currentIndex, typedChars]);
 
     const viLive = langLines(session.lines, 'vi');
     const jaLive = langLines(session.lines, 'ja');
 
     const statusText =
         session.status === 'connecting' ? 'CONNECTING…'
+        : session.status === 'reconnecting' ? 'MẤT KẾT NỐI — ĐANG KẾT NỐI LẠI…'
         : session.status === 'warming'
             ? `WARMING UP ${session.warming?.step ?? 0}/${session.warming?.steps ?? 0} ${session.warming?.detail ?? ''}`.trim()
         : session.status === 'ready' ? 'READY — WAITING FOR SPEECH'
         : session.status === 'listening' ? 'TRANSLATING LIVE'
+        // A dropped/errored session keeps its slate — it must NEVER read "DEMO MODE" on stage.
+        : session.hadSession ? 'MẤT TÍN HIỆU — GIỮ DÒNG CUỐI'
         : 'DEMO MODE';
 
     const renderLiveColumn = (items: LiveLine[]) =>
@@ -222,15 +231,15 @@ const BilingualStream: React.FC<Props> = ({ isEmbedded = false }) => {
             );
         });
 
-    const viDep = live ? [viLive.length, viLive[viLive.length - 1]?.text] : [currentIndex, typedChars];
-    const jaDep = live ? [jaLive.length, jaLive[jaLive.length - 1]?.text] : [currentIndex, typedChars];
+    const viDep = showLive ? [viLive.length, viLive[viLive.length - 1]?.text] : [currentIndex, typedChars];
+    const jaDep = showLive ? [jaLive.length, jaLive[jaLive.length - 1]?.text] : [currentIndex, typedChars];
 
     // One scrollable column for a given language, wired to its own sticky dep.
     const columnFor = (lang: 'vi' | 'ja', padClass: string, buttonSide: 'left' | 'right') => {
         const jp = lang === 'ja';
         return (
             <SubtitleColumn side={buttonSide} padClass={padClass} jp={jp} dep={jp ? jaDep : viDep}>
-                {live ? renderLiveColumn(jp ? jaLive : viLive) : renderDemoColumn(jp ? 'jp' : 'vn')}
+                {showLive ? renderLiveColumn(jp ? jaLive : viLive) : (session.everStarted ? null : renderDemoColumn(jp ? 'jp' : 'vn'))}
             </SubtitleColumn>
         );
     };
@@ -349,6 +358,15 @@ const BilingualStream: React.FC<Props> = ({ isEmbedded = false }) => {
                 {isSingle && (
                     <div className="flex-1 flex flex-row w-full z-10 relative px-section-gap pb-48 pt-4 min-h-0">
                         {columnFor(mode as 'vi' | 'ja', 'px-0', 'left')}
+                    </div>
+                )}
+
+                {/* Neutral STANDBY slate after a STOP/EMERGENCY STOP — NEVER the scripted demo. */}
+                {showStandby && (
+                    <div className="absolute inset-0 z-30 flex flex-col items-center justify-center gap-4 pointer-events-none">
+                        <span className="material-symbols-outlined text-secondary opacity-80" style={{ fontSize: '44px' }}>pause_circle</span>
+                        <span className="font-label-caps text-lg md:text-2xl text-secondary tracking-[0.3em] uppercase opacity-90">PROYAKU — CHỜ TÍN HIỆU</span>
+                        <span className="jp-text font-label-caps text-sm text-on-surface-variant tracking-widest opacity-70">スタンバイ · STANDBY</span>
                     </div>
                 )}
 

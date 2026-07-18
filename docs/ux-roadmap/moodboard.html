@@ -1,0 +1,254 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>KIM SẮC — Moodboard · PROYAKU</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Be+Vietnam+Pro:wght@400;600;700&family=Noto+Sans+JP:wght@400;600;700&family=Noto+Serif:wght@600;700&family=Noto+Serif+JP:wght@600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<style>
+:root{
+  --wine-canvas:#160909; --wine-base:#1a0b0b; --wine-surface:#241313;
+  --wine-surface-2:#2c1b1b; --wine-surface-3:#372625; --hairline:#4f4444;
+  --gold:#e9c349; --gold-bright:#ffe088; --gold-deep:#af8d11;
+  --gold-foil:linear-gradient(135deg,#ffe9a8 0%,#e9c349 45%,#b8891f 100%);
+  --brand-red:#f0564a; --live:#ff5a4d;
+  --ink:#fbf1ea; --ink-2:#d2c3c2; --ink-3:#9b8e8d;
+  --ok:#5fd0a0; --warn:#ffcf6b; --danger:#ff8f84;
+  --serif:"Noto Serif JP",Georgia,serif;
+  --serif-vn:"Noto Serif",Georgia,serif;
+  --serif-jp:"Noto Serif JP",serif;
+  --sans:"Be Vietnam Pro","Noto Sans JP",system-ui,sans-serif;
+  --mono:"JetBrains Mono",ui-monospace,monospace;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--wine-canvas);color:var(--ink);font-family:var(--sans);line-height:1.6;
+  background-image:radial-gradient(120% 80% at 50% -10%,rgba(44,27,27,.7),transparent 60%);}
+.wrap{max-width:1120px;margin:0 auto;padding:0 24px 96px}
+.jp{font-family:var(--sans)}.serif{font-family:var(--serif)}.mono{font-family:var(--mono)}
+.eyebrow{font-family:var(--mono);text-transform:uppercase;letter-spacing:.28em;font-size:12px;color:var(--gold);opacity:.9}
+h2.sec{font-family:var(--mono);text-transform:uppercase;letter-spacing:.2em;font-size:13px;color:var(--gold);
+  margin:64px 0 20px;padding-bottom:10px;border-bottom:1px solid var(--hairline)}
+.muted{color:var(--ink-2)} .dim{color:var(--ink-3)}
+.grid{display:grid;gap:16px}
+.card{background:var(--wine-surface);border:1px solid var(--hairline);border-radius:10px;padding:20px}
+.foil{background:var(--gold-foil);-webkit-background-clip:text;background-clip:text;color:transparent}
+.foilbar{background:var(--gold-foil);position:relative;overflow:hidden}
+.foilbar::after{content:"";position:absolute;inset:0;background:linear-gradient(115deg,transparent 40%,rgba(255,255,255,.55) 50%,transparent 60%)}
+.glow{box-shadow:0 0 26px rgba(233,195,73,.28)}
+
+/* HERO */
+.hero{text-align:center;padding:88px 0 40px;border-bottom:1px solid var(--hairline)}
+.hero .kanji{font-family:var(--serif);font-weight:700;font-size:clamp(56px,9vw,120px);line-height:1;letter-spacing:0}
+.hero .rule{width:120px;height:3px;margin:24px auto;border-radius:2px}
+.hero .sub{font-family:var(--mono);letter-spacing:.3em;text-transform:uppercase;font-size:clamp(11px,1.4vw,14px);color:var(--ink-2)}
+.badge-row{display:flex;gap:12px;justify-content:center;flex-wrap:wrap;margin-top:26px}
+
+/* swatches */
+.sw{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:12px}
+.chip{border:1px solid var(--hairline);border-radius:10px;overflow:hidden}
+.chip .cap{height:74px} .chip .meta{padding:10px 12px;font-size:12px}
+.chip .meta b{display:block;font-size:13px;color:var(--ink)} .chip .meta .hex{font-family:var(--mono);color:var(--ink-3);font-size:11px}
+
+/* badges & buttons */
+.lang-badge{font-family:var(--mono);font-weight:600;letter-spacing:.15em;font-size:13px;color:var(--gold);
+  border:1px solid transparent;border-radius:8px;padding:8px 14px;position:relative;background:
+  linear-gradient(var(--wine-base),var(--wine-base)) padding-box, var(--gold-foil) border-box}
+.btn{font-family:var(--sans);font-weight:600;font-size:14px;border-radius:8px;padding:11px 20px;border:1px solid transparent;cursor:pointer}
+.btn.primary{color:#241313}.btn.primary span{position:relative;z-index:1}
+.btn.outline{background:transparent;border-color:var(--hairline);color:var(--ink)}
+.btn.danger{background:var(--brand-red);color:#fff}
+.btn.ghost{background:transparent;color:var(--ink-2)}
+.btns{display:flex;gap:12px;flex-wrap:wrap;align-items:center}
+
+/* status */
+.dot{width:9px;height:9px;border-radius:50%;display:inline-block;vertical-align:middle}
+.statrow{display:flex;gap:22px;flex-wrap:wrap}
+.stat{display:flex;align-items:center;gap:8px;font-size:13px;font-family:var(--mono)}
+.annun{display:inline-flex;align-items:center;gap:10px;font-family:var(--mono);font-weight:600;letter-spacing:.16em;
+  text-transform:uppercase;font-size:13px;padding:10px 16px;border-radius:8px;border:1px solid var(--hairline)}
+
+/* stage / subtitles */
+.stage{background:radial-gradient(120% 90% at 50% 0,rgba(44,27,27,.6),var(--wine-base));border:1px solid var(--hairline);
+  border-radius:12px;padding:28px 30px;min-height:230px;display:flex;flex-direction:column;justify-content:flex-end;gap:14px}
+.line{font-family:var(--serif-vn)} .line.jp{font-family:var(--serif-jp)} .line.hist{color:var(--ink-3);font-size:18px}
+.line.commit{color:var(--ink);font-size:20px}
+.line.corr{color:var(--ink);font-size:20px;border-bottom:2px solid var(--gold);display:inline-block;padding-bottom:2px}
+.line.cur{color:var(--ink);font-size:clamp(26px,3.4vw,40px);line-height:1.25}
+.line.cur .hl{background:var(--gold-foil);-webkit-background-clip:text;background-clip:text;color:transparent}
+.line.interim{color:var(--ink-2);font-style:italic;font-size:18px;border-bottom:1px dashed var(--ink-3);display:inline-block}
+.cols{display:grid;grid-template-columns:1fr 1px 1fr;gap:22px}
+.divider{background:var(--gold-foil);position:relative;opacity:.5}
+.divider::before{content:"";position:absolute;top:50%;left:50%;width:9px;height:9px;transform:translate(-50%,-50%) rotate(45deg);
+  background:var(--gold-bright);box-shadow:0 0 10px var(--gold)}
+
+/* before/after */
+.ba{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+.ba .panel{border-radius:12px;padding:26px;min-height:150px;display:flex;flex-direction:column;justify-content:center}
+.ba .before{background:#1a0b0b;border:1px solid var(--hairline)}
+.ba .after{background:#1a0b0b;border:1px solid var(--gold-deep)}
+.tag{font-family:var(--mono);font-size:11px;letter-spacing:.12em;text-transform:uppercase;margin-bottom:12px}
+.tag.bad{color:var(--danger)} .tag.good{color:var(--ok)}
+.badline{font-family:var(--serif-vn);font-size:26px;color:#8f7675} /* lỗi hiện tại: mauve chìm */
+.goodline{font-family:var(--serif-vn);font-size:26px}
+.goodline .hl{background:var(--gold-foil);-webkit-background-clip:text;background-clip:text;color:transparent}
+
+/* telemetry */
+.telem{display:flex;gap:2px;font-family:var(--mono);font-size:13px;border-radius:8px;overflow:hidden;border:1px solid var(--hairline)}
+.telem div{padding:10px 14px;background:var(--wine-surface-2)}
+.telem .g{color:var(--ok)} .telem .w{color:var(--warn)} .telem .r{color:var(--danger)}
+.telem .e{margin-left:auto;background:var(--wine-surface-3);color:var(--ink)}
+
+.two{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+.type-sample .big{font-family:var(--serif);font-size:34px}
+.type-sample .cap{font-size:20px;font-weight:600}
+.type-sample .tech{font-family:var(--mono);color:var(--ink-2);font-size:14px}
+.note{font-size:13px;color:var(--ink-3);margin-top:10px}
+footer{margin-top:72px;padding-top:24px;border-top:1px solid var(--hairline);color:var(--ink-3);font-size:13px;text-align:center}
+@media (max-width:720px){.cols,.ba,.two{grid-template-columns:1fr}.cols .divider{display:none}}
+.breathe{animation:none}
+@media (prefers-reduced-motion:no-preference){
+  .breathe{animation:breathe 2.4s ease-in-out infinite}
+  @keyframes breathe{0%,100%{opacity:.55;transform:scale(.85)}50%{opacity:1;transform:scale(1.15);box-shadow:0 0 12px var(--live)}}
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <!-- HERO -->
+  <header class="hero">
+    <div class="eyebrow">Định hướng thiết kế · Ceremonial Gold</div>
+    <div style="height:22px"></div>
+    <div class="kanji foil">PROYAKU</div>
+    <div class="rule foilbar"></div>
+    <div class="serif" style="font-size:22px;letter-spacing:.35em;color:var(--ink)">PROYAKU</div>
+    <div style="height:16px"></div>
+    <div class="sub">20周年記念 · Kỷ niệm 20 năm Esuhai</div>
+    <div class="badge-row">
+      <span class="lang-badge">TIẾNG VIỆT (VN)</span>
+      <span class="lang-badge jp">日本語 (JA)</span>
+    </div>
+    <p class="note" style="max-width:640px;margin:26px auto 0">Bản mô phỏng trực quan định hướng <b class="foil">KIM SẮC</b> — rượu vang tối · vàng foil lễ hội · đỏ Esuhai — chắt lọc tinh hoa Linear · Raycast · Stripe · DeepL · Otter · Wordly · Interprefy, chuyển hoá thành bản sắc riêng PROYAKU.</p>
+  </header>
+
+  <!-- PALETTE -->
+  <h2 class="sec">01 · Bảng màu (dark-first)</h2>
+  <div class="sw">
+    <div class="chip"><div class="cap" style="background:#160909"></div><div class="meta"><b>Wine Canvas</b><span class="hex">#160909</span><div class="dim">Nền sân khấu</div></div></div>
+    <div class="chip"><div class="cap" style="background:#1a0b0b"></div><div class="meta"><b>Wine Base</b><span class="hex">#1a0b0b</span><div class="dim">Nền chính</div></div></div>
+    <div class="chip"><div class="cap" style="background:#2c1b1b"></div><div class="meta"><b>Surface</b><span class="hex">#2c1b1b</span><div class="dim">Card / panel</div></div></div>
+    <div class="chip"><div class="cap foilbar"></div><div class="meta"><b class="foil">Gold Foil</b><span class="hex">#e9c349 ✦</span><div class="dim">Lễ hội / đặc biệt</div></div></div>
+    <div class="chip"><div class="cap" style="background:#f0564a"></div><div class="meta"><b>Ember (Đỏ Esuhai)</b><span class="hex">#f0564a</span><div class="dim">Thương hiệu · ổn định 2 mode</div></div></div>
+    <div class="chip"><div class="cap" style="background:#fbf1ea"></div><div class="meta"><b style="color:#241313">Ink</b><span class="hex">#fbf1ea</span><div class="dim">Chữ chính ≥7:1</div></div></div>
+    <div class="chip"><div class="cap" style="background:#5fd0a0"></div><div class="meta"><b>OK</b><span class="hex">#5fd0a0</span><div class="dim">Thành công</div></div></div>
+    <div class="chip"><div class="cap" style="background:#ff8f84"></div><div class="meta"><b>Danger</b><span class="hex">#ff8f84</span><div class="dim">Lỗi (tách khỏi đỏ TH)</div></div></div>
+  </div>
+
+  <!-- BEFORE / AFTER -->
+  <h2 class="sec">02 · Sửa lỗi gốc — dòng phụ đề chính</h2>
+  <div class="ba">
+    <div class="panel before">
+      <div class="tag bad">✕ Hiện tại — text-on-primary-container · ~4:1 · chìm</div>
+      <div class="badline">và tinh thần Kiến nghiệp thành công</div>
+    </div>
+    <div class="panel after">
+      <div class="tag good">✓ KIM SẮC — Ink/Gold · ≥7:1 · sáng nhất màn hình</div>
+      <div class="goodline"><span class="hl">và tinh thần Kiến nghiệp thành công</span></div>
+    </div>
+  </div>
+  <p class="note">Nghịch lý hiện tại: dòng "nổi bật" lại là chữ kém đọc nhất. KIM SẮC đưa dòng hiện tại thành chữ <b>sáng &amp; tương phản cao nhất</b>.</p>
+
+  <!-- SUBTITLE STATES -->
+  <h2 class="sec">03 · Trạng thái dòng phụ đề (Otter · BBC/EBU · DeepL)</h2>
+  <div class="stage">
+    <div class="cols">
+      <div style="display:flex;flex-direction:column;justify-content:flex-end;gap:12px">
+        <div class="line hist">Kính thưa quý vị đại biểu,</div>
+        <div class="line commit">Hôm nay mùng 8 tháng 8,</div>
+        <div class="line corr">Tập đoàn Esuhai</div>
+        <div class="line cur"><span class="hl">long trọng tổ chức lễ kỷ niệm 20 năm</span></div>
+        <div class="line interim">hình thành và phát triển…</div>
+      </div>
+      <div class="divider"></div>
+      <div class="jp" style="display:flex;flex-direction:column;justify-content:flex-end;gap:12px">
+        <div class="line hist jp">ご来賓の皆様、</div>
+        <div class="line commit jp">本日8月8日、</div>
+        <div class="line corr jp">エスハイグループは</div>
+        <div class="line cur jp"><span class="hl">設立20周年記念式典を盛大に挙行</span></div>
+        <div class="line interim jp">いたします…</div>
+      </div>
+    </div>
+  </div>
+  <div class="statrow" style="margin-top:14px">
+    <span class="stat"><span class="dim">history</span> <span class="dim">cũ ≥4.5:1, không blur</span></span>
+    <span class="stat"><span class="dim">committed</span> <span class="muted">khoá</span></span>
+    <span class="stat" style="color:var(--gold)">corrected — gạch vàng 1 nhịp</span>
+    <span class="stat" style="color:var(--ink)">current — sáng &amp; lớn nhất</span>
+    <span class="stat" style="font-style:italic;color:var(--ink-2)">interim — đang lắng</span>
+  </div>
+
+  <!-- COMPONENTS -->
+  <h2 class="sec">04 · Component (Linear · Raycast · vMix)</h2>
+  <div class="two">
+    <div class="card">
+      <div class="eyebrow" style="margin-bottom:14px">Buttons</div>
+      <div class="btns">
+        <button class="btn primary foilbar glow"><span>START INTERPRETER</span></button>
+        <button class="btn outline">Test Tone</button>
+        <button class="btn danger">EMERGENCY STOP</button>
+        <button class="btn ghost">Stream</button>
+      </div>
+      <div class="eyebrow" style="margin:22px 0 12px">Master Annunciator</div>
+      <div class="btns">
+        <span class="annun"><span class="dot" style="background:var(--ink-3)"></span> STANDBY</span>
+        <span class="annun" style="border-color:var(--live)"><span class="dot breathe" style="background:var(--live)"></span> LIVE</span>
+        <span class="annun" style="border-color:var(--danger);color:var(--danger)"><span class="dot" style="background:var(--danger)"></span> MẤT KẾT NỐI</span>
+      </div>
+    </div>
+    <div class="card">
+      <div class="eyebrow" style="margin-bottom:14px">Status &amp; Health (không chỉ-màu)</div>
+      <div class="statrow">
+        <span class="stat"><span class="dot" style="background:var(--ok)"></span> Backend ✓ online</span>
+        <span class="stat"><span class="dot" style="background:var(--warn)"></span> Session ⋯ warming 2/5</span>
+        <span class="stat"><span class="dot" style="background:var(--danger)"></span> JA-out ✕ chưa test</span>
+      </div>
+      <div class="eyebrow" style="margin:22px 0 12px">Telemetry (mono · ngân sách độ trễ)</div>
+      <div class="telem">
+        <div class="g">STT 120ms</div><div class="g">MT 340ms</div><div class="w">PROC 80ms</div><div class="e">E2E 540ms ✓</div>
+      </div>
+      <div class="telem" style="margin-top:8px">
+        <div class="r">STT 900ms</div><div class="r">MT 1400ms</div><div class="w">PROC 100ms</div><div class="e" style="color:var(--warn)">E2E 2.4s → FAST MODE?</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- TYPOGRAPHY -->
+  <h2 class="sec">05 · Typography (Keynote serif · Otter sans · Vercel mono)</h2>
+  <div class="two">
+    <div class="card type-sample">
+      <div class="eyebrow" style="margin-bottom:12px">Ceremonial · Noto Serif JP</div>
+      <div class="big">PROYAKU</div>
+      <div class="note">Hero / tiêu đề lễ — tĩnh, sang. Kanji có font CJK tường minh + <span class="mono">lang="ja"</span>.</div>
+    </div>
+    <div class="card type-sample">
+      <div class="eyebrow" style="margin-bottom:12px">Caption · Be Vietnam Pro / Noto Sans JP</div>
+      <div class="cap">Kỷ niệm 20 năm thành lập</div>
+      <div class="cap jp">設立20周年記念式典</div>
+      <div class="note">Phụ đề &amp; UI — sans đậm, đọc-được từ xa (thay Times New Roman). Cỡ fluid theo màn hình.</div>
+    </div>
+  </div>
+  <div class="card" style="margin-top:16px">
+    <div class="eyebrow" style="margin-bottom:10px">Technical · JetBrains Mono</div>
+    <div class="tech">model=Qwen3-ASR-1.7B · stt_ms=120 · mt_ms=340 · e2e=540ms · vad=speech · dB=-18</div>
+    <div class="note">Số liệu / nhãn kỹ thuật trên console — "giọng kỹ thuật" học từ Vercel.</div>
+  </div>
+
+  <footer>
+    KIM SẮC Moodboard · PROYAKU — bản mô phỏng định hướng, mọi màu neo vào <span class="mono">src/index.css</span> · Học tinh hoa, không sao chép.
+    <br>Xem chi tiết: docs/ux-roadmap/11 &amp; 12.
+  </footer>
+</div>
+</body>
+</html>

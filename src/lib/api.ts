@@ -151,3 +151,61 @@ export const getLiveFast = () => getJson<{ fast: boolean }>('/live/fast');
 
 export const setLiveFast = (on: boolean) =>
     postJson<{ ok: boolean; fast: boolean }>('/live/fast', { on });
+
+// ---------------------------------------------------------------- TTS voices & preview
+
+export interface TtsVoice {
+    id: string | number;
+    label: string;
+    jp?: string;
+}
+
+export interface TtsVoices {
+    engine: string;
+    // The LiveConfig param the chosen voice id feeds (e.g. "speaker_id" | "voice" | "speaker_ref").
+    key: string;
+    voices: TtsVoice[];
+    hint?: string;
+    error?: string;
+    msg?: string;
+}
+
+// List selectable voices for a TTS engine (voicevox | gpt-sovits | vieneu | openai …).
+export const getTtsVoices = (engine: string) =>
+    getJson<TtsVoices>(`/tts/voices?engine=${encodeURIComponent(engine)}`);
+
+/**
+ * Synthesize a short sample and return the WAV Blob to play in-app.
+ * Preview is wired for `vieneu` (on-box VI) and `voicevox` (JA server on :50021);
+ * other engines return 400. Throws Error with a friendly message on failure.
+ */
+export async function previewTts(engine: string, voice: string | number, text: string): Promise<Blob> {
+    const res = await fetch(apiUrl('/tts/preview'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ engine, voice, text }),
+    });
+    const ct = res.headers.get('content-type') ?? '';
+    if (res.ok && ct.includes('audio')) return res.blob();
+    let detail = `HTTP ${res.status}`;
+    try { const j = await res.json(); detail = (j.error ?? j.msg ?? detail) as string; } catch { /* non-JSON */ }
+    throw new Error(detail);
+}
+
+// ---------------------------------------------------------------- Voice / pronunciation training
+
+// The reading script staff read aloud to teach pronunciations (seeds from glossary terms).
+export const getVoiceScript = () => getJson<{ script: string }>('/voice/script');
+
+export const saveVoiceScript = (script: string) =>
+    postJson<{ ok: boolean }>('/voice/script', { script });
+
+// Record from the SERVER's mic for N seconds and transcribe (capture happens on the backend machine).
+export const recordVoice = (seconds: number, model?: string) =>
+    postJson<{ heard?: string; peak?: number; error?: string }>(
+        '/voice/record', model ? { seconds, model } : { seconds });
+
+// Diff the reference script vs what was heard, adding misheard→correct rules to the glossary (live next run).
+export const learnVoice = (reference: string, heard: string) =>
+    postJson<{ added: { misheard: string; term: string }[]; count: number }>(
+        '/voice/learn', { reference, heard });

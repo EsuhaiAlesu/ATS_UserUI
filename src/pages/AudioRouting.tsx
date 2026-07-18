@@ -1,10 +1,12 @@
 import React, { useEffect, useMemo, useState } from 'react';
+import { Link } from 'react-router-dom';
 import {
     getAudioDevices, getAudioOutputs, getBlocks, getLiveFast, playTestTone, setLiveFast,
 } from '../lib/api';
 import type { AudioInputDevice, AudioOutputDevice, LiveConfig } from '../lib/api';
 import { isSessionActive, useLiveSession } from '../lib/LiveSessionContext';
 import { useMeter } from '../lib/useMeter';
+import { buildTtsConfig, loadTtsPrefs } from '../lib/ttsPrefs';
 
 const AudioRouting: React.FC = () => {
     const session = useLiveSession();
@@ -89,6 +91,9 @@ const AudioRouting: React.FC = () => {
             session.stop();
             return;
         }
+        // Include a TTS block only if the operator opted in on the Voice Studio page (default:
+        // subtitles-only, per the audit). The multi-language shape is best-effort — see doc 15.
+        const ttsBlock = buildTtsConfig(loadTtsPrefs());
         const config: LiveConfig = {
             device: 'mic',
             ...(inputDevice !== null ? { device_index: inputDevice } : {}),
@@ -100,6 +105,7 @@ const AudioRouting: React.FC = () => {
             },
             post_correct: true,
             hotwords: true,
+            ...(ttsBlock ? { tts: ttsBlock } : {}),
             ...(outVi !== null && outJa !== null ? { outputs: { vi: outVi, ja: outJa } } : {}),
         };
         session.start(config);
@@ -107,6 +113,7 @@ const AudioRouting: React.FC = () => {
 
     const statusLabel =
         session.status === 'connecting' ? 'CONNECTING…'
+        : session.status === 'reconnecting' ? 'RECONNECTING…'
         : session.status === 'warming' ? `WARMING ${session.warming?.step ?? 0}/${session.warming?.steps ?? 0}`
         : session.status === 'ready' ? 'READY'
         : session.status === 'listening' ? 'LISTENING'
@@ -148,9 +155,9 @@ const AudioRouting: React.FC = () => {
                         >
                             EMERGENCY STOP
                         </button>
-                        <a className="flex items-center gap-4 text-on-surface-variant dark:text-on-surface-variant p-3 font-label-caps text-label-caps hover:bg-surface-container-high" href="#">
-                            <span className="material-symbols-outlined">help</span> Support
-                        </a>
+                        <Link to="/voices" className="flex items-center gap-4 text-on-surface-variant dark:text-on-surface-variant p-3 font-label-caps text-label-caps hover:bg-surface-container-high">
+                            <span className="material-symbols-outlined">record_voice_over</span> Giọng nói / Voices
+                        </Link>
                         <a className="flex items-center gap-4 text-on-surface-variant dark:text-on-surface-variant p-3 font-label-caps text-label-caps hover:bg-surface-container-high" href="#">
                             <span className="material-symbols-outlined">history</span> Logs
                         </a>
