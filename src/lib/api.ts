@@ -128,6 +128,21 @@ export interface LiveEvent {
     lang?: string;
     text?: string;
     corrected?: boolean;
+    // on_script (script-match score for this line)
+    score?: number;
+    // timing (per-stage latency, ms)
+    stt_ms?: number;
+    proc_ms?: number;
+    mt_ms?: number;
+    // speech_lang (detected source language)
+    prob?: number;
+    // context (rolling summary)
+    summary?: string;
+    // name_fix (name-restore / script recovery fixes; shape is backend-specific)
+    fixes?: unknown;
+    // say / speaking / spoken (TTS cues)
+    seq?: number;
+    lag_ms?: number;
     // error
     error?: string;
 }

@@ -59,9 +59,9 @@
 | A1.1 | STOP/EMERGENCY **không chiếu demo giả** → slate STANDBY | `LiveSessionContext.tsx`, `BilingualStream.tsx` | STOP giữa phiên → hiện "CHỜ TÍN HIỆU", không diễn văn giả | ✅ |
 | A1.2 | Reconnect **không kẹt vòng lặp 1s** (backend accept-rồi-drop) | `LiveSessionContext.tsx` | Drop lặp → backoff tăng → tới FAULT đúng cách | ✅ |
 | A1.3 | Giữ cờ `corrected` | `LiveSessionContext.tsx` | Badge "đã sửa" không bị mất | ✅ |
-| A1.4 | **Nút CUT-TO-SAFE** độc lập pipeline (FREEZE dòng-cuối-đã-duyệt / SLATE) | `BilingualStream.tsx` + control | 1 nút đưa màn về trạng thái an toàn tức thì, không qua đường lỗi | ⬜ |
-| A1.5 | **Session bus 3 màn** (BroadcastChannel/feed read-only) — sửa pop-out **chiếu demo** | `LiveSessionContext.tsx`, `BilingualStream.tsx` | Màn cạnh hiện **đúng live** trong ~200ms; rớt → slate, không demo | ⛔ F4 |
-| A1.6 | **Production topology + `/api` proxy** (proxy chỉ có ở dev!) | `vite.config.ts`, build env, backend CORS | App **đã build** kết nối được backend (đặt `VITE_API_BASE` hoặc reverse-proxy same-origin) | ⛔ F6 |
+| A1.4 | **Nút CUT-TO-SAFE** độc lập pipeline (FREEZE dòng-cuối / SLATE) — phím L/G/B + nút thanh điều khiển, broadcast mọi màn | `LiveSessionContext.tsx`, `BilingualStream.tsx` | 1 nút/phím đưa màn về an toàn tức thì | ✅ |
+| A1.5 | **Session bus 3 màn** (BroadcastChannel) — pop-out `?display=1` **mirror phiên live**, không còn chiếu demo | `LiveSessionContext.tsx`, `BilingualStream.tsx` | ✅ đã verify màn cạnh hiện STANDBY, không demo. **Lưu ý: cùng trình duyệt/máy**; đa-máy cần feed backend | ✅ (cùng máy) |
+| A1.6 | **Production proxy**: `vite preview` nay proxy `/api` same-origin | `vite.config.ts` (`preview.proxy`) | Bản build chạy `npm run preview` kết nối được backend cùng máy | ✅ |
 | A1.7 | **Namespace `lid` theo epoch** khi reconnect | `LiveSessionContext.tsx` | Lịch sử "đóng băng" không bị ghi đè bởi lid trùng | ⬜ F5 |
 
 → Chi tiết: [04](04-man-hinh-phu-de.md), [05](05-ban-dieu-khien.md), [08](08-san-pham-va-do-tin-cay.md), [15 §15.1 F/§15.5](15-audit-lo-hong-va-cai-tien.md).

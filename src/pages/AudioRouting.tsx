@@ -67,6 +67,15 @@ const AudioRouting: React.FC = () => {
         return rms > 0 ? Math.max(-60, Math.round(20 * Math.log10(rms))) : -60;
     }, [active, vuLevel, meter.rms]);
 
+    // Trust HUD signals (A3.1) — the backend streams these; the UI previously dropped them.
+    const lastLine = session.lines[session.lines.length - 1];
+    const lastOnScript = lastLine?.onScript;
+    const srcLang = session.sourceLang?.lang?.toLowerCase() ?? '';
+    const dir = srcLang.startsWith('ja') ? 'JA → VI' : srcLang.startsWith('vi') ? 'VI → JA' : '';
+    const e2e = session.timing?.e2e;
+    const fmtMs = (n?: number) => (typeof n === 'number' ? `${Math.round(n)}ms` : '—');
+    const pct = (n?: number) => (typeof n === 'number' ? `${Math.round(n * 100)}%` : '—');
+
     const handleTestTone = async (channel: 'vi' | 'ja') => {
         const device = channel === 'vi' ? outVi : outJa;
         setToneStatus((s) => ({ ...s, [channel]: '…' }));
@@ -178,6 +187,29 @@ const AudioRouting: React.FC = () => {
                                     {session.error ?? deviceError}
                                 </div>
                             )}
+                            {/* Trust HUD (A3.1): latency · detected direction · script-match · name fixes · TTS */}
+                            {active && (
+                                <div className="mb-6 border border-outline-variant bg-surface-container-lowest rounded-DEFAULT px-4 py-3">
+                                    <div className="flex flex-wrap items-center gap-x-6 gap-y-2 font-label-caps text-label-caps" style={{ fontFamily: 'ui-monospace, monospace' }}>
+                                        <span className="text-secondary">TRUST HUD</span>
+                                        <span className="text-on-surface-variant">
+                                            HƯỚNG <span className="text-primary">{dir || '—'}</span>
+                                            {session.sourceLang ? ` ${pct(session.sourceLang.prob)}` : ''}
+                                        </span>
+                                        <span className="text-on-surface-variant">
+                                            TRỄ E2E <span className={e2e == null ? 'text-on-surface-variant' : e2e < 2000 ? 'text-secondary' : 'text-error'}>{fmtMs(e2e)}</span>
+                                            {session.timing ? ` · STT ${fmtMs(session.timing.stt)} MT ${fmtMs(session.timing.mt)} PROC ${fmtMs(session.timing.proc)}` : ''}
+                                        </span>
+                                        <span className="text-on-surface-variant">KHỚP KỊCH BẢN <span className="text-secondary">{pct(lastOnScript)}</span></span>
+                                        <span className="text-on-surface-variant">SỬA TÊN <span className="text-secondary">{session.nameFixCount}</span></span>
+                                        {session.speakingLang && <span className="text-secondary">🔊 ĐANG ĐỌC {session.speakingLang.toUpperCase()}</span>}
+                                    </div>
+                                    {session.contextSummary && (
+                                        <div className="mt-2 font-label-caps text-label-caps text-on-surface-variant truncate">NGỮ CẢNH: {session.contextSummary}</div>
+                                    )}
+                                </div>
+                            )}
+
                             {/* Flow Layout */}
                             <div className="flex flex-col lg:flex-row items-center justify-between gap-gutter lg:gap-16">
 

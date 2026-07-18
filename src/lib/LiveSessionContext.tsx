@@ -16,6 +16,15 @@ export interface LiveLine {
     text: string;
     kind: 'transcript' | 'line';
     corrected?: boolean;
+    onScript?: number;   // on_script match score (0–1) if the backend badged this line as scripted
+}
+
+// Per-stage latency (ms) from the backend `timing` event, plus a derived end-to-end sum.
+export interface Telemetry {
+    stt?: number;
+    proc?: number;
+    mt?: number;
+    e2e?: number;
 }
 
 interface Warming {
@@ -56,6 +65,17 @@ interface LiveSessionValue {
      * back on the LED wall).
      */
     everStarted: boolean;
+    // Operator "trust" signals the backend streams and the UI previously DROPPED (audit A3.1):
+    /** Rolling per-stage + end-to-end latency (ms) from `timing`. */
+    timing: Telemetry | null;
+    /** Detected source language + probability from `speech_lang`. */
+    sourceLang: { lang: string; prob: number } | null;
+    /** Rolling context summary from `context`. */
+    contextSummary: string;
+    /** How many name-restore fixes the backend applied this session (`name_fix`). */
+    nameFixCount: number;
+    /** Which language TTS is currently speaking (`speaking`/`spoken`), or null. */
+    speakingLang: string | null;
     /** True if this window is a read-only MIRROR of another window's session (edge display). */
     mirrored: boolean;
     /** Take-to-safe control for the audience wall; broadcast to every window (A1.4). */
@@ -85,12 +105,18 @@ export const LiveSessionProvider: React.FC<{ children: React.ReactNode }> = ({ c
     const [everStarted, setEverStarted] = useState(false);
     const [mirrored, setMirrored] = useState(false);
     const [audienceCut, setAudienceCutState] = useState<AudienceCut>('live');
+    const [timing, setTiming] = useState<Telemetry | null>(null);
+    const [sourceLang, setSourceLang] = useState<{ lang: string; prob: number } | null>(null);
+    const [contextSummary, setContextSummary] = useState('');
+    const [nameFixCount, setNameFixCount] = useState(0);
+    const [speakingLang, setSpeakingLang] = useState<string | null>(null);
 
     const isPublisherRef = useRef(false);                 // this window owns the live session
     const busRef = useRef<BroadcastChannel | null>(null);
     const latestStateRef = useRef<BusState | null>(null);
 
     const wsRef = useRef<WebSocket | null>(null);
+    const epochRef = useRef(0);                           // bumps each socket open → namespaces lids (A1.7)
     const configRef = useRef<LiveConfig | null>(null);   // last config, replayed on reconnect
     const userStoppedRef = useRef(false);                // distinguishes intentional stop from a drop
     const attemptRef = useRef(0);                        // reconnect attempts since last good open
@@ -162,8 +188,9 @@ export const LiveSessionProvider: React.FC<{ children: React.ReactNode }> = ({ c
     }, []);
 
     const upsertLine = useCallback((evt: LiveEvent, kind: 'transcript' | 'line') => {
-        const lid = String(evt.lid ?? '');
-        if (!lid) return;
+        const raw = String(evt.lid ?? '');
+        if (!raw) return;
+        const lid = `${epochRef.current}:${raw}`;   // namespaced per socket epoch (A1.7)
         setLines((prev) => {
             const next = [...prev];
             const i = next.findIndex((l) => l.lid === lid);
@@ -211,8 +238,39 @@ export const LiveSessionProvider: React.FC<{ children: React.ReactNode }> = ({ c
                 // Non-fatal: the session keeps running; surface the message.
                 setError(evt.error ?? 'Unknown error');
                 break;
+            // --- A3.1: operator trust signals previously dropped ---
+            case 'timing': {
+                const anyMs = [evt.stt_ms, evt.proc_ms, evt.mt_ms].some((n) => typeof n === 'number');
+                setTiming({
+                    stt: evt.stt_ms, proc: evt.proc_ms, mt: evt.mt_ms,
+                    e2e: anyMs ? (evt.stt_ms ?? 0) + (evt.proc_ms ?? 0) + (evt.mt_ms ?? 0) : undefined,
+                });
+                break;
+            }
+            case 'speech_lang':
+                setSourceLang({ lang: evt.lang ?? '', prob: evt.prob ?? 0 });
+                break;
+            case 'context':
+                setContextSummary(evt.summary ?? '');
+                break;
+            case 'name_fix':
+                setNameFixCount((n) => n + (Array.isArray(evt.fixes) ? evt.fixes.length : 1));
+                break;
+            case 'on_script':
+                if (evt.lid !== undefined) {
+                    const lid = `${epochRef.current}:${String(evt.lid)}`;
+                    setLines((prev) => prev.map((l) => (l.lid === lid ? { ...l, onScript: evt.score } : l)));
+                }
+                break;
+            case 'speaking':
+                setSpeakingLang(evt.lang ?? null);
+                break;
+            case 'spoken':
+            case 'said':
+                setSpeakingLang(null);
+                break;
             default:
-                break; // committed / timing / say / spoken … not rendered yet
+                break; // committed / speech_start / say … not surfaced yet
         }
     }, [upsertLine]);
 
@@ -220,6 +278,10 @@ export const LiveSessionProvider: React.FC<{ children: React.ReactNode }> = ({ c
     const openSocket = useCallback(() => {
         const config = configRef.current;
         if (!config) return;
+
+        // New socket = new epoch. Lines are keyed `${epoch}:${lid}` so a reconnected session's
+        // re-used low lids can't overwrite the frozen pre-drop history (A1.7).
+        epochRef.current += 1;
 
         const ws = new WebSocket(wsUrl('/ws/live'));
         wsRef.current = ws;
@@ -289,6 +351,11 @@ export const LiveSessionProvider: React.FC<{ children: React.ReactNode }> = ({ c
         configRef.current = config;
         setError(null);
         setLines([]);
+        setTiming(null);
+        setSourceLang(null);
+        setContextSummary('');
+        setNameFixCount(0);
+        setSpeakingLang(null);
         setHadSession(true);
         setEverStarted(true);   // sticky — the demo loop can never return to the wall this run
         setStatus('connecting');
@@ -302,6 +369,7 @@ export const LiveSessionProvider: React.FC<{ children: React.ReactNode }> = ({ c
 
     const value: LiveSessionValue = {
         backendOnline, status, warming, level, speech, lines, error, hadSession, everStarted,
+        timing, sourceLang, contextSummary, nameFixCount, speakingLang,
         mirrored, audienceCut, setAudienceCut, start, stop,
     };
     return <LiveSessionContext.Provider value={value}>{children}</LiveSessionContext.Provider>;
