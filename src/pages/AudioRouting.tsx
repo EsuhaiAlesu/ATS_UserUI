@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
     getAudioDevices, getAudioOutputs, getBlocks, getLiveFast, playTestTone, setLiveFast,
@@ -120,6 +120,64 @@ const AudioRouting: React.FC = () => {
         session.start(config);
     };
 
+    // --- A3.4: NO-SIGNAL alarm — level stuck near the floor while a session is live ---
+    const [noSignal, setNoSignal] = useState(false);
+    const lastAboveRef = useRef(Date.now());
+    useEffect(() => { if (vuLevel > 0.02) lastAboveRef.current = Date.now(); }, [vuLevel]);
+    useEffect(() => {
+        if (!active) { setNoSignal(false); lastAboveRef.current = Date.now(); return; }
+        const id = setInterval(() => setNoSignal(Date.now() - lastAboveRef.current > 2000), 500);
+        return () => clearInterval(id);
+    }, [active]);
+
+    // --- A3.4: hold-to-confirm STOP — guards the primary transport against a fat-finger click ---
+    const [holdPct, setHoldPct] = useState(0);
+    const holdRef = useRef<ReturnType<typeof setInterval> | null>(null);
+    const cancelHold = () => { if (holdRef.current) { clearInterval(holdRef.current); holdRef.current = null; } setHoldPct(0); };
+    const startHold = () => {
+        if (holdRef.current) return;
+        const t0 = Date.now();
+        holdRef.current = setInterval(() => {
+            const p = Math.min(1, (Date.now() - t0) / 800);
+            setHoldPct(p);
+            if (p >= 1) { cancelHold(); session.stop(); }
+        }, 30);
+    };
+    useEffect(() => () => cancelHold(), []);
+
+    // --- A3.5: pre-flight readiness — START is gated until every check passes (or explicit override) ---
+    const preflight = [
+        { ok: session.backendOnline, label: 'Backend online' },
+        { ok: inputDevice !== null, label: 'Đã chọn mic' },
+        { ok: !!sttModel, label: 'Model nhận dạng (ASR)' },
+        { ok: !!mtModel, label: 'Model dịch (MT)' },
+        { ok: outVi !== null, label: 'Ngõ ra VI' },
+        { ok: outJa !== null, label: 'Ngõ ra JA' },
+        { ok: outVi === null || outJa === null || outVi !== outJa, label: 'VI ≠ JA (khác loa)' },
+    ];
+    const preflightOk = preflight.every((i) => i.ok);
+    const [override, setOverride] = useState(false);
+    const canStart = preflightOk || override;
+
+    // --- A3.2: Master Annunciator — one dominant, room-readable state ---
+    const master = (() => {
+        if (!session.backendOnline && !active) return { label: 'BACKEND OFFLINE', dot: 'bg-error', text: 'text-error', anim: '' };
+        switch (session.status) {
+            case 'connecting': return { label: 'CONNECTING…', dot: 'bg-primary', text: 'text-primary', anim: 'animate-pulse' };
+            case 'warming': return { label: `WARMING ${session.warming?.step ?? 0}/${session.warming?.steps ?? 0}`, dot: 'bg-primary', text: 'text-primary', anim: 'animate-pulse' };
+            case 'ready': return { label: 'READY', dot: 'bg-secondary', text: 'text-secondary', anim: 'listening-pulse' };
+            case 'listening':
+                return noSignal
+                    ? { label: 'LIVE · KHÔNG CÓ TÍN HIỆU', dot: 'bg-error', text: 'text-error', anim: 'animate-pulse' }
+                    : (e2e != null && e2e >= 2500)
+                        ? { label: 'DEGRADED · TRỄ CAO', dot: 'bg-error', text: 'text-error', anim: 'animate-pulse' }
+                        : { label: '● LIVE', dot: 'bg-secondary', text: 'text-secondary', anim: 'listening-pulse' };
+            case 'reconnecting': return { label: 'MẤT KẾT NỐI · ĐANG KẾT NỐI LẠI', dot: 'bg-error', text: 'text-error', anim: 'animate-pulse' };
+            case 'error': return { label: 'FAULT · LỖI', dot: 'bg-error', text: 'text-error', anim: '' };
+            default: return { label: 'STANDBY', dot: 'bg-outline-variant', text: 'text-on-surface-variant', anim: '' };
+        }
+    })();
+
     const statusLabel =
         session.status === 'connecting' ? 'CONNECTING…'
         : session.status === 'reconnecting' ? 'RECONNECTING…'
@@ -182,6 +240,12 @@ const AudioRouting: React.FC = () => {
                             <path className="connecting-line" d="M 250 400 C 400 400, 500 600, 700 600" fill="none"></path>
                         </svg>
                         <div className="w-full max-w-6xl z-10">
+                            {/* A3.2 Master Annunciator — one dominant state, readable across the room */}
+                            <div className="mb-6 flex items-center gap-4 border border-outline-variant rounded-DEFAULT bg-surface-container-lowest px-5 py-4">
+                                <span className={`w-4 h-4 rounded-full ${master.dot} ${master.anim}`}></span>
+                                <span className={`font-headline-sm text-headline-sm tracking-wide ${master.text}`}>{master.label}</span>
+                                {fastMode && <span className="ml-auto font-label-caps text-label-caps text-secondary">⚡ FAST MODE</span>}
+                            </div>
                             {(session.error || deviceError) && (
                                 <div className="mb-6 border border-error text-error font-label-caps text-label-caps px-4 py-3">
                                     {session.error ?? deviceError}
@@ -252,9 +316,11 @@ const AudioRouting: React.FC = () => {
                                         <div className="pt-4">
                                             <div className="flex justify-between items-center mb-2">
                                                 <label className="font-label-caps text-label-caps text-on-surface-variant">Signal Level</label>
-                                                <span className="font-label-caps text-label-caps text-primary">{vuDb}dB</span>
+                                                <span className={`font-label-caps text-label-caps ${noSignal ? 'text-error animate-pulse' : 'text-primary'}`}>
+                                                    {noSignal ? '⚠ KHÔNG CÓ TÍN HIỆU' : `${vuDb}dB`}
+                                                </span>
                                             </div>
-                                            <div className="vu-meter-bar">
+                                            <div className={`vu-meter-bar ${noSignal ? 'ring-1 ring-error' : ''}`}>
                                                 <div className="vu-meter-fill" style={{ width: `${Math.round(Math.min(1, vuLevel) * 100)}%` }}></div>
                                             </div>
                                         </div>
@@ -294,13 +360,44 @@ const AudioRouting: React.FC = () => {
                                                 </span>
                                             </div>
                                         )}
-                                        <button
-                                            onClick={handleStartStop}
-                                            disabled={!session.backendOnline && !active}
-                                            className={`mt-4 w-full font-label-caps text-label-caps py-3 rounded-DEFAULT transition-colors disabled:opacity-40 ${active ? 'bg-error text-on-error hover:opacity-80' : 'bg-secondary text-on-secondary hover:opacity-80'}`}
-                                        >
-                                            {active ? 'STOP INTERPRETER' : 'START INTERPRETER'}
-                                        </button>
+                                        {/* A3.5 Pre-flight checklist (shown before START) */}
+                                        {!active && (
+                                            <div className="mt-4 text-left space-y-1">
+                                                {preflight.map((it) => (
+                                                    <div key={it.label} className="flex items-center gap-2 font-label-caps text-label-caps">
+                                                        <span className={it.ok ? 'text-secondary' : 'text-error'}>{it.ok ? '✓' : '✕'}</span>
+                                                        <span className={it.ok ? 'text-on-surface-variant' : 'text-error'}>{it.label}</span>
+                                                    </div>
+                                                ))}
+                                                {!preflightOk && (
+                                                    <label className="flex items-center gap-2 mt-1 font-label-caps text-label-caps text-on-surface-variant cursor-pointer">
+                                                        <input type="checkbox" checked={override} onChange={(e) => setOverride(e.target.checked)} />
+                                                        Bỏ qua kiểm tra (override)
+                                                    </label>
+                                                )}
+                                            </div>
+                                        )}
+                                        {/* A3.4 START (gated by pre-flight) / STOP (hold-to-confirm) */}
+                                        {active ? (
+                                            <button
+                                                onPointerDown={startHold}
+                                                onPointerUp={cancelHold}
+                                                onPointerLeave={cancelHold}
+                                                title="Giữ để dừng"
+                                                className="mt-4 w-full relative overflow-hidden font-label-caps text-label-caps py-3 rounded-DEFAULT bg-error text-on-error select-none"
+                                            >
+                                                <span className="absolute inset-y-0 left-0 bg-on-error/30" style={{ width: `${Math.round(holdPct * 100)}%` }}></span>
+                                                <span className="relative">{holdPct > 0 ? `GIỮ ĐỂ DỪNG… ${Math.round(holdPct * 100)}%` : 'STOP INTERPRETER (giữ)'}</span>
+                                            </button>
+                                        ) : (
+                                            <button
+                                                onClick={() => { if (canStart) handleStartStop(); }}
+                                                disabled={!canStart}
+                                                className="mt-4 w-full font-label-caps text-label-caps py-3 rounded-DEFAULT bg-secondary text-on-secondary hover:opacity-80 disabled:opacity-40"
+                                            >
+                                                START INTERPRETER
+                                            </button>
+                                        )}
                                         <div className="mt-4 flex justify-center gap-2">
                                             <div className={`w-2 h-2 rounded-full ${session.backendOnline ? 'bg-secondary' : 'bg-outline-variant'}`}></div>
                                             <div className={`w-2 h-2 rounded-full ${active ? 'bg-secondary' : 'bg-outline-variant'}`}></div>
@@ -324,7 +421,8 @@ const AudioRouting: React.FC = () => {
                                                 <select
                                                     value={outVi ?? ''}
                                                     onChange={(e) => setOutVi(Number(e.target.value))}
-                                                    className="w-full bg-surface text-on-surface border-b border-outline-variant rounded-none py-1 px-0 focus:ring-0 focus:border-secondary text-sm"
+                                                    disabled={active}
+                                                    className="w-full bg-surface text-on-surface border-b border-outline-variant rounded-none py-1 px-0 focus:ring-0 focus:border-secondary text-sm disabled:opacity-50"
                                                 >
                                                     {outputs.length === 0 && <option value="">No output devices found</option>}
                                                     {outputs.map((d) => <option key={d.index} value={d.index}>{d.name}</option>)}
@@ -350,7 +448,8 @@ const AudioRouting: React.FC = () => {
                                                 <select
                                                     value={outJa ?? ''}
                                                     onChange={(e) => setOutJa(Number(e.target.value))}
-                                                    className="w-full bg-surface text-on-surface border-b border-outline-variant rounded-none py-1 px-0 focus:ring-0 focus:border-secondary text-sm"
+                                                    disabled={active}
+                                                    className="w-full bg-surface text-on-surface border-b border-outline-variant rounded-none py-1 px-0 focus:ring-0 focus:border-secondary text-sm disabled:opacity-50"
                                                 >
                                                     {outputs.length === 0 && <option value="">No output devices found</option>}
                                                     {outputs.map((d) => <option key={d.index} value={d.index}>{d.name}</option>)}
