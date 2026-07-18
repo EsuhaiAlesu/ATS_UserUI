@@ -81,10 +81,10 @@
 | # | Việc | File | DoD |
 |---|------|------|-----|
 | A3.1 | ✅ **Đấu nối event đang bị bỏ** (`timing/on_script/name_fix/speech_lang/context/speaking`) vào state | `LiveSessionContext.tsx` (`handleEvent`) | ✅ Không còn `default: break` nuốt tín hiệu |
-| A3.2 | **Master Annunciator** (một trạng thái chủ đạo, đọc từ xa) | `AudioRouting.tsx` | STANDBY/WARMING/LIVE/DEGRADED/FAULT rõ, đổi màu |
+| A3.2 | ✅ **Master Annunciator** (một trạng thái chủ đạo, đổi màu) | `AudioRouting.tsx` | ✅ OFFLINE/STANDBY/CONNECTING/WARMING/READY/LIVE/DEGRADED/RECONNECTING/FAULT |
 | A3.3 | 🔧 **Trust HUD tối thiểu** (SCRIPT-MATCH%, name_fix, độ trễ, hướng, TTS, ngữ cảnh) | `AudioRouting.tsx` | ✅ Bản đầu đã có (hiện khi active); còn: sparkline độ trễ, ngưỡng màu, gợi ý Fast Mode |
-| A3.4 | **VU + chuông NO-SIGNAL** · **guard STOP (hold)** · **dọn banner lỗi thô** | `AudioRouting.tsx` | Mic chết → báo; STOP không bấm nhầm; không rò `SyntaxError` |
-| A3.5 | **Pre-flight "Green Room" checklist** chặn START | `AudioRouting.tsx` | START chỉ bật khi: backend online · mic có tín hiệu · model warm · VI≠JA · test tone · glossary/script nạp |
+| A3.4 | ✅ **NO-SIGNAL alarm** (>2s) + **STOP hold-to-confirm** (EMERGENCY một-chạm riêng) + disable ngõ ra khi active | `AudioRouting.tsx` | ✅ Mic mất tín hiệu → báo; STOP không bấm nhầm. Còn: peak-hold/clip VU |
+| A3.5 | ✅ **Pre-flight checklist** chặn START (backend · mic · ASR · MT · ngõ VI/JA · VI≠JA) + override | `AudioRouting.tsx` | ✅ START chỉ bật khi pass. Còn: mục "mic có tín hiệu thật" + test-tone-đã-bấm + model-warm |
 
 → Chi tiết: [05](05-ban-dieu-khien.md), [12.2/12.5/12.6/12.7](12-thu-vien-mau-giao-dien.md).
 
