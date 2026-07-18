@@ -69,11 +69,11 @@
 ### A2 · Đọc-được từ xa (broadcast-grade phụ đề)
 | # | Việc | File | DoD |
 |---|------|------|-----|
-| A2.1 | **Cỡ chữ fluid** (`clamp()/cqw`) + **phím zoom** vận hành | `BilingualStream.tsx`, `index.css` | Trên 4K, dòng mới ~6–9% chiều cao màn; đọc từ hàng cuối phòng thật |
-| A2.2 | **Tương phản dòng mới ≥7:1** (bỏ mauve), dòng cũ ≥4.5:1, bỏ blur | `BilingualStream.tsx`, `index.css` | Đo bằng công cụ tương phản ở từng "tuổi" dòng |
-| A2.3 | **Ép dark mặc định** cho `/stream`; **bỏ Times → sans đậm** | `MainLayout.tsx`, `BilingualStream.tsx` | Sân khấu dark, VN sans đọc-được |
-| A2.4 | **`lang="vi/ja"` + kinsoku + reduced-motion + trạng thái chờ** | `index.html`, `BilingualStream.tsx`, `index.css` | Screen reader/kinsoku đúng; Reduce Motion tôn trọng; có placeholder chờ |
-| A2.5 | **3 màn: mỗi cạnh 1 ngôn ngữ** (VI trái / JA phải), fill toàn màn | `BilingualStream.tsx` | Mỗi màn cạnh full 1 ngôn ngữ, đồng bộ live (dựa A1.5) |
+| A2.1 | ✅ **Cỡ chữ fluid** (`clamp()/vh`) + **phím zoom +/−/0** (lưu localStorage) | `BilingualStream.tsx` | ✅ Chữ co theo màn; verify trên viewport thật ở venue |
+| A2.2 | ✅ **Dòng mới = vàng sáng nhất** (bỏ mauve), dòng cũ opacity 0.85 không blur | `BilingualStream.tsx`, `index.css` | ✅ Verify mắt thường; còn: đo APCA/WCAG chính xác |
+| A2.3 | ✅ **Ép dark** cho `/stream` standalone + **bỏ Times → sans đậm** (VN Be Vietnam Pro / JA Noto Sans JP) | `BilingualStream.tsx` | ✅ |
+| A2.4 | ✅ **`lang` mỗi dòng + `line-break:strict` + `prefers-reduced-motion` + placeholder "Đang chờ diễn giả…"** + `index.html lang=vi`/title PROYAKU | `index.html`, `BilingualStream.tsx`, `index.css` | ✅ |
+| A2.5 | ✅ **3 màn: mỗi cạnh 1 ngôn ngữ, fill** (đã có `?lang`+`?display=1`+`?fill`, đồng bộ qua bus A1.5) | `BilingualStream.tsx` | ✅ cùng máy; đa-máy cần feed backend |
 
 → Chi tiết: [04](04-man-hinh-phu-de.md), [06](06-typography-i18n.md), [07](07-accessibility.md), [11 KIM SẮC](11-ngon-ngu-thiet-ke.md).
 
