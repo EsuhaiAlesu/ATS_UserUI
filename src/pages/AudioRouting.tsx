@@ -222,6 +222,9 @@ const AudioRouting: React.FC = () => {
                         >
                             EMERGENCY STOP
                         </button>
+                        <Link to="/prep" className="flex items-center gap-4 text-secondary dark:text-secondary p-3 font-label-caps text-label-caps hover:bg-surface-container-high">
+                            <span className="material-symbols-outlined">dashboard</span> Trung tâm điều phối
+                        </Link>
                         <Link to="/voices" className="flex items-center gap-4 text-on-surface-variant dark:text-on-surface-variant p-3 font-label-caps text-label-caps hover:bg-surface-container-high">
                             <span className="material-symbols-outlined">record_voice_over</span> Giọng nói / Voices
                         </Link>

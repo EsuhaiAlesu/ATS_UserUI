@@ -48,9 +48,14 @@ const MainLayout: React.FC = () => {
             {/* TopAppBar (Navbar) */}
             <header className="bg-surface dark:bg-surface border-b border-outline-variant dark:border-outline-variant flex justify-between items-center w-full px-container-padding h-20 z-50 shrink-0">
                 <div className="flex items-center gap-gutter">
-                    <span className="font-bold text-2xl tracking-tighter text-secondary dark:text-secondary">Agent Translator — 花訳</span>
+                    <span className="font-bold text-2xl tracking-tighter text-secondary dark:text-secondary">PROYAKU — 訳</span>
                     <nav className="hidden md:flex gap-6 ml-8">
-                        <button className="font-label-caps text-label-caps text-on-surface-variant dark:text-on-surface-variant hover:opacity-80 transition-opacity uppercase">LIVE FEED</button>
+                        <button
+                            onClick={() => navigate('/prep')}
+                            className="font-label-caps text-label-caps uppercase transition-transform duration-200 text-on-surface-variant dark:text-on-surface-variant hover:opacity-80"
+                        >
+                            ĐIỀU PHỐI
+                        </button>
                         <button 
                             onClick={() => handleTabChange('audio')}
                             className={`font-label-caps text-label-caps uppercase transition-transform duration-200 ${activeTab === 'audio' ? 'text-secondary dark:text-secondary border-b-2 border-secondary pb-1 scale-95' : 'text-on-surface-variant dark:text-on-surface-variant hover:opacity-80'}`}

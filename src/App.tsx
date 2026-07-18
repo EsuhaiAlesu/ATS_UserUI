@@ -6,6 +6,7 @@ import BilingualStream from './pages/BilingualStream'
 import VoiceStudio from './pages/VoiceStudio'
 import GlossaryEditor from './pages/GlossaryEditor'
 import ScriptPrep from './pages/ScriptPrep'
+import PrepDesk from './pages/PrepDesk'
 import Home from './pages/Home'
 import SplashScreen from './components/SplashScreen'
 import { LiveSessionProvider } from './lib/LiveSessionContext'
@@ -31,6 +32,7 @@ const App: React.FC = () => {
             <Route path="/voices" element={<VoiceStudio />} />
             <Route path="/glossary" element={<GlossaryEditor />} />
             <Route path="/script" element={<ScriptPrep />} />
+            <Route path="/prep" element={<PrepDesk />} />
           </Routes>
         )}
       </div>
