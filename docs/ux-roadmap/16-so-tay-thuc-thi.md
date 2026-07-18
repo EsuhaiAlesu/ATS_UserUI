@@ -91,7 +91,7 @@
 ### A4 · Chuẩn bị nội dung (đây mới là TRẦN chất lượng dịch)
 | # | Việc | File | DoD |
 |---|------|------|-----|
-| A4.1 | **Glossary & Names editor** + **khoá tên riêng** (Lê Long Sơn, Kaizen Yoshida School, Esuhai, keigo 御社…) | mới: `GlossaryEditor` + `/api/file` | Sửa/khoá/lưu term; verify tên hiển thị đúng trước lễ |
+| A4.1 | ✅ **Glossary & Names editor** + **khoá tên riêng** (Lê Long Sơn, Kaizen Yoshida School, Esuhai, keigo 御社…) | `GlossaryEditor.tsx` `/glossary` + `getFile/saveFile` | ✅ Sửa/khoá/lưu term về `data/glossary.json`; seed tên trọng yếu chạy cả khi offline. **Cần backend `/api/file`** để lưu thật + verify tên trên LED trước lễ |
 | A4.2 | **Nạp kịch bản + biên dịch trước từng dòng + duyệt tay** | mới: dùng `/api/file`, `/api/run` | Kịch bản khoá, bản dịch chuẩn đã duyệt sẵn |
 | A4.3 | **Ghim cứng con số 20 (周年)** + gate số/tên theo độ tin cậy ASR | logic | Không tin ASR cho con số cốt lõi |
 | A4.4 | *(Đã có)* **Voice Studio** — chọn giọng + Pronunciation Clinic | `VoiceStudio.tsx` | ✅ dùng cho phòng họp; **gala: thu sẵn kính ngữ bằng giọng người** |
