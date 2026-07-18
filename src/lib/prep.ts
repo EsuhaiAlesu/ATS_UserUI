@@ -30,7 +30,19 @@ export const GALA_DATE = '2026-08-08';
 function read(): PrepStore {
     try {
         const s = localStorage.getItem(KEY);
-        if (s) return { attest: {}, debrief: {}, incidents: [], ...JSON.parse(s) };
+        if (s) {
+            // Coerce each field defensively — a present-but-wrong-typed key (e.g. {"attest":null}
+            // from a hand-edit) must NOT override the safe default and later crash prep.attest[id].
+            const p = JSON.parse(s) as Partial<PrepStore> | null;
+            if (p && typeof p === 'object') {
+                return {
+                    attest: p.attest && typeof p.attest === 'object' ? p.attest : {},
+                    debrief: p.debrief && typeof p.debrief === 'object' ? p.debrief : {},
+                    incidents: Array.isArray(p.incidents) ? p.incidents : [],
+                    reachedReadyTs: typeof p.reachedReadyTs === 'string' ? p.reachedReadyTs : undefined,
+                };
+            }
+        }
     } catch { /* corrupt/absent → default */ }
     return { attest: {}, debrief: {}, incidents: [] };
 }
@@ -83,10 +95,15 @@ export function removeIncident(i: number): PrepStore {
     return s;
 }
 
-/** True if the attestation timestamp is before the rehearsal day (a soft warning against pre-signing). */
+/** True if the attestation was signed before the rehearsal day (soft warning against pre-signing).
+ *  Compares LOCAL calendar dates — a signature made early morning on 07/08 in Vietnam (UTC+7) is a
+ *  06/08 UTC timestamp, and must not spuriously read as "before rehearsal". */
 export function signedBeforeRehearsal(a?: Attest): boolean {
     if (!a) return false;
-    return a.ts.slice(0, 10) < REHEARSAL_DATE;
+    const d = new Date(a.ts);
+    if (isNaN(d.getTime())) return false;
+    const local = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    return local < REHEARSAL_DATE;
 }
 
 /** Whole-days from now until an ISO date (negative if past). Browser Date is fine here. */

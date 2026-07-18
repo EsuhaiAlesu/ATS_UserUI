@@ -8,6 +8,7 @@ import {
     getPrep, signAttest, clearAttest, markReachedReady, setDebrief, addIncident, removeIncident,
     signedBeforeRehearsal, daysUntil, REHEARSAL_DATE, GALA_DATE,
 } from '../lib/prep';
+import type { Attest } from '../lib/prep';
 
 type SigState = 'ok' | 'fail' | 'unknown';
 type Weight = 'blocker' | 'important' | 'nice';
@@ -42,6 +43,67 @@ const INITIAL: Fetched = {
 const WEIGHT_LABEL: Record<Weight, string> = { blocker: 'CHẶN', important: 'QUAN TRỌNG', nice: 'NÊN CÓ' };
 const fmtTs = (ts: string) => ts.replace('T', ' ').slice(0, 16);
 
+const CHIP_MAP: Record<SigState, { cls: string; txt: string }> = {
+    ok: { cls: 'bg-secondary text-on-secondary', txt: '✓ ĐẠT' },
+    fail: { cls: 'border border-error text-error', txt: '✗ CHƯA' },
+    unknown: { cls: 'border border-outline-variant text-on-surface-variant', txt: '— ?' },
+};
+
+// Module-scope so their function identity is STABLE across PrepDesk re-renders. If SignalRow were
+// declared inside PrepDesk, typing in the "Tên người ký" input would setState → re-render → a new
+// SignalRow type → React remounts the subtree → the input loses focus after every keystroke.
+const Chip: React.FC<{ state: SigState }> = ({ state }) => (
+    <span className={`px-2 py-0.5 rounded-DEFAULT font-label-caps text-label-caps ${CHIP_MAP[state].cls}`}>{CHIP_MAP[state].txt}</span>
+);
+
+const Ring: React.FC<{ pct: number; size?: number }> = ({ pct, size = 44 }) => {
+    const r = (size - 6) / 2, c = 2 * Math.PI * r;
+    return (
+        <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} className="shrink-0">
+            <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="var(--color-outline-variant)" strokeWidth="4" />
+            <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="var(--color-secondary)" strokeWidth="4"
+                strokeDasharray={c} strokeDashoffset={c * (1 - pct / 100)} strokeLinecap="round" transform={`rotate(-90 ${size / 2} ${size / 2})`} />
+            <text x="50%" y="52%" dominantBaseline="middle" textAnchor="middle" className="fill-on-surface" style={{ fontSize: size * 0.28 }}>{pct}</text>
+        </svg>
+    );
+};
+
+const SignalRow: React.FC<{
+    s: Signal; attest?: Attest; signValue: string;
+    onSignChange: (v: string) => void; onSign: () => void; onClear: () => void;
+}> = ({ s, attest, signValue, onSignChange, onSign, onClear }) => {
+    const warn = signedBeforeRehearsal(attest);
+    return (
+        <div className="border-t border-outline-variant py-3 flex flex-col gap-1.5">
+            <div className="flex items-center gap-3 flex-wrap">
+                <Chip state={s.state} />
+                <span className="font-medium text-on-surface">{s.label}</span>
+                <span className={`font-label-caps text-label-caps px-1.5 py-0.5 rounded-DEFAULT ${s.weight === 'blocker' ? 'text-error' : 'text-on-surface-variant'}`}>{WEIGHT_LABEL[s.weight]}</span>
+                <span className="font-label-caps text-label-caps px-1.5 py-0.5 rounded-DEFAULT border border-outline-variant text-on-surface-variant">{s.kind === 'attest' ? 'KÝ TAY' : 'ĐO ĐƯỢC'}</span>
+                {s.to && <Link to={s.to} className="ml-auto font-label-caps text-label-caps text-primary hover:opacity-70">{s.toLabel ?? 'Mở'} ↗</Link>}
+            </div>
+            <div className="text-sm text-on-surface-variant pl-1">{s.detail}</div>
+            {s.kind === 'attest' && (
+                <div className="flex items-center gap-2 flex-wrap pl-1">
+                    {attest ? (
+                        <>
+                            <span className="text-sm text-secondary">✓ Đã ký: <b>{attest.by}</b> · {fmtTs(attest.ts)}</span>
+                            {warn && <span className="text-sm text-error">⚠ ký TRƯỚC ngày tổng duyệt {REHEARSAL_DATE}</span>}
+                            <button onClick={onClear} className="text-sm text-on-surface-variant hover:text-error underline">Rút</button>
+                        </>
+                    ) : (
+                        <>
+                            <input value={signValue} onChange={(e) => onSignChange(e.target.value)}
+                                placeholder="Tên người ký" className="bg-surface text-on-surface border border-outline-variant rounded-DEFAULT px-2 py-1 text-sm w-44" />
+                            <button onClick={onSign} className="border border-secondary text-secondary px-3 py-1 text-sm rounded-DEFAULT hover:opacity-80">Ký xác nhận</button>
+                        </>
+                    )}
+                </div>
+            )}
+        </div>
+    );
+};
+
 const PrepDesk: React.FC = () => {
     const session = useLiveSession();
     const [data, setData] = useState<Fetched>(INITIAL);
@@ -62,8 +124,11 @@ const PrepDesk: React.FC = () => {
                     health: h.status === 'fulfilled' ? h.value : null, healthErr: h.status === 'rejected',
                     glossary: g.status === 'fulfilled' ? g.value : null, glossaryErr: g.status === 'rejected',
                     script: s.status === 'fulfilled' ? s.value : null, scriptErr: s.status === 'rejected',
-                    inputs: ind.status === 'fulfilled' ? ind.value.devices.length : null, inputsErr: ind.status === 'rejected',
-                    outputs: outd.status === 'fulfilled' ? outd.value.devices.length : null, outputsErr: outd.status === 'rejected',
+                    // A 200-but-error-shaped body (has `error`, no `devices[]`) is fulfilled — treat it as a failed read, not a crash.
+                    inputs: ind.status === 'fulfilled' ? (ind.value?.devices?.length ?? null) : null,
+                    inputsErr: ind.status === 'rejected' || (ind.status === 'fulfilled' && !Array.isArray(ind.value?.devices)),
+                    outputs: outd.status === 'fulfilled' ? (outd.value?.devices?.length ?? null) : null,
+                    outputsErr: outd.status === 'rejected' || (outd.status === 'fulfilled' && !Array.isArray(outd.value?.devices)),
                     loading: false,
                 });
             });
@@ -71,8 +136,13 @@ const PrepDesk: React.FC = () => {
     }, [tick]);
 
     // Latch proof that models actually warmed to READY in this browser (the Metal≠CUDA risk).
+    // Refresh component state after latching so the models-warm signal stays green once the session
+    // leaves ready/listening — otherwise the memo re-reads stale prep and the blocker reverts to NO-GO.
     useEffect(() => {
-        if (session.status === 'ready' || session.status === 'listening') markReachedReady();
+        if (session.status === 'ready' || session.status === 'listening') {
+            markReachedReady();
+            setPrepState((p) => (p.reachedReadyTs ? p : getPrep()));
+        }
     }, [session.status]);
 
     const doSign = (id: string) => setPrepState(signAttest(id, signName[id] ?? ''));
@@ -228,7 +298,8 @@ const PrepDesk: React.FC = () => {
     const importants = preSignals.filter((s) => s.weight === 'important');
     const blockersOk = blockers.filter((s) => s.state === 'ok').length;
     const importantsOk = importants.filter((s) => s.state === 'ok').length;
-    const unsigned = signals.filter((s) => s.kind === 'attest' && s.state !== 'ok').length;
+    // Scope the "chưa ký" counter to PRE attests — the verdict strip is the pre-event go/no-go.
+    const unsigned = preSignals.filter((s) => s.kind === 'attest' && s.state !== 'ok').length;
 
     const verdict: 'GO' | 'NO-GO' | 'DEGRADED' =
         blockersOk < blockers.length ? 'NO-GO' : (importantsOk < importants.length ? 'DEGRADED' : 'GO');
@@ -250,62 +321,6 @@ const PrepDesk: React.FC = () => {
         a.href = url; a.download = `proyaku-as-run-${new Date().toISOString().slice(0, 10)}.json`;
         a.click();
         URL.revokeObjectURL(url);
-    };
-
-    // ---- small render helpers ----
-    const chip = (state: SigState) => {
-        const map: Record<SigState, string> = {
-            ok: 'bg-secondary text-on-secondary', fail: 'border border-error text-error',
-            unknown: 'border border-outline-variant text-on-surface-variant',
-        };
-        const txt: Record<SigState, string> = { ok: '✓ ĐẠT', fail: '✗ CHƯA', unknown: '— ?' };
-        return <span className={`px-2 py-0.5 rounded-DEFAULT font-label-caps text-label-caps ${map[state]}`}>{txt[state]}</span>;
-    };
-
-    const Row: React.FC<{ s: Signal }> = ({ s }) => {
-        const a = prep.attest[s.id];
-        const warn = signedBeforeRehearsal(a);
-        return (
-            <div className="border-t border-outline-variant py-3 flex flex-col gap-1.5">
-                <div className="flex items-center gap-3 flex-wrap">
-                    {chip(s.state)}
-                    <span className="font-medium text-on-surface">{s.label}</span>
-                    <span className={`font-label-caps text-label-caps px-1.5 py-0.5 rounded-DEFAULT ${s.weight === 'blocker' ? 'text-error' : 'text-on-surface-variant'}`}>{WEIGHT_LABEL[s.weight]}</span>
-                    <span className="font-label-caps text-label-caps px-1.5 py-0.5 rounded-DEFAULT border border-outline-variant text-on-surface-variant">{s.kind === 'attest' ? 'KÝ TAY' : 'ĐO ĐƯỢC'}</span>
-                    {s.to && <Link to={s.to} className="ml-auto font-label-caps text-label-caps text-primary hover:opacity-70">{s.toLabel ?? 'Mở'} ↗</Link>}
-                </div>
-                <div className="text-sm text-on-surface-variant pl-1">{s.detail}</div>
-                {s.kind === 'attest' && (
-                    <div className="flex items-center gap-2 flex-wrap pl-1">
-                        {a ? (
-                            <>
-                                <span className="text-sm text-secondary">✓ Đã ký: <b>{a.by}</b> · {fmtTs(a.ts)}</span>
-                                {warn && <span className="text-sm text-error">⚠ ký TRƯỚC ngày tổng duyệt {REHEARSAL_DATE}</span>}
-                                <button onClick={() => doClear(s.id)} className="text-sm text-on-surface-variant hover:text-error underline">Rút</button>
-                            </>
-                        ) : (
-                            <>
-                                <input value={signName[s.id] ?? ''} onChange={(e) => setSignName((m) => ({ ...m, [s.id]: e.target.value }))}
-                                    placeholder="Tên người ký" className="bg-surface text-on-surface border border-outline-variant rounded-DEFAULT px-2 py-1 text-sm w-44" />
-                                <button onClick={() => doSign(s.id)} className="border border-secondary text-secondary px-3 py-1 text-sm rounded-DEFAULT hover:opacity-80">Ký xác nhận</button>
-                            </>
-                        )}
-                    </div>
-                )}
-            </div>
-        );
-    };
-
-    const Ring: React.FC<{ pct: number; size?: number }> = ({ pct, size = 44 }) => {
-        const r = (size - 6) / 2, c = 2 * Math.PI * r;
-        return (
-            <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} className="shrink-0">
-                <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="var(--color-outline-variant)" strokeWidth="4" />
-                <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="var(--color-secondary)" strokeWidth="4"
-                    strokeDasharray={c} strokeDashoffset={c * (1 - pct / 100)} strokeLinecap="round" transform={`rotate(-90 ${size / 2} ${size / 2})`} />
-                <text x="50%" y="52%" dominantBaseline="middle" textAnchor="middle" className="fill-on-surface" style={{ fontSize: size * 0.28 }}>{pct}</text>
-            </svg>
-        );
     };
 
     const verdictBox: Record<typeof verdict, string> = {
@@ -382,7 +397,12 @@ const PrepDesk: React.FC = () => {
                 )}
 
                 <div>
-                    {shownSignals.map((s) => <Row key={s.id} s={s} />)}
+                    {shownSignals.map((s) => (
+                        <SignalRow key={s.id} s={s} attest={prep.attest[s.id]}
+                            signValue={signName[s.id] ?? ''}
+                            onSignChange={(v) => setSignName((m) => ({ ...m, [s.id]: v }))}
+                            onSign={() => doSign(s.id)} onClear={() => doClear(s.id)} />
+                    ))}
                 </div>
 
                 {selPhase === 'pre' && (

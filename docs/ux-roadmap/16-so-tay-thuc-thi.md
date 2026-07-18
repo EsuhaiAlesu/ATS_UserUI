@@ -109,7 +109,11 @@
 → Chi tiết: [15 §15.3](15-audit-lo-hong-va-cai-tien.md).
 
 ### A6 · GO / NO-GO (trước giờ mở cửa)
-Dùng checklist [09 §9.5](09-lo-trinh-nang-cap.md) + [15](15-audit-lo-hong-va-cai-tien.md): rớt backend không hiện demo · pop-out đúng live · đọc-được hàng cuối · STOP an toàn · glossary/tên đúng · VI≠JA test tone · Green Room đã chạy · **máy dự phòng + người phiên dịch sẵn sàng**.
+✅ **Đã dựng thành cổng sống: `/prep` — Trung tâm điều phối** (`PrepDesk.tsx`). Bàn Pre→In→Post với phán quyết **GO / NO-GO / DEGRADED** đọc dữ liệu THẬT (health, glossary, script, mic/loa, tts) và gương LiveSession. Mỗi tín hiệu gắn nhãn **ĐO ĐƯỢC** (máy tự tính) hoặc **KÝ TAY** (người xác nhận — model ấm/tên nghe đúng/đã diễn tập mic thật/Mac #2/PDV người — lưu localStorage, không bao giờ tự-xanh, cảnh báo nếu ký trước ngày tổng duyệt). Mục CHẶN khoá phán quyết ở NO-GO tới khi đạt hết. Offline-safe.
+
+Checklist gốc (đã nhúng vào /prep): rớt backend không hiện demo · pop-out đúng live · đọc-được hàng cuối · STOP an toàn · glossary/tên đúng · VI≠JA test tone · Green Room đã chạy · **máy dự phòng + người phiên dịch sẵn sàng**. Xem [09 §9.5](09-lo-trinh-nang-cap.md) + [15](15-audit-lo-hong-va-cai-tien.md).
+
+> Vào **`/prep`** để bắt đầu mỗi buổi: nó chỉ ra đúng việc chặn kế tiếp và dẫn thẳng tới công cụ tương ứng (/audio · /glossary · /script · /voices · /stream).
 
 ---
 
