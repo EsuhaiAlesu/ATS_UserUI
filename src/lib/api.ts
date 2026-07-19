@@ -120,6 +120,15 @@ export interface LiveConfig {
     glossary?: Record<string, string>;
 }
 
+// A hot patch applied MID-SESSION over WS /api/ws/live via {cmd:'set', id, patch} (Bước 0 §5).
+// Scaffolding: sent only when wired to a control; the backend applies whatever fields it supports
+// and (ideally) replies {type:'ack', id, ok}. A backend that ignores unknown messages is harmless.
+export interface LiveCommandPatch {
+    tts?: { on?: boolean; rate?: number; engine?: string; voice?: string | number };
+    direction?: { src: string; dst: string };
+    speaker?: { name?: string; voice?: string | number };
+}
+
 // Events streamed by WS /api/ws/live (subset the UI consumes).
 export interface LiveEvent {
     type: string;
@@ -153,6 +162,11 @@ export interface LiveEvent {
     // say / speaking / spoken (TTS cues)
     seq?: number;
     lag_ms?: number;
+    // heartbeat pong + command ack (Bước 0 §4.1/§5)
+    t?: number;
+    id?: string;
+    ok?: boolean;
+    applied?: unknown;
     // error
     error?: string;
 }

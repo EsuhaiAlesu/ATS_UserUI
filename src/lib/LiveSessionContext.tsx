@@ -1,6 +1,6 @@
 import React, { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
 import { getHealth, wsUrl } from './api';
-import type { LiveConfig, LiveEvent } from './api';
+import type { LiveConfig, LiveCommandPatch, LiveEvent } from './api';
 
 // 'reconnecting' = the live WS dropped unexpectedly mid-session and we are retrying.
 // While reconnecting we KEEP the last subtitles frozen and never fall back to the demo.
@@ -83,6 +83,14 @@ interface LiveSessionValue {
     /** Take-to-safe control for the audience wall; broadcast to every window (A1.4). */
     audienceCut: AudienceCut;
     setAudienceCut: (cut: AudienceCut) => void;
+    /** Round-trip time (ms) from the live heartbeat ping/pong, or null if unmeasured (Bước 0 §4.1). */
+    rtt: number | null;
+    /**
+     * Apply a hot config patch (tts/direction/speaker) to the RUNNING session over the live socket.
+     * No-op (returns false) when there is no open session/socket — e.g. mirror windows. Idempotent;
+     * resends once if the backend does not ack within 3s, then gives up silently (Bước 0 §5).
+     */
+    sendCommand: (patch: LiveCommandPatch) => boolean;
     start: (config: LiveConfig) => void;
     stop: () => void;
 }
@@ -94,6 +102,16 @@ const MAX_LINES = 400;
 // Reconnect backoff: 1s, 2s, 4s … capped, then give up into an explicit FAULT state.
 const MAX_RECONNECT_ATTEMPTS = 8;
 const MAX_RECONNECT_DELAY_MS = 30000;
+// Heartbeat (Bước 0 §4.1): ping every 5s; escalate to reconnect only if the backend has EVER
+// ponged (pongSeenRef) AND then NO inbound frame arrives for 8s (liveness = any frame, not only pong).
+// A backend that never ponds is tolerated. HEARTBEAT_ENABLED gates the AUTO-SEND of {cmd:'ping'}:
+// keep it OFF until Bước 0 confirms the Mac backend implements {cmd:'ping'}→{type:'pong'}, so we
+// never poke a backend that might mishandle an unknown frame mid-gala. Flip on only after verifying.
+const HEARTBEAT_ENABLED = false;
+const HEARTBEAT_MS = 5000;
+const PONG_TIMEOUT_MS = 8000;
+// Live command (Bước 0 §5): resend once if no ack within 3s, then give up silently (idempotent set).
+const ACK_TIMEOUT_MS = 3000;
 
 export const LiveSessionProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
     const [backendOnline, setBackendOnline] = useState(false);
@@ -112,6 +130,7 @@ export const LiveSessionProvider: React.FC<{ children: React.ReactNode }> = ({ c
     const [contextSummary, setContextSummary] = useState('');
     const [nameFixCount, setNameFixCount] = useState(0);
     const [speakingLang, setSpeakingLang] = useState<string | null>(null);
+    const [rtt, setRtt] = useState<number | null>(null);
 
     const isPublisherRef = useRef(false);                 // this window owns the live session
     const busRef = useRef<BroadcastChannel | null>(null);
@@ -123,12 +142,40 @@ export const LiveSessionProvider: React.FC<{ children: React.ReactNode }> = ({ c
     const userStoppedRef = useRef(false);                // distinguishes intentional stop from a drop
     const attemptRef = useRef(0);                        // reconnect attempts since last good open
     const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    // Heartbeat (§4.1) + live-command ack tracking (§5).
+    const hbTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+    const pongSeenRef = useRef(false);                   // backend has replied to a ping this session
+    const lastPongAtRef = useRef(0);                     // timestamp of the last pong (or socket open)
+    const cmdSeqRef = useRef(0);                          // monotonic id for {cmd:'set'} messages
+    const pendingAcksRef = useRef<Map<string, { tries: number; timer: ReturnType<typeof setTimeout> }>>(new Map());
+    const hotPatchRef = useRef<LiveCommandPatch>({});     // cumulative hot config, re-applied after a reconnect ([6])
 
     const clearReconnect = useCallback(() => {
         if (reconnectTimerRef.current) {
             clearTimeout(reconnectTimerRef.current);
             reconnectTimerRef.current = null;
         }
+    }, []);
+
+    const clearHeartbeat = useCallback(() => {
+        if (hbTimerRef.current) {
+            clearInterval(hbTimerRef.current);
+            hbTimerRef.current = null;
+        }
+    }, []);
+
+    const clearPendingAcks = useCallback(() => {
+        pendingAcksRef.current.forEach((p) => clearTimeout(p.timer));
+        pendingAcksRef.current.clear();
+    }, []);
+
+    // Send a JSON message on the live socket ONLY if it is open. Returns whether it was sent.
+    const sendRaw = useCallback((obj: unknown): boolean => {
+        const ws = wsRef.current;
+        if (ws && ws.readyState === WebSocket.OPEN) {
+            try { ws.send(JSON.stringify(obj)); return true; } catch { /* closing */ }
+        }
+        return false;
     }, []);
 
     // Backend liveness poll drives the ONLINE/OFFLINE indicators.
@@ -276,6 +323,17 @@ export const LiveSessionProvider: React.FC<{ children: React.ReactNode }> = ({ c
             case 'said':
                 setSpeakingLang(null);
                 break;
+            // --- Bước 0 §4.1/§5: heartbeat + live-command ack ---
+            case 'pong':
+                pongSeenRef.current = true;
+                lastPongAtRef.current = Date.now();
+                if (typeof evt.t === 'number') setRtt(Math.max(0, Date.now() - evt.t));
+                break;
+            case 'ack': {
+                const p = evt.id ? pendingAcksRef.current.get(evt.id) : undefined;
+                if (p && evt.id) { clearTimeout(p.timer); pendingAcksRef.current.delete(evt.id); }
+                break;
+            }
             default:
                 break; // committed / speech_start / say … not surfaced yet
         }
@@ -294,21 +352,45 @@ export const LiveSessionProvider: React.FC<{ children: React.ReactNode }> = ({ c
         wsRef.current = ws;
 
         ws.onopen = () => {
+            if (wsRef.current !== ws) return;   // superseded before open — do nothing (defensive, [7])
             // NOTE: do NOT reset attemptRef here. A backend that accepts-then-drops
             // (crash-after-warm, OOM) would otherwise reset the backoff on every reopen and
             // spin an infinite 1s reconnect loop that never reaches the FAULT slate. Backoff
             // is reset only on a proven-healthy 'ready' event (see handleEvent).
             ws.send(JSON.stringify(config));
+            // Re-apply hot config from before a drop so a reconnect doesn't revert operator changes ([6]).
+            // (hotPatchRef stays {} until sendCommand is wired to a control, so this is inert for now.)
+            if (Object.keys(hotPatchRef.current).length) {
+                sendRaw({ cmd: 'set', id: `r${epochRef.current}`, patch: hotPatchRef.current });
+            }
+            // Each new socket must re-prove ping/pong before pong-silence is trusted ([2]) — matches start().
+            pongSeenRef.current = false;
+            lastPongAtRef.current = Date.now();
+            clearHeartbeat();
+            if (HEARTBEAT_ENABLED) {
+                hbTimerRef.current = setInterval(() => {
+                    if (wsRef.current !== ws || ws.readyState !== WebSocket.OPEN) return;
+                    // Dead-but-open detection: a pong was seen, then NO inbound frame for the timeout ([5]).
+                    if (pongSeenRef.current && Date.now() - lastPongAtRef.current > PONG_TIMEOUT_MS) {
+                        try { ws.close(); } catch { /* onclose runs the reconnect path */ }
+                        return;
+                    }
+                    sendRaw({ cmd: 'ping', t: Date.now() });
+                }, HEARTBEAT_MS);
+            }
         };
         ws.onmessage = (e) => {
+            if (wsRef.current === ws) lastPongAtRef.current = Date.now();   // any inbound frame proves liveness ([5])
             try { handleEvent(JSON.parse(e.data) as LiveEvent); } catch { /* ignore malformed frame */ }
         };
         ws.onerror = () => { /* a close event always follows; reconnect is handled there */ };
         ws.onclose = () => {
-            if (wsRef.current !== ws) return;   // superseded by a newer socket — ignore
+            if (wsRef.current !== ws) return;   // superseded by a newer socket — its heartbeat was already replaced
+            clearHeartbeat();                   // stop THIS socket's heartbeat (reconnect's onopen starts a fresh one)
             wsRef.current = null;
             setLevel(0);
             setSpeech(false);
+            setRtt(null);
 
             if (userStoppedRef.current) return; // intentional stop already moved us to 'idle'
 
@@ -326,11 +408,38 @@ export const LiveSessionProvider: React.FC<{ children: React.ReactNode }> = ({ c
                 setStatus('error');
             }
         };
-    }, [handleEvent, clearReconnect]);
+    }, [handleEvent, clearReconnect, clearHeartbeat, sendRaw]);
+
+    // Apply a hot config patch to the running session (§5). No-op without an open socket.
+    const sendCommand = useCallback((patch: LiveCommandPatch): boolean => {
+        // Remember the cumulative hot config so a reconnect re-applies it ([6]).
+        hotPatchRef.current = {
+            ...hotPatchRef.current,
+            ...(patch.tts ? { tts: { ...hotPatchRef.current.tts, ...patch.tts } } : {}),
+            ...(patch.direction ? { direction: patch.direction } : {}),
+            ...(patch.speaker ? { speaker: { ...hotPatchRef.current.speaker, ...patch.speaker } } : {}),
+        };
+        const id = `c${cmdSeqRef.current++}`;
+        const fire = () => sendRaw({ cmd: 'set', id, patch });
+        if (!fire()) return false;                       // no open socket → recorded; applies on reconnect
+        const arm = (tries: number) => {
+            const timer = setTimeout(() => {
+                if (!pendingAcksRef.current.has(id)) return;   // already acked
+                pendingAcksRef.current.delete(id);
+                if (tries < 1) { if (fire()) arm(tries + 1); }  // resend once (idempotent); silent if never acked
+            }, ACK_TIMEOUT_MS);
+            pendingAcksRef.current.set(id, { tries, timer });
+        };
+        arm(0);
+        return true;
+    }, [sendRaw]);
 
     const stop = useCallback(() => {
         userStoppedRef.current = true;
         clearReconnect();
+        clearHeartbeat();       // wsRef is nulled below, so onclose won't run — clear the heartbeat here
+        clearPendingAcks();
+        hotPatchRef.current = {};
         const ws = wsRef.current;
         wsRef.current = null;
         if (ws && ws.readyState === WebSocket.OPEN) {
@@ -341,11 +450,14 @@ export const LiveSessionProvider: React.FC<{ children: React.ReactNode }> = ({ c
         setWarming(null);
         setLevel(0);
         setSpeech(false);
+        setRtt(null);
         setHadSession(false);   // only an explicit stop allows the demo loop to run again
-    }, [clearReconnect]);
+    }, [clearReconnect, clearHeartbeat, clearPendingAcks]);
 
     const start = useCallback((config: LiveConfig) => {
         clearReconnect();
+        clearHeartbeat();
+        clearPendingAcks();
         isPublisherRef.current = true;   // this window owns the session and publishes it to mirrors
         setMirrored(false);
         if (wsRef.current) {
@@ -355,6 +467,9 @@ export const LiveSessionProvider: React.FC<{ children: React.ReactNode }> = ({ c
         }
         userStoppedRef.current = false;
         attemptRef.current = 0;
+        pongSeenRef.current = false;            // fresh session: don't trust pong-silence until a pong arrives
+        lastPongAtRef.current = Date.now();
+        hotPatchRef.current = {};               // clear hot patches from any prior session ([6])
         configRef.current = config;
         setError(null);
         setLines([]);
@@ -363,21 +478,27 @@ export const LiveSessionProvider: React.FC<{ children: React.ReactNode }> = ({ c
         setContextSummary('');
         setNameFixCount(0);
         setSpeakingLang(null);
+        setRtt(null);
         setHadSession(true);
         setEverStarted(true);   // sticky — the demo loop can never return to the wall this run
         setStatus('connecting');
         openSocket();
-    }, [openSocket, clearReconnect]);
+    }, [openSocket, clearReconnect, clearHeartbeat, clearPendingAcks]);
 
     useEffect(() => () => {
+        userStoppedRef.current = true;      // neutralize the post-unmount onclose so it can't reconnect ([1])
         clearReconnect();
-        wsRef.current?.close();
-    }, [clearReconnect]);
+        clearHeartbeat();
+        clearPendingAcks();
+        const ws = wsRef.current;
+        wsRef.current = null;               // onclose early-returns → no reconnect / setState after unmount
+        ws?.close();
+    }, [clearReconnect, clearHeartbeat, clearPendingAcks]);
 
     const value: LiveSessionValue = {
         backendOnline, status, warming, level, speech, lines, error, hadSession, everStarted,
-        timing, sourceLang, contextSummary, nameFixCount, speakingLang,
-        mirrored, audienceCut, setAudienceCut, start, stop,
+        timing, sourceLang, contextSummary, nameFixCount, speakingLang, rtt,
+        mirrored, audienceCut, setAudienceCut, sendCommand, start, stop,
     };
     return <LiveSessionContext.Provider value={value}>{children}</LiveSessionContext.Provider>;
 };
