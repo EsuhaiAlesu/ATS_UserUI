@@ -174,6 +174,7 @@ const AudioRouting: React.FC = () => {
 
     const handleStartStop = () => {
         if (active) { session.stop(); return; }
+        if (!session.backendOnline) return;   // B0-3a: cổng cứng — không tạo phiên "giả" khi chưa có backend
         const ttsBlock = buildTtsConfig(loadTtsPrefs());
         const config: LiveConfig = {
             device: 'mic',
@@ -247,7 +248,10 @@ const AudioRouting: React.FC = () => {
     const preflightPass = preflight.filter((i) => i.ok).length;
     const preflightOk = preflight.every((i) => i.ok);
     const [override, setOverride] = useState(false);
-    const canStart = preflightOk || override;
+    // B0-3a (nghiệm thu T6): "Backend online" là CỔNG CỨNG — override chỉ được bỏ qua cảnh báo
+    // thiết bị/mô hình, KHÔNG bao giờ bỏ qua việc thiếu backend (start khi offline chỉ tạo phiên
+    // "giả" rồi rơi vào FAULT). Vì thế backendOnline luôn được AND vào điều kiện bắt đầu.
+    const canStart = session.backendOnline && (preflightOk || override);
 
     // --- A3.2: Master Annunciator ---
     const master = (() => {
@@ -375,9 +379,11 @@ const AudioRouting: React.FC = () => {
                                 {session.backendOnline ? 'PROYAKU · SẴN SÀNG' : 'PROYAKU · CHỜ LÕI DỊCH'}
                             </span>
                             <span className="text-sm text-on-surface-variant max-w-md leading-relaxed">
-                                {canStart
-                                    ? 'Nhấn ● Bắt đầu ở thanh dưới để lên sóng — kết quả song ngữ sẽ hiện ngay tại đây.'
-                                    : 'Mở ⚙ Cài đặt để chọn mic & mô hình, rồi Bắt đầu.'}
+                                {!session.backendOnline
+                                    ? 'Backend (lõi dịch) chưa online — chạy backend trên Mac Studio rồi mới bắt đầu được.'
+                                    : canStart
+                                        ? 'Nhấn ● Bắt đầu ở thanh dưới để lên sóng — kết quả song ngữ sẽ hiện ngay tại đây.'
+                                        : 'Mở ⚙ Cài đặt để chọn mic & mô hình, rồi Bắt đầu.'}
                             </span>
                         </div>
                     </div>
@@ -418,7 +424,7 @@ const AudioRouting: React.FC = () => {
                         <span className="text-[10px] font-label-caps text-error leading-none">{holdPct > 0 ? `GIỮ… ${Math.round(holdPct * 100)}%` : 'DỪNG (giữ)'}</span>
                     </button>
                 ) : (
-                    <RoundBtn icon="play_arrow" label="BẮT ĐẦU" title={canStart ? 'Bắt đầu phiên dịch' : 'Chưa đạt kiểm tra — mở Cài đặt'} tone="primary" disabled={!canStart} onClick={handleStartStop} />
+                    <RoundBtn icon="play_arrow" label="BẮT ĐẦU" title={canStart ? 'Bắt đầu phiên dịch' : !session.backendOnline ? 'Backend (lõi dịch) offline — không thể bắt đầu' : 'Chưa đạt kiểm tra thiết bị — mở Cài đặt'} tone="primary" disabled={!canStart} onClick={handleStartStop} />
                 )}
 
                 {active && (
@@ -463,10 +469,18 @@ const AudioRouting: React.FC = () => {
                                     ))}
                                 </div>
                                 {!preflightOk && (
-                                    <label className="flex items-center gap-2 mt-3 font-label-caps text-label-caps text-on-surface-variant cursor-pointer">
-                                        <input type="checkbox" checked={override} onChange={(e) => setOverride(e.target.checked)} className="accent-secondary" />
-                                        Bỏ qua kiểm tra (override) — chỉ khi diễn tập
-                                    </label>
+                                    <div className="mt-3 space-y-1.5">
+                                        <label className="flex items-center gap-2 font-label-caps text-label-caps text-on-surface-variant cursor-pointer">
+                                            <input type="checkbox" checked={override} onChange={(e) => setOverride(e.target.checked)} className="accent-secondary" />
+                                            Bỏ qua kiểm tra thiết bị (override) — chỉ khi diễn tập
+                                        </label>
+                                        {!session.backendOnline && (
+                                            <div className="flex items-center gap-1.5 text-[11px] text-error">
+                                                <span className="material-symbols-outlined text-[14px]" aria-hidden="true">lock</span>
+                                                Không bỏ qua được "Backend online" — cần chạy backend mới bắt đầu.
+                                            </div>
+                                        )}
+                                    </div>
                                 )}
                             </section>
 
