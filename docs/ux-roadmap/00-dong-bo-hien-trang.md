@@ -36,7 +36,7 @@
 - Author commit: `hoangkha@esuhai.com`. Không PII/secret trong repo (mật khẩu chỉ ở Railway Variables).
 
 ## ⑤ NHẬT KÝ (mới nhất trên cùng)
-- **2026-07-19 (chiều)** — Audit UX trung thực: **6/10** (đẹp da chưa đẹp xương — nav rối, vàng bôi khắp, vết prototype). Đã sửa **quick win** (xóa footer giả + link chết · đổi "HanDichThuat"→"Lõi dịch PROYAKU" · xóa nút chết · fix bug bo góc/pill · làm mềm góc). Thêm **doc 21 — đánh giá kỹ thuật** (≈3/5, lõi AI chưa kiểm chứng, khoá sau Bước 0). Còn chờ duyệt: nước đi lớn (khung điều hướng #1 · kỷ luật màu · khoảnh khắc lên-sóng).
+- **2026-07-19 (chiều)** — Audit UX trung thực: **6/10** (đẹp da chưa đẹp xương — nav rối, vàng bôi khắp, vết prototype). Đã sửa **quick win** (xóa footer giả + link chết · đổi "HanDichThuat"→"Lõi dịch PROYAKU" · xóa nút chết · fix bug bo góc/pill · làm mềm góc). Thêm **doc 21** (đánh giá kỹ thuật ≈3/5, khoá sau Bước 0), **22** (spec build khung điều hướng), **23** (đọc số Bước 0 & cây quyết định), **24** (phân vai & phối hợp đội). Còn chờ duyệt: nước đi lớn (khung điều hướng #1 · kỷ luật màu · khoảnh khắc lên-sóng) + chốt 1 người push.
 - **2026-07-19 (sáng)** — Theme vàng–đen **build + LIVE**; đổi domain `proyaku.up.railway.app`; thêm cổng login (`server.js`); thêm doc 19 (IA), 20 (Mission Control), 00 (đồng bộ). Phát hiện: Railway không tự deploy (cần Redeploy tay); npm-ci lock đã fix (HoangKha `96ae673`).
 - **2026-07-18** — A1–A4 + `/prep` Prep Desk + audit (15) + playbook (16) + runbook Bước 0 (17) & A5 (18); reskin KIM SẮC (docs 11/12).
 
