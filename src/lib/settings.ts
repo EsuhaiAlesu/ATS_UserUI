@@ -43,7 +43,7 @@ export function eventName(): string {
 }
 
 // All Proyaku localStorage keys — used by the Data section to export / clear everything at once.
-export const LOCAL_KEYS = ['proyaku_settings', 'proyaku_tts', 'proyaku_prep', 'proyaku_capscale', 'proyaku_speaker'];
+export const LOCAL_KEYS = ['proyaku_settings', 'proyaku_tts', 'proyaku_prep', 'proyaku_capscale', 'proyaku_speaker', 'proyaku_schedule'];
 
 export function exportLocalData(): string {
     const out: Record<string, unknown> = {};

@@ -9,6 +9,7 @@ import ScriptPrep from './pages/ScriptPrep'
 import PrepDesk from './pages/PrepDesk'
 import Settings from './pages/Settings'
 import IncidentReport from './pages/IncidentReport'
+import SchedulePlanner from './pages/SchedulePlanner'
 import OperatorLayout from './components/OperatorLayout'
 import SplashScreen from './components/SplashScreen'
 import Toaster from './components/Toaster'
@@ -41,6 +42,7 @@ const App: React.FC = () => {
               <Route path="/voices" element={<VoiceStudio />} />
               <Route path="/settings" element={<Settings />} />
               <Route path="/report" element={<IncidentReport />} />
+              <Route path="/schedule" element={<SchedulePlanner />} />
             </Route>
 
             {/* Audience / ceremonial surfaces are full-screen — no operator chrome. */}
