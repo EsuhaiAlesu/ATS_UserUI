@@ -78,32 +78,49 @@ const Ring: React.FC<{ pct: number; size?: number }> = ({ pct, size = 44 }) => {
 };
 
 const WEIGHT_LABEL: Record<Weight, string> = { blocker: 'Bắt buộc', important: 'Quan trọng', nice: 'Nên có' };
+// Ưu tiên (weight) → eyebrow ĐƠN SẮC: việc quan trọng đọc đậm hơn, KHÔNG thêm hue mới nên không đụng màu trạng thái.
+const WEIGHT_EYEBROW: Record<Weight, string> = {
+    blocker: 'text-on-surface-variant',
+    important: 'text-on-surface-variant/70',
+    nice: 'text-on-surface-variant/40',
+};
 
-// A refined, tappable readiness card (Mercury aesthetic): calm surface, clear status, subtle
-// "chi tiết →" reveal on hover. Clicking opens the detail drawer. Module-scope for stable identity.
-const SignalCard: React.FC<{ s: Signal; attest?: Attest; onOpen: () => void; index: number }> = ({ s, attest, onOpen, index }) => {
+// Thẻ con (readiness card) — hệ thống thị giác chặt chẽ:
+//   • ĐỘ CAO NỀN = cấp bậc + đang-chọn: thường nằm trên surface-container; khi drawer của nó mở thì
+//     NÂNG lên surface-container-high + viền vàng (đúng ngôn ngữ "bạn đang ở đây" như menu cha),
+//     nên luôn phân biệt được cha↔con và active↔thường.
+//   • MÀU = CHỈ trạng thái: thanh trái + khối icon + dòng phụ dùng chung một dải
+//     (vàng = xong · đỏ = cần xử lý · trung tính = chưa đo). Ưu tiên là eyebrow đơn sắc.
+//   • CHUYỂN ĐỘNG = một ease mượt khi rê/chọn (đã chặn cho prefers-reduced-motion).
+// Module-scope để input giữ được focus.
+const SignalCard: React.FC<{ s: Signal; attest?: Attest; onOpen: () => void; index: number; active: boolean }> = ({ s, attest, onOpen, index, active }) => {
     const st = STATE_ICON[s.state];
     const iconBg = s.state === 'ok' ? 'bg-secondary/15' : s.state === 'fail' ? 'bg-error/15' : 'bg-surface-container-high';
     const subCls = s.state === 'ok' ? 'text-secondary' : s.state === 'fail' ? 'text-error' : 'text-on-surface-variant';
+    const rail = active ? 'bg-secondary' : s.state === 'ok' ? 'bg-secondary/60' : s.state === 'fail' ? 'bg-error/70' : 'bg-outline-variant';
     return (
-        <button type="button" onClick={onOpen}
-            className="card-in group text-left w-full bg-surface-container border border-outline-variant rounded-2xl p-5 flex flex-col gap-4 hover:border-secondary/50 hover:bg-surface-container-high hover:-translate-y-0.5 hover:shadow-lg hover:shadow-black/25 transition-all duration-200"
+        <button type="button" onClick={onOpen} aria-pressed={active}
+            className={`card-in group relative overflow-hidden text-left w-full rounded-2xl p-5 pl-6 flex flex-col gap-3.5 border transition-all duration-200 ease-out motion-reduce:transition-none ${active
+                ? 'bg-surface-container-high border-secondary shadow-lg shadow-secondary/10'
+                : 'bg-surface-container border-outline-variant hover:border-secondary/40 hover:bg-surface-container-high hover:-translate-y-0.5 hover:shadow-lg hover:shadow-black/25 motion-reduce:hover:translate-y-0'}`}
             style={{ animationDelay: `${Math.min(index * 40, 400)}ms` }}>
+            {/* Thanh trái = trạng thái (hoặc vàng khi đang mở) */}
+            <span className={`absolute left-0 top-0 bottom-0 w-[3px] transition-colors ${rail}`} aria-hidden="true"></span>
             <div className="flex items-start justify-between gap-2">
-                <span className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${iconBg}`}>
+                <span className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 transition-colors ${iconBg}`}>
                     <span className={`material-symbols-outlined ${st.cls}`} style={{ fontSize: '22px' }} aria-hidden="true">{st.icon}</span>
                 </span>
                 <div className="flex items-center gap-1.5 shrink-0">
-                    {s.kind === 'attest' && <span className="material-symbols-outlined text-[16px] text-on-surface-variant/50" title="Người ký" aria-hidden="true">stylus_note</span>}
-                    {s.weight === 'blocker' && <span className="font-label-caps text-[9px] px-2 py-0.5 rounded-full bg-error/15 text-error">Bắt buộc</span>}
+                    {s.kind === 'attest' && <span className="material-symbols-outlined text-[15px] text-on-surface-variant/45" title="Người ký" aria-hidden="true">stylus_note</span>}
+                    <span className={`uppercase font-label-caps text-[9px] tracking-[0.14em] ${WEIGHT_EYEBROW[s.weight]}`}>{WEIGHT_LABEL[s.weight]}</span>
                 </div>
             </div>
             <div className="flex-1">
                 <div className="font-semibold text-on-surface text-[15px] leading-snug">{s.label}</div>
-                <div className={`text-xs mt-1.5 font-medium ${subCls}`}>{st.title}{s.kind === 'attest' && attest ? ` · ${attest.by}` : ''}</div>
+                <div className={`text-[13px] mt-1.5 font-medium ${subCls}`}>{st.title}{s.kind === 'attest' && attest ? ` · ${attest.by}` : ''}</div>
             </div>
-            <div className="flex items-center gap-1 text-xs text-on-surface-variant/70 group-hover:text-secondary transition-colors">
-                Chi tiết<span className="material-symbols-outlined text-[15px] transition-transform group-hover:translate-x-0.5" aria-hidden="true">arrow_forward</span>
+            <div className={`flex items-center gap-1 text-xs transition-colors ${active ? 'text-secondary font-medium' : 'text-on-surface-variant/70 group-hover:text-secondary'}`}>
+                {active ? 'Đang mở' : 'Chi tiết'}<span className={`material-symbols-outlined text-[15px] transition-transform ${active ? '' : 'group-hover:translate-x-0.5'}`} aria-hidden="true">arrow_forward</span>
             </div>
         </button>
     );
@@ -116,6 +133,7 @@ const SignalDrawer: React.FC<{
     onSignChange: (v: string) => void; onSign: () => void; onClear: () => void; onClose: () => void;
 }> = ({ s, attest, signValue, shown, onSignChange, onSign, onClear, onClose }) => {
     const st = STATE_ICON[s.state];
+    const iconBg = s.state === 'ok' ? 'bg-secondary/15' : s.state === 'fail' ? 'bg-error/15' : 'bg-surface-container-high';
     const warn = signedBeforeRehearsal(attest);
     const chip = 'px-2.5 py-1 rounded-full font-label-caps text-label-caps';
     return (
@@ -123,10 +141,14 @@ const SignalDrawer: React.FC<{
             <div className={`absolute inset-0 bg-background/50 backdrop-blur-[1px] z-30 transition-opacity duration-300 ${shown ? 'opacity-100' : 'opacity-0'}`} onClick={onClose}></div>
             <aside style={{ transitionTimingFunction: 'cubic-bezier(0.16,1,0.3,1)' }}
                 className={`absolute top-0 right-0 h-full w-full max-w-[460px] bg-surface-container-lowest border-l border-outline-variant z-40 flex flex-col shadow-2xl transition-transform duration-300 will-change-transform ${shown ? 'translate-x-0' : 'translate-x-full'}`}>
+                {/* Thanh trạng thái mép trái drawer — cùng ngôn ngữ với thẻ */}
+                <span className={`absolute left-0 top-0 bottom-0 w-[3px] z-10 ${s.state === 'ok' ? 'bg-secondary' : s.state === 'fail' ? 'bg-error/80' : 'bg-outline-variant'}`} aria-hidden="true"></span>
                 <div className="shrink-0 flex items-center gap-3 px-5 h-16 border-b border-outline-variant">
-                    <span className={`material-symbols-outlined ${st.cls}`} aria-hidden="true">{st.icon}</span>
-                    <span className="font-semibold text-on-surface flex-1 leading-snug">{s.label}</span>
-                    <button onClick={onClose} title="Đóng" className="shrink-0 w-9 h-9 rounded-full flex items-center justify-center text-on-surface-variant hover:text-on-surface hover:bg-surface-container"><span className="material-symbols-outlined" aria-hidden="true">close</span></button>
+                    <span className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${iconBg}`}>
+                        <span className={`material-symbols-outlined ${st.cls}`} style={{ fontSize: '22px' }} aria-hidden="true">{st.icon}</span>
+                    </span>
+                    <span className="font-semibold text-on-surface text-[15px] flex-1 leading-snug">{s.label}</span>
+                    <button onClick={onClose} title="Đóng" className="shrink-0 w-9 h-9 rounded-full flex items-center justify-center text-on-surface-variant hover:text-on-surface hover:bg-surface-container transition-colors"><span className="material-symbols-outlined" aria-hidden="true">close</span></button>
                 </div>
                 <div className="flex-1 overflow-y-auto p-5 space-y-5">
                     <div className="flex flex-wrap items-center gap-2">
@@ -430,14 +452,18 @@ const PrepDesk: React.FC = () => {
             <div className="flex-1 flex min-h-0 gap-5 p-5 md:p-8 overflow-hidden">
                 {/* CỘT 1 — menu pha: 3 ô chia đều chiều cao; active = viền + màu + icon + font to hơn */}
                 <aside className="w-60 xl:w-72 shrink-0 flex flex-col gap-3">
-                    {PHASES.map((ph) => {
+                    {PHASES.map((ph, pi) => {
                         const c = phaseCount(ph.key);
                         const activeP = selPhase === ph.key;
                         return (
-                            <button key={ph.key} onClick={() => setSelPhase(ph.key)}
-                                className={`flex-1 flex flex-col justify-center gap-3 rounded-2xl border-2 p-5 text-left transition-all duration-200 ${activeP ? 'border-secondary bg-secondary/10 shadow-lg shadow-black/20' : 'border-outline-variant hover:border-primary/50 hover:bg-surface-container'}`}>
+                            <button key={ph.key} onClick={() => setSelPhase(ph.key)} aria-pressed={activeP}
+                                className={`group relative overflow-hidden flex-1 flex flex-col justify-center gap-3 rounded-2xl border p-5 pl-6 text-left transition-all duration-200 ease-out motion-reduce:transition-none ${activeP ? 'bg-surface-container-high border-secondary/70 shadow-lg shadow-secondary/10' : 'bg-transparent border-outline-variant hover:bg-surface-container hover:border-outline'}`}>
+                                {/* Thanh vàng trái = "bạn đang ở đây" (cùng ngôn ngữ với thẻ con đang mở) */}
+                                <span className={`absolute left-0 top-0 bottom-0 w-[3px] transition-all duration-200 ${activeP ? 'bg-secondary' : 'bg-transparent'}`} aria-hidden="true"></span>
+                                {/* Số thứ tự — các pha là một chuỗi thật (trước → trong → sau sự kiện) */}
+                                <span className={`absolute top-4 right-5 font-label-caps text-[11px] tracking-[0.2em] tabular-nums transition-colors ${activeP ? 'text-secondary/70' : 'text-on-surface-variant/30'}`} aria-hidden="true">{`0${pi + 1}`}</span>
                                 <div className="flex items-center gap-3">
-                                    <span className={`w-11 h-11 rounded-xl flex items-center justify-center shrink-0 transition-colors ${activeP ? 'bg-secondary text-on-secondary' : 'bg-surface-container-high text-on-surface-variant'}`}>
+                                    <span className={`w-11 h-11 rounded-xl flex items-center justify-center shrink-0 transition-colors ${activeP ? 'bg-secondary text-on-secondary shadow-md shadow-secondary/25' : 'bg-surface-container-high text-on-surface-variant group-hover:text-on-surface'}`}>
                                         <span className="material-symbols-outlined" style={{ fontSize: '24px' }} aria-hidden="true">{ph.icon}</span>
                                     </span>
                                     <div className="min-w-0">
@@ -446,7 +472,7 @@ const PrepDesk: React.FC = () => {
                                     </div>
                                 </div>
                                 <div className="h-1.5 rounded-full bg-surface-container-high overflow-hidden">
-                                    <div className={`h-full rounded-full transition-all duration-500 ${activeP ? 'bg-secondary' : 'bg-outline/50'}`} style={{ width: `${c.pct}%` }}></div>
+                                    <div className={`h-full rounded-full transition-all duration-500 ${activeP ? 'bg-secondary' : 'bg-outline/40 group-hover:bg-outline/60'}`} style={{ width: `${c.pct}%` }}></div>
                                 </div>
                             </button>
                         );
@@ -488,7 +514,7 @@ const PrepDesk: React.FC = () => {
                         {/* READINESS CARDS (Mercury) — bấm thẻ mở panel chi tiết (Raycast) */}
                         <div className="grid grid-cols-1 xl:grid-cols-2 2xl:grid-cols-3 gap-4">
                             {shownSignals.map((s, i) => (
-                                <SignalCard key={s.id} s={s} attest={prep.attest[s.id]} index={i} onOpen={() => openCard(s.id)} />
+                                <SignalCard key={s.id} s={s} attest={prep.attest[s.id]} index={i} active={openId === s.id} onOpen={() => openCard(s.id)} />
                             ))}
                         </div>
 
