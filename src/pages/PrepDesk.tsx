@@ -41,21 +41,27 @@ const INITIAL: Fetched = {
     script: null, scriptErr: false, inputs: null, inputsErr: false, outputs: null, outputsErr: false, loading: true,
 };
 
-const WEIGHT_LABEL: Record<Weight, string> = { blocker: 'CHẶN', important: 'QUAN TRỌNG', nice: 'NÊN CÓ' };
 const fmtTs = (ts: string) => ts.replace('T', ' ').slice(0, 16);
 
-const CHIP_MAP: Record<SigState, { cls: string; txt: string }> = {
-    ok: { cls: 'bg-secondary text-on-secondary', txt: '✓ ĐẠT' },
-    fail: { cls: 'border border-error text-error', txt: '✗ CHƯA' },
-    unknown: { cls: 'border border-outline-variant text-on-surface-variant', txt: '— ?' },
+// Status → one clean icon (no jargon text) — friendly & scannable.
+const STATE_ICON: Record<SigState, { icon: string; cls: string; title: string }> = {
+    ok: { icon: 'check_circle', cls: 'text-secondary', title: 'Đã xong' },
+    fail: { icon: 'cancel', cls: 'text-error', title: 'Chưa xong' },
+    unknown: { icon: 'do_not_disturb_on', cls: 'text-on-surface-variant', title: 'Chưa đo được' },
 };
 
-// Module-scope so their function identity is STABLE across PrepDesk re-renders. If SignalRow were
-// declared inside PrepDesk, typing in the "Tên người ký" input would setState → re-render → a new
-// SignalRow type → React remounts the subtree → the input loses focus after every keystroke.
-const Chip: React.FC<{ state: SigState }> = ({ state }) => (
-    <span className={`px-2 py-0.5 rounded-DEFAULT font-label-caps text-label-caps ${CHIP_MAP[state].cls}`}>{CHIP_MAP[state].txt}</span>
-);
+// Friendly verdict wording (lead with plain Vietnamese, not GO/NO-GO jargon).
+const VERDICT_UI: Record<'GO' | 'DEGRADED' | 'NO-GO', { word: string; icon: string; box: string }> = {
+    'GO': { word: 'SẴN SÀNG LÊN SÓNG', icon: 'verified', box: 'bg-secondary text-on-secondary' },
+    'DEGRADED': { word: 'SẴN SÀNG HẠN CHẾ', icon: 'warning', box: 'border-2 border-primary text-primary' },
+    'NO-GO': { word: 'CHƯA SẴN SÀNG', icon: 'block', box: 'border-2 border-error text-error' },
+};
+
+const PHASES: { key: 'pre' | 'in' | 'post'; name: string; icon: string }[] = [
+    { key: 'pre', name: 'Chuẩn bị', icon: 'fact_check' },
+    { key: 'in', name: 'Vận hành', icon: 'sensors' },
+    { key: 'post', name: 'Sau sự kiện', icon: 'history' },
+];
 
 const Ring: React.FC<{ pct: number; size?: number }> = ({ pct, size = 44 }) => {
     const r = (size - 6) / 2, c = 2 * Math.PI * r;
@@ -69,38 +75,43 @@ const Ring: React.FC<{ pct: number; size?: number }> = ({ pct, size = 44 }) => {
     );
 };
 
+// Module-scope so its identity is STABLE across PrepDesk re-renders — otherwise typing in the
+// "Tên người ký" input would remount the row and drop focus after each keystroke.
 const SignalRow: React.FC<{
     s: Signal; attest?: Attest; signValue: string;
     onSignChange: (v: string) => void; onSign: () => void; onClear: () => void;
 }> = ({ s, attest, signValue, onSignChange, onSign, onClear }) => {
     const warn = signedBeforeRehearsal(attest);
+    const st = STATE_ICON[s.state];
     return (
-        <div className="border-t border-outline-variant py-3 flex flex-col gap-1.5">
-            <div className="flex items-center gap-3 flex-wrap">
-                <Chip state={s.state} />
-                <span className="font-medium text-on-surface">{s.label}</span>
-                <span className={`font-label-caps text-label-caps px-1.5 py-0.5 rounded-DEFAULT ${s.weight === 'blocker' ? 'text-error' : 'text-on-surface-variant'}`}>{WEIGHT_LABEL[s.weight]}</span>
-                <span className="font-label-caps text-label-caps px-1.5 py-0.5 rounded-DEFAULT border border-outline-variant text-on-surface-variant">{s.kind === 'attest' ? 'KÝ TAY' : 'ĐO ĐƯỢC'}</span>
-                {s.to && <Link to={s.to} className="ml-auto font-label-caps text-label-caps text-primary hover:opacity-70">{s.toLabel ?? 'Mở'} ↗</Link>}
-            </div>
-            <div className="text-sm text-on-surface-variant pl-1">{s.detail}</div>
-            {s.kind === 'attest' && (
-                <div className="flex items-center gap-2 flex-wrap pl-1">
-                    {attest ? (
-                        <>
-                            <span className="text-sm text-secondary">✓ Đã ký: <b>{attest.by}</b> · {fmtTs(attest.ts)}</span>
-                            {warn && <span className="text-sm text-error">⚠ ký TRƯỚC ngày tổng duyệt {REHEARSAL_DATE}</span>}
-                            <button onClick={onClear} className="text-sm text-on-surface-variant hover:text-error underline">Rút</button>
-                        </>
-                    ) : (
-                        <>
-                            <input value={signValue} onChange={(e) => onSignChange(e.target.value)}
-                                placeholder="Tên người ký" className="bg-surface text-on-surface border border-outline-variant rounded-DEFAULT px-2 py-1 text-sm w-44" />
-                            <button onClick={onSign} className="border border-secondary text-secondary px-3 py-1 text-sm rounded-DEFAULT hover:opacity-80">Ký xác nhận</button>
-                        </>
-                    )}
+        <div className="flex items-start gap-3 py-3 border-t border-outline-variant/50 first:border-t-0">
+            <span className={`material-symbols-outlined shrink-0 ${st.cls}`} title={st.title} aria-hidden="true">{st.icon}</span>
+            <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2">
+                    {s.weight === 'blocker' && <span className="w-1.5 h-1.5 rounded-full bg-error shrink-0" title="Bắt buộc"></span>}
+                    <span className="font-medium text-on-surface">{s.label}</span>
+                    <span className="material-symbols-outlined text-[15px] text-on-surface-variant/60 shrink-0" title={s.kind === 'attest' ? 'Người xác nhận' : 'Máy tự đo'} aria-hidden="true">{s.kind === 'attest' ? 'stylus_note' : 'speed'}</span>
                 </div>
-            )}
+                {s.state !== 'ok' && <div className="text-sm text-on-surface-variant mt-0.5">{s.detail}</div>}
+                {s.kind === 'attest' && (
+                    <div className="flex items-center gap-2 flex-wrap mt-2">
+                        {attest ? (
+                            <>
+                                <span className="text-xs text-secondary">✓ {attest.by} · {fmtTs(attest.ts)}</span>
+                                {warn && <span className="text-xs text-error">⚠ ký trước tổng duyệt</span>}
+                                <button onClick={onClear} className="text-xs text-on-surface-variant hover:text-error underline">Rút</button>
+                            </>
+                        ) : (
+                            <>
+                                <input value={signValue} onChange={(e) => onSignChange(e.target.value)}
+                                    placeholder="Tên người ký" className="bg-surface text-on-surface border border-outline-variant rounded-DEFAULT px-2.5 py-1 text-sm w-40" />
+                                <button onClick={onSign} className="border border-secondary text-secondary px-3 py-1 text-sm rounded-DEFAULT hover:opacity-80">Ký</button>
+                            </>
+                        )}
+                    </div>
+                )}
+            </div>
+            {s.to && <Link to={s.to} title={s.toLabel ?? 'Mở'} className="shrink-0 w-8 h-8 flex items-center justify-center rounded-full text-primary hover:bg-surface-container"><span className="material-symbols-outlined text-[20px]" aria-hidden="true">arrow_forward</span></Link>}
         </div>
     );
 };
@@ -299,8 +310,6 @@ const PrepDesk: React.FC = () => {
     const importants = preSignals.filter((s) => s.weight === 'important');
     const blockersOk = blockers.filter((s) => s.state === 'ok').length;
     const importantsOk = importants.filter((s) => s.state === 'ok').length;
-    // Scope the "chưa ký" counter to PRE attests — the verdict strip is the pre-event go/no-go.
-    const unsigned = preSignals.filter((s) => s.kind === 'attest' && s.state !== 'ok').length;
 
     const verdict: 'GO' | 'NO-GO' | 'DEGRADED' =
         blockersOk < blockers.length ? 'NO-GO' : (importantsOk < importants.length ? 'DEGRADED' : 'GO');
@@ -324,127 +333,116 @@ const PrepDesk: React.FC = () => {
         URL.revokeObjectURL(url);
     };
 
-    const verdictBox: Record<typeof verdict, string> = {
-        'GO': 'bg-secondary text-on-secondary', 'NO-GO': 'border-2 border-error text-error', 'DEGRADED': 'border-2 border-primary text-primary',
-    };
     const dRehearsal = daysUntil(REHEARSAL_DATE), dGala = daysUntil(GALA_DATE);
     const shownSignals = signals.filter((s) => s.phase === selPhase);
+    const openPre = preSignals.filter((s) => s.state !== 'ok').length;
+    const v = VERDICT_UI[verdict];
+    const blockPct = blockers.length ? Math.round((blockersOk / blockers.length) * 100) : 0;
 
     return (
         <div className="h-full flex flex-col bg-background text-on-background overflow-hidden">
             <PageHeader
                 icon="dashboard"
                 title="Bảng chỉ huy"
-                subtitle={`Tổng duyệt ${dRehearsal >= 0 ? `còn ${dRehearsal}n` : 'đã qua'} · Gala ${dGala >= 0 ? `còn ${dGala}n` : 'đã qua'}${data.health ? ` · ${data.health.blocks} khối` : ''}`}
+                subtitle={`Tổng duyệt ${dRehearsal >= 0 ? `còn ${dRehearsal}n` : 'đã qua'} · Gala ${dGala >= 0 ? `còn ${dGala}n` : 'đã qua'}`}
             >
                 <button onClick={() => setTick((t) => t + 1)} disabled={data.loading} className="border border-outline-variant text-on-surface-variant px-3 py-1.5 text-sm rounded-DEFAULT hover:text-primary hover:border-primary disabled:opacity-40">{data.loading ? 'Đang đo…' : 'Đo lại'}</button>
             </PageHeader>
 
             <div className="flex-1 overflow-y-auto">
-            <main className="max-w-5xl mx-auto px-container-padding py-8 space-y-6">
-                {/* VERDICT STRIP */}
-                <div className={`rounded-DEFAULT px-6 py-5 flex items-center gap-6 ${verdictBox[verdict]}`}>
-                    <Ring pct={blockers.length ? Math.round((blockersOk / blockers.length) * 100) : 0} size={64} />
-                    <div className="flex-1">
-                        <div className="text-3xl font-bold tracking-tight">{verdict === 'GO' ? 'ĐƯỢC PHÉP LIVE — GO' : verdict === 'DEGRADED' ? 'GO HẠN CHẾ (DEGRADED)' : 'CHƯA ĐƯỢC — NO-GO'}</div>
-                        <div className="text-sm mt-1 opacity-90">
-                            {blockersOk}/{blockers.length} mục CHẶN đạt · {importantsOk}/{importants.length} quan trọng đạt · {unsigned} mục ký-tay chưa ký
-                        </div>
-                        {nextBlocker && <div className="text-sm mt-1 opacity-90">Việc chặn kế tiếp: <b>{nextBlocker.label}</b></div>}
-                    </div>
-                    {nextBlocker?.to
-                        ? <Link to={nextBlocker.to} className="bg-background/20 border border-current px-4 py-2 rounded-DEFAULT font-label-caps text-label-caps hover:opacity-80">{nextBlocker.toLabel ?? 'Xử lý'} →</Link>
-                        : verdict === 'GO'
-                            ? <Link to="/audio" className="bg-background/20 border border-current px-4 py-2 rounded-DEFAULT font-label-caps text-label-caps hover:opacity-80">VÀO BÀN ĐIỀU KHIỂN →</Link>
-                            : null}
-                </div>
-
-                <p className="text-sm text-on-surface-variant border border-outline-variant rounded-DEFAULT px-4 py-3">
-                    ⓘ PROYAKU là lớp <b className="text-secondary">PHỤ ĐỀ-LÀ-CHÍNH</b>, có <b className="text-secondary">phiên dịch viên NGƯỜI</b> đứng cạnh — không phải hệ tự động hoàn toàn. Mỗi tín hiệu ghi rõ <b>ĐO ĐƯỢC</b> (máy tự tính) hay <b>KÝ TAY</b> (người xác nhận, lưu cục bộ máy này). Mục ký-tay <b>không bao giờ</b> tự xanh.
-                </p>
-
-                {/* STEPPER */}
-                <div className="flex items-stretch gap-3">
-                    {(['pre', 'in', 'post'] as Phase[]).map((p) => {
-                        const c = phaseCount(p);
-                        const label = p === 'pre' ? 'CHUẨN BỊ' : p === 'in' ? 'VẬN HÀNH' : 'SAU SỰ KIỆN';
-                        const active = selPhase === p;
-                        return (
-                            <button key={p} onClick={() => setSelPhase(p)}
-                                className={`flex-1 flex items-center gap-3 px-4 py-3 rounded-DEFAULT border ${active ? 'border-secondary bg-surface-container' : 'border-outline-variant hover:border-primary'}`}>
-                                <Ring pct={c.pct} />
-                                <div className="text-left">
-                                    <div className={`font-label-caps text-label-caps ${active ? 'text-secondary' : 'text-on-surface'}`}>{label}</div>
-                                    <div className="text-sm text-on-surface-variant">{c.ok}/{c.total} đạt{c.openBlockers > 0 ? ` · ${c.openBlockers} chặn` : ''}</div>
-                                </div>
-                            </button>
-                        );
-                    })}
-                </div>
-
-                {/* PHASE DETAIL */}
-                {selPhase === 'in' && (
-                    <div className="flex flex-wrap gap-3">
-                        <Link to="/audio" className="flex-1 min-w-[220px] bg-primary text-on-primary rounded-DEFAULT px-5 py-4 font-label-caps text-label-caps text-center hover:opacity-90">CONSOLE VẬN HÀNH — START/STOP</Link>
-                        <Link to="/stream" className="flex-1 min-w-[220px] bg-secondary text-on-secondary rounded-DEFAULT px-5 py-4 font-label-caps text-label-caps text-center hover:opacity-90">TƯỜNG PHỤ ĐỀ KHÁN GIẢ</Link>
-                        <Link to="/reveal" className="flex-1 min-w-[160px] border border-outline-variant text-on-surface-variant rounded-DEFAULT px-5 py-4 font-label-caps text-label-caps text-center hover:border-primary">KHOẢNH KHẮC REVEAL</Link>
-                    </div>
-                )}
-
-                <div>
-                    {shownSignals.map((s) => (
-                        <SignalRow key={s.id} s={s} attest={prep.attest[s.id]}
-                            signValue={signName[s.id] ?? ''}
-                            onSignChange={(v) => setSignName((m) => ({ ...m, [s.id]: v }))}
-                            onSign={() => doSign(s.id)} onClear={() => doClear(s.id)} />
-                    ))}
-                </div>
-
-                {selPhase === 'pre' && (
-                    <div className="border border-outline-variant rounded-DEFAULT bg-surface-container-lowest px-4 py-3 text-sm text-on-surface-variant space-y-1">
-                        <div className="font-label-caps text-label-caps text-secondary">LƯỚI AN TOÀN — nếu GÃY thì LÀM GÌ</div>
-                        <div>• Mac chính OOM/quá nhiệt → gạt <b>A/B feed LED</b> sang <b>Mac #2</b> đã ấm.</div>
-                        <div>• Chưa kịp chuyển máy → <b>PDV người cầm mic</b>, phụ đề <b>đóng băng dòng cuối</b> (freeze), <b>KHÔNG chiếu demo</b>.</div>
-                        <div>• Mất tín hiệu mic → cảnh báo NO-SIGNAL ở /audio; kiểm mic sân khấu, sẵn sàng cắt sang người.</div>
-                    </div>
-                )}
-
-                {selPhase === 'post' && (
-                    <div className="space-y-4">
-                        <div className="border border-outline-variant rounded-DEFAULT px-4 py-3 text-sm text-on-surface-variant">
-                            ⓘ <b>Không</b> có phát lại / transcript / thống kê phiên tự động (API không có endpoint log). Muốn có bản ghi âm phải bật <b>record</b> trên /audio <b>trước</b> khi START. Dưới đây là những gì làm THẬT được:
-                        </div>
-                        <div className="flex flex-wrap items-center gap-3">
-                            <button onClick={exportKb} disabled={!data.glossary || !data.script}
-                                className="bg-secondary text-on-secondary px-4 py-2 rounded-DEFAULT font-label-caps text-label-caps hover:opacity-80 disabled:opacity-40">⤓ Export gói tri thức (as-run JSON)</button>
-                            {(!data.glossary || !data.script) && <span className="text-sm text-on-surface-variant">cần backend để đọc glossary+script</span>}
-                            <Link to="/glossary" className="border border-outline-variant text-on-surface-variant px-3 py-2 text-sm rounded-DEFAULT hover:border-primary">Cập nhật từ điển ↗</Link>
-                            <Link to="/script" className="border border-outline-variant text-on-surface-variant px-3 py-2 text-sm rounded-DEFAULT hover:border-primary">Cập nhật kịch bản ↗</Link>
-                        </div>
-                        <div>
-                            <div className="font-label-caps text-label-caps text-on-surface-variant mb-2">Nhật ký "sự cố đã thấy" (nền cho lần sau)</div>
-                            <div className="flex gap-2">
-                                <input value={incident} onChange={(e) => setIncident(e.target.value)} placeholder="vd: 'Kaizen' bị nghe thành 'kaisen' lúc vinh danh…"
-                                    className="flex-1 bg-surface text-on-surface border border-outline-variant rounded-DEFAULT px-3 py-2 text-sm" />
-                                <button onClick={() => { setPrepState(addIncident(incident)); setIncident(''); }} disabled={!incident.trim()}
-                                    className="border border-outline-variant text-on-surface-variant px-3 py-2 text-sm rounded-DEFAULT hover:border-primary disabled:opacity-40">Ghi</button>
+                <main className="max-w-3xl mx-auto px-6 py-8 space-y-6">
+                    {/* VERDICT — friendly hero */}
+                    <div className={`rounded-xl px-6 py-5 flex items-center gap-5 ${v.box}`}>
+                        <Ring pct={blockPct} size={68} />
+                        <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2">
+                                <span className="material-symbols-outlined" aria-hidden="true">{v.icon}</span>
+                                <span className="text-xl md:text-2xl font-bold tracking-tight">{v.word}</span>
                             </div>
-                            <ul className="mt-2 space-y-1">
-                                {prep.incidents.map((it, i) => (
-                                    <li key={i} className="text-sm text-on-surface-variant flex items-start gap-2">
-                                        <button onClick={() => setPrepState(removeIncident(i))} className="text-error hover:opacity-70">✕</button>
-                                        <span>{it}</span>
-                                    </li>
-                                ))}
-                            </ul>
+                            <div className="text-sm mt-1 opacity-90">
+                                {verdict === 'GO'
+                                    ? 'Mọi hạng mục bắt buộc đã hoàn tất.'
+                                    : `Còn ${openPre} việc cần hoàn tất${nextBlocker ? ` — kế tiếp: ${nextBlocker.label}` : ''}.`}
+                            </div>
                         </div>
-                        <label className="flex items-center gap-2 text-sm text-on-surface-variant">
-                            <input type="checkbox" checked={!!prep.debrief['done']} onChange={(e) => setPrepState(setDebrief('done', e.target.checked))} />
-                            Đã họp rút kinh nghiệm & đưa thay đổi vào glossary/script cho sự kiện kế
-                        </label>
+                        {nextBlocker?.to
+                            ? <Link to={nextBlocker.to} className="shrink-0 flex items-center gap-1.5 bg-background/20 border border-current px-4 py-2 rounded-full font-label-caps text-label-caps hover:opacity-80">{nextBlocker.toLabel ?? 'Xử lý'}<span className="material-symbols-outlined text-[18px]" aria-hidden="true">arrow_forward</span></Link>
+                            : verdict === 'GO'
+                                ? <Link to="/audio" className="shrink-0 flex items-center gap-1.5 bg-background/20 border border-current px-4 py-2 rounded-full font-label-caps text-label-caps hover:opacity-80">Vào điều khiển<span className="material-symbols-outlined text-[18px]" aria-hidden="true">arrow_forward</span></Link>
+                                : null}
                     </div>
-                )}
-            </main>
+
+                    {/* PHASE CARDS */}
+                    <div className="grid grid-cols-3 gap-3">
+                        {PHASES.map((ph) => {
+                            const c = phaseCount(ph.key);
+                            const activeP = selPhase === ph.key;
+                            return (
+                                <button key={ph.key} onClick={() => setSelPhase(ph.key)}
+                                    className={`flex flex-col items-center gap-2 px-3 py-4 rounded-xl border transition-colors ${activeP ? 'border-secondary bg-surface-container' : 'border-outline-variant hover:border-primary'}`}>
+                                    <div className="relative flex items-center justify-center">
+                                        <Ring pct={c.pct} size={48} />
+                                        <span className={`material-symbols-outlined absolute text-[18px] ${activeP ? 'text-secondary' : 'text-on-surface-variant'}`} aria-hidden="true">{ph.icon}</span>
+                                    </div>
+                                    <div className={`font-label-caps text-label-caps ${activeP ? 'text-secondary' : 'text-on-surface'}`}>{ph.name}</div>
+                                    <div className="text-xs text-on-surface-variant tabular-nums">{c.ok}/{c.total}{c.openBlockers > 0 ? ` · ${c.openBlockers}✗` : ''}</div>
+                                </button>
+                            );
+                        })}
+                    </div>
+
+                    {/* In-event quick actions */}
+                    {selPhase === 'in' && (
+                        <div className="grid sm:grid-cols-3 gap-3">
+                            <Link to="/audio" className="flex items-center justify-center gap-2 bg-primary text-on-primary rounded-xl px-4 py-3.5 font-label-caps text-label-caps hover:opacity-90"><span className="material-symbols-outlined text-[20px]" aria-hidden="true">tune</span>Điều khiển</Link>
+                            <Link to="/stream" className="flex items-center justify-center gap-2 bg-secondary text-on-secondary rounded-xl px-4 py-3.5 font-label-caps text-label-caps hover:opacity-90"><span className="material-symbols-outlined text-[20px]" aria-hidden="true">subtitles</span>Tường phụ đề</Link>
+                            <Link to="/reveal" className="flex items-center justify-center gap-2 border border-outline-variant text-on-surface-variant rounded-xl px-4 py-3.5 font-label-caps text-label-caps hover:border-primary"><span className="material-symbols-outlined text-[20px]" aria-hidden="true">auto_awesome</span>Reveal</Link>
+                        </div>
+                    )}
+
+                    {/* CHECKLIST */}
+                    <div className="bg-surface-container-lowest border border-outline-variant rounded-xl px-4 py-1">
+                        {shownSignals.map((s) => (
+                            <SignalRow key={s.id} s={s} attest={prep.attest[s.id]}
+                                signValue={signName[s.id] ?? ''}
+                                onSignChange={(val) => setSignName((m) => ({ ...m, [s.id]: val }))}
+                                onSign={() => doSign(s.id)} onClear={() => doClear(s.id)} />
+                        ))}
+                    </div>
+
+                    {/* POST-EVENT actions */}
+                    {selPhase === 'post' && (
+                        <div className="space-y-4">
+                            <div className="flex flex-wrap items-center gap-3">
+                                <button onClick={exportKb} disabled={!data.glossary || !data.script}
+                                    className="flex items-center gap-2 bg-secondary text-on-secondary px-4 py-2 rounded-full font-label-caps text-label-caps hover:opacity-80 disabled:opacity-40"><span className="material-symbols-outlined text-[18px]" aria-hidden="true">download</span>Xuất gói tri thức</button>
+                                <Link to="/glossary" className="flex items-center gap-1.5 border border-outline-variant text-on-surface-variant px-3 py-2 text-sm rounded-full hover:border-primary"><span className="material-symbols-outlined text-[18px]" aria-hidden="true">menu_book</span>Từ điển</Link>
+                                <Link to="/script" className="flex items-center gap-1.5 border border-outline-variant text-on-surface-variant px-3 py-2 text-sm rounded-full hover:border-primary"><span className="material-symbols-outlined text-[18px]" aria-hidden="true">theater_comedy</span>Kịch bản</Link>
+                            </div>
+                            <div>
+                                <div className="font-label-caps text-label-caps text-on-surface-variant mb-2">Ghi sự cố (nền cho lần sau)</div>
+                                <div className="flex gap-2">
+                                    <input value={incident} onChange={(e) => setIncident(e.target.value)} placeholder="vd: 'Kaizen' nghe thành 'kaisen'…"
+                                        className="flex-1 bg-surface text-on-surface border border-outline-variant rounded-DEFAULT px-3 py-2 text-sm" />
+                                    <button onClick={() => { setPrepState(addIncident(incident)); setIncident(''); }} disabled={!incident.trim()}
+                                        className="border border-outline-variant text-on-surface-variant px-3 py-2 text-sm rounded-DEFAULT hover:border-primary disabled:opacity-40">Ghi</button>
+                                </div>
+                                <ul className="mt-2 space-y-1">
+                                    {prep.incidents.map((it, i) => (
+                                        <li key={i} className="text-sm text-on-surface-variant flex items-start gap-2">
+                                            <button onClick={() => setPrepState(removeIncident(i))} className="text-error hover:opacity-70">✕</button>
+                                            <span>{it}</span>
+                                        </li>
+                                    ))}
+                                </ul>
+                            </div>
+                            <label className="flex items-center gap-2 text-sm text-on-surface-variant">
+                                <input type="checkbox" checked={!!prep.debrief['done']} onChange={(e) => setPrepState(setDebrief('done', e.target.checked))} className="accent-secondary" />
+                                Đã họp rút kinh nghiệm cho sự kiện kế
+                            </label>
+                        </div>
+                    )}
+                </main>
             </div>
         </div>
     );
