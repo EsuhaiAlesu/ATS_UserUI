@@ -457,22 +457,28 @@ const PrepDesk: React.FC = () => {
                         const activeP = selPhase === ph.key;
                         return (
                             <button key={ph.key} onClick={() => setSelPhase(ph.key)} aria-pressed={activeP}
-                                className={`group relative overflow-hidden flex-1 flex flex-col justify-center gap-3 rounded-2xl border p-5 pl-6 text-left transition-all duration-200 ease-out motion-reduce:transition-none ${activeP ? 'bg-surface-container-high border-secondary/70 shadow-lg shadow-secondary/10' : 'bg-transparent border-outline-variant hover:bg-surface-container hover:border-outline'}`}>
-                                {/* Thanh vàng trái = "bạn đang ở đây" (cùng ngôn ngữ với thẻ con đang mở) */}
-                                <span className={`absolute left-0 top-0 bottom-0 w-[3px] transition-all duration-200 ${activeP ? 'bg-secondary' : 'bg-transparent'}`} aria-hidden="true"></span>
-                                {/* Số thứ tự — các pha là một chuỗi thật (trước → trong → sau sự kiện) */}
-                                <span className={`absolute top-4 right-5 font-label-caps text-[11px] tracking-[0.2em] tabular-nums transition-colors ${activeP ? 'text-secondary/70' : 'text-on-surface-variant/30'}`} aria-hidden="true">{`0${pi + 1}`}</span>
-                                <div className="flex items-center gap-3">
-                                    <span className={`w-11 h-11 rounded-xl flex items-center justify-center shrink-0 transition-colors ${activeP ? 'bg-secondary text-on-secondary shadow-md shadow-secondary/25' : 'bg-surface-container-high text-on-surface-variant group-hover:text-on-surface'}`}>
-                                        <span className="material-symbols-outlined" style={{ fontSize: '24px' }} aria-hidden="true">{ph.icon}</span>
+                                style={activeP ? { boxShadow: '0 16px 36px -12px rgba(244,208,106,0.30), 0 6px 16px -6px rgba(0,0,0,0.55)' } : undefined}
+                                className={`group relative flex-1 flex flex-col justify-between rounded-2xl border-2 p-6 text-left transition-all duration-200 ease-out will-change-transform motion-reduce:transition-none motion-reduce:hover:translate-y-0 ${activeP
+                                    ? 'bg-surface-container-high bg-gradient-to-b from-surface-container-high to-surface-container border-secondary -translate-y-1'
+                                    : 'bg-surface-container/40 border-outline-variant hover:bg-surface-container hover:border-outline hover:-translate-y-0.5'}`}>
+                                {/* Trên: icon (đưa vào khối bo tròn) + số thứ tự pha */}
+                                <div className="flex items-start justify-between">
+                                    <span className={`w-12 h-12 rounded-2xl flex items-center justify-center shrink-0 transition-all duration-200 ${activeP ? 'bg-secondary text-on-secondary shadow-lg shadow-secondary/30' : 'bg-surface-container-high text-on-surface-variant group-hover:text-on-surface'}`}>
+                                        <span className="material-symbols-outlined" style={{ fontSize: '26px' }} aria-hidden="true">{ph.icon}</span>
                                     </span>
-                                    <div className="min-w-0">
-                                        <div className={`transition-all leading-tight ${activeP ? 'text-secondary font-bold text-lg' : 'text-on-surface font-semibold text-[15px]'}`}>{ph.name}</div>
-                                        <div className="text-xs text-on-surface-variant mt-0.5 tabular-nums">{c.ok}/{c.total} đạt{c.openBlockers > 0 ? ` · ${c.openBlockers} chặn` : ''}</div>
-                                    </div>
+                                    <span className={`font-label-caps text-[12px] tracking-[0.22em] tabular-nums transition-colors ${activeP ? 'text-secondary/80' : 'text-on-surface-variant/30'}`} aria-hidden="true">{`0${pi + 1}`}</span>
                                 </div>
-                                <div className="h-1.5 rounded-full bg-surface-container-high overflow-hidden">
-                                    <div className={`h-full rounded-full transition-all duration-500 ${activeP ? 'bg-secondary' : 'bg-outline/40 group-hover:bg-outline/60'}`} style={{ width: `${c.pct}%` }}></div>
+                                {/* Giữa: tên chính (to đậm khi active) + số liệu */}
+                                <div className="mt-auto pt-4">
+                                    <div className={`transition-all leading-tight ${activeP ? 'text-secondary font-bold text-xl' : 'text-on-surface font-semibold text-base'}`}>{ph.name}</div>
+                                    <div className={`mt-1 tabular-nums transition-colors ${activeP ? 'text-[13px] text-on-surface-variant' : 'text-xs text-on-surface-variant/80'}`}>{c.ok}/{c.total} đạt{c.openBlockers > 0 ? ` · ${c.openBlockers} chặn` : ''}</div>
+                                </div>
+                                {/* Dưới: thanh tiến độ + phần trăm */}
+                                <div className="mt-4 flex items-center gap-3">
+                                    <div className="flex-1 h-1.5 rounded-full bg-surface-container-high overflow-hidden">
+                                        <div className={`h-full rounded-full transition-all duration-500 ${activeP ? 'bg-secondary' : 'bg-outline/40 group-hover:bg-outline/60'}`} style={{ width: `${c.pct}%` }}></div>
+                                    </div>
+                                    <span className={`text-[11px] font-medium tabular-nums transition-colors ${activeP ? 'text-secondary/80' : 'text-on-surface-variant/50'}`}>{c.pct}%</span>
                                 </div>
                             </button>
                         );
