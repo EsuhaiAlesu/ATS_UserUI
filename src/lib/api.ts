@@ -143,6 +143,7 @@ export interface LiveEvent {
     stt_ms?: number;
     proc_ms?: number;
     mt_ms?: number;
+    e2e_ms?: number;   // TRUE wall-clock end-to-end (utterance-final → line emit), if the backend measures it (Bước 0 §3.1)
     // speech_lang (detected source language)
     prob?: number;
     // context (rolling summary)

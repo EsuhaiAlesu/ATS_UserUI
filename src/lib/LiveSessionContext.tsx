@@ -25,6 +25,8 @@ export interface Telemetry {
     proc?: number;
     mt?: number;
     e2e?: number;
+    /** true = e2e is the backend's real wall-clock e2e_ms; false = a per-stage SUM fallback (Bước 0 §3.1). */
+    measured?: boolean;
 }
 
 interface Warming {
@@ -240,10 +242,15 @@ export const LiveSessionProvider: React.FC<{ children: React.ReactNode }> = ({ c
                 break;
             // --- A3.1: operator trust signals previously dropped ---
             case 'timing': {
+                // Prefer the backend's REAL wall-clock e2e_ms (utterance-final → line on wire). Fall back
+                // to the per-stage SUM only if e2e_ms is absent, and flag it so the HUD doesn't present a
+                // compute-sum as true perceived latency (Bước 0 §3.1).
+                const measured = typeof evt.e2e_ms === 'number';
                 const anyMs = [evt.stt_ms, evt.proc_ms, evt.mt_ms].some((n) => typeof n === 'number');
                 setTiming({
                     stt: evt.stt_ms, proc: evt.proc_ms, mt: evt.mt_ms,
-                    e2e: anyMs ? (evt.stt_ms ?? 0) + (evt.proc_ms ?? 0) + (evt.mt_ms ?? 0) : undefined,
+                    e2e: measured ? evt.e2e_ms : (anyMs ? (evt.stt_ms ?? 0) + (evt.proc_ms ?? 0) + (evt.mt_ms ?? 0) : undefined),
+                    measured,
                 });
                 break;
             }

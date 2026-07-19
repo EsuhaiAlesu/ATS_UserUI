@@ -150,6 +150,7 @@ const AudioRouting: React.FC = () => {
     const srcLang = session.sourceLang?.lang?.toLowerCase() ?? '';
     const dir = srcLang.startsWith('ja') ? 'JA → VI' : srcLang.startsWith('vi') ? 'VI → JA' : '';
     const e2e = session.timing?.e2e;
+    const e2eEstimated = e2e != null && session.timing?.measured === false;   // e2e mới là TỔNG chặng, chưa đo thực (Bước 0 §3.1)
     const fmtMs = (n?: number) => (typeof n === 'number' ? `${Math.round(n)}ms` : '—');
     const pct = (n?: number) => (typeof n === 'number' ? `${Math.round(n * 100)}%` : '—');
 
@@ -394,7 +395,7 @@ const AudioRouting: React.FC = () => {
                     <div className="shrink-0 border-t border-outline-variant/60 bg-surface-container-lowest px-5 py-2 overflow-x-auto z-20">
                         <div className="flex items-center gap-x-6 gap-y-1 whitespace-nowrap font-label-caps text-label-caps" style={{ fontFamily: 'ui-monospace, monospace' }}>
                             <span className="text-on-surface-variant">HƯỚNG <span className="text-primary">{dir || '—'}</span>{session.sourceLang ? ` ${pct(session.sourceLang.prob)}` : ''}</span>
-                            <span className="text-on-surface-variant">TRỄ E2E <span className={e2e == null ? 'text-on-surface-variant' : e2e < 2000 ? 'text-secondary' : 'text-error'}>{fmtMs(e2e)}</span>{session.timing ? ` · STT ${fmtMs(session.timing.stt)} MT ${fmtMs(session.timing.mt)}` : ''}</span>
+                            <span className="text-on-surface-variant">TRỄ E2E <span className={e2e == null ? 'text-on-surface-variant' : e2e < 2000 ? 'text-secondary' : 'text-error'}>{e2eEstimated ? '~' : ''}{fmtMs(e2e)}</span>{e2eEstimated ? ' (tổng)' : ''}{session.timing ? ` · STT ${fmtMs(session.timing.stt)} MT ${fmtMs(session.timing.mt)}` : ''}</span>
                             <span className="text-on-surface-variant">KHỚP KỊCH BẢN <span className="text-secondary">{pct(lastOnScript)}</span></span>
                             <span className="text-on-surface-variant">SỬA TÊN <span className="text-secondary">{session.nameFixCount}</span></span>
                             {session.speakingLang && <span className="text-secondary inline-flex items-center gap-1"><span className="material-symbols-outlined" style={{ fontSize: '1rem' }} aria-hidden="true">volume_up</span>ĐANG ĐỌC {session.speakingLang.toUpperCase()}</span>}
