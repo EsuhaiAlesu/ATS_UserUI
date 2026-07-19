@@ -486,7 +486,7 @@ const PrepDesk: React.FC = () => {
                 </aside>
 
                 {/* CỘT 2–3 — verdict + thẻ nội dung của pha đang chọn */}
-                <div className="flex-1 flex flex-col min-h-0 gap-5">
+                <div className="flex-1 flex flex-col min-h-0">
                     <div className={`shrink-0 rounded-2xl border p-5 flex items-center gap-5 ${tone.wrap}`}>
                         <Ring pct={blockPct} size={64} />
                         <div className="flex-1 min-w-0">
@@ -507,7 +507,7 @@ const PrepDesk: React.FC = () => {
                                 : null}
                     </div>
 
-                    <div className="flex-1 overflow-y-auto min-h-0 -mr-2 pr-2 space-y-4">
+                    <div className="flex-1 overflow-y-auto min-h-0 -mr-2 pr-2 pt-5 space-y-4">
                         {/* In-event quick actions */}
                     {selPhase === 'in' && (
                         <div className="grid sm:grid-cols-3 gap-3">
