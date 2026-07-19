@@ -15,6 +15,7 @@ export interface VoicePick {
 
 export interface TtsPrefs {
     enabled: boolean;            // opt-in: send a tts block at all (default false = subtitles-only)
+    rate?: number;              // speaking speed multiplier 0.5–2.0 (default 1) — spec 2.3
     vi?: VoicePick;
     ja?: VoicePick;
 }
@@ -43,6 +44,7 @@ export function buildTtsConfig(p: TtsPrefs): Record<string, unknown> | undefined
     const primary = p.ja ?? p.vi;        // ceremony honors JA guests; fall back to VI
     if (!primary) return undefined;
     const block: Record<string, unknown> = { engine: primary.engine, [primary.key]: primary.id };
+    if (typeof p.rate === 'number' && p.rate > 0 && p.rate !== 1) block.rate = p.rate;
     // Extra, non-breaking hint for a per-language-capable backend (ignored otherwise).
     const voices: Record<string, unknown> = {};
     if (p.vi) voices.vi = { engine: p.vi.engine, [p.vi.key]: p.vi.id };

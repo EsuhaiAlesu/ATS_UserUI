@@ -6,7 +6,8 @@ import type { AudioInputDevice, AudioOutputDevice, LiveConfig } from '../lib/api
 import type { LiveLine } from '../lib/LiveSessionContext';
 import { isSessionActive, useLiveSession } from '../lib/LiveSessionContext';
 import { useMeter } from '../lib/useMeter';
-import { buildTtsConfig, loadTtsPrefs } from '../lib/ttsPrefs';
+import { buildTtsConfig, loadTtsPrefs, saveTtsPrefs } from '../lib/ttsPrefs';
+import { getSchedules } from '../lib/schedule';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Operator console as a clean video-meeting cockpit (Zoom/Teams pattern):
@@ -106,6 +107,19 @@ const AudioRouting: React.FC = () => {
     const [settingsOpen, setSettingsOpen] = useState(false);
     const [isFs, setIsFs] = useState(false);
 
+    // --- Live operation controls (spec 2.1–2.6) ---
+    const [ttsOn, setTtsOn] = useState(() => loadTtsPrefs().enabled);
+    const [ttsRate, setTtsRate] = useState(() => { const r = loadTtsPrefs().rate; return typeof r === 'number' && r > 0 ? r : 1; });
+    const [ttsHasVoice] = useState(() => { const p = loadTtsPrefs(); return !!(p.vi || p.ja); }); // whether a voice was picked at Chuẩn bị · Giọng đọc
+    const [speaker, setSpeaker] = useState(() => { try { return String(JSON.parse(localStorage.getItem('proyaku_speaker') || '{}').name || ''); } catch { return ''; } });
+    const [panel, setPanel] = useState<null | 'speed' | 'speaker'>(null);
+    const scheduledSpeakers = useMemo(() => {
+        const now = new Date();
+        const iso = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+        const list = getSchedules();
+        return (list.find((c) => c.date >= iso) ?? list[list.length - 1])?.speakers ?? [];
+    }, []);
+
     useEffect(() => {
         getAudioDevices()
             .then((d) => {
@@ -188,6 +202,18 @@ const AudioRouting: React.FC = () => {
         };
         session.start(config);
     };
+
+    // --- Live control appliers: persist locally (used at next START) + hot-apply via sendCommand ---
+    const applyTtsOn = (on: boolean) => { setTtsOn(on); saveTtsPrefs({ ...loadTtsPrefs(), enabled: on }); session.sendCommand({ tts: { on } }); };
+    const applyRate = (raw: number) => {
+        const v = Math.max(0.5, Math.min(2, Math.round(raw * 10) / 10));
+        setTtsRate(v); saveTtsPrefs({ ...loadTtsPrefs(), rate: v }); session.sendCommand({ tts: { rate: v } });
+    };
+    const saveSpeakerLocal = (name: string) => {
+        setSpeaker(name);
+        try { const cur = JSON.parse(localStorage.getItem('proyaku_speaker') || '{}'); localStorage.setItem('proyaku_speaker', JSON.stringify({ ...cur, name })); } catch { /* ignore */ }
+    };
+    const dispatchSpeaker = (name: string) => { saveSpeakerLocal(name); session.sendCommand({ speaker: { name } }); };
 
     // --- A3.4: NO-SIGNAL alarm ---
     const [noSignal, setNoSignal] = useState(false);
@@ -411,9 +437,9 @@ const AudioRouting: React.FC = () => {
             </main>
 
             {/* ══════════ BOTTOM CONTROL CLUSTER (icon buttons) ══════════ */}
-            <footer className="shrink-0 h-24 flex items-center justify-center gap-5 px-5 border-t border-outline-variant bg-surface-container-lowest">
+            <footer className={`relative shrink-0 h-24 flex items-center justify-center gap-5 px-5 border-t border-outline-variant bg-surface-container-lowest ${panel ? 'z-40' : ''}`}>
                 <RoundBtn icon={noSignal ? 'mic_off' : 'mic'} label={noSignal ? 'KHÔNG TÍN HIỆU' : `MIC ${vuDb}dB`}
-                    title="Nguồn thu — mở Cài đặt để đổi mic" onClick={() => setSettingsOpen(true)} tone={noSignal ? 'danger' : active ? 'active' : 'default'} />
+                    title="Nguồn thu — mở Cài đặt để đổi mic" onClick={() => { setPanel(null); setSettingsOpen(true); }} tone={noSignal ? 'danger' : active ? 'active' : 'default'} />
 
                 {active ? (
                     <button type="button" onPointerDown={startHold} onPointerUp={cancelHold} onPointerLeave={cancelHold} title="Giữ để dừng phiên"
@@ -437,9 +463,91 @@ const AudioRouting: React.FC = () => {
                 )}
 
                 <div className="w-px h-12 bg-outline-variant mx-1"></div>
-                <RoundBtn icon="settings" label="Cài đặt" title="Cấu hình thiết bị & mô hình (pre-event)" onClick={() => setSettingsOpen(true)} />
+                {/* live operation controls (spec 2.1–2.6) — hot-applied via sendCommand */}
+                <RoundBtn icon={ttsOn && ttsHasVoice ? 'volume_up' : 'subtitles'} label={ttsOn && ttsHasVoice ? 'Giọng' : 'Phụ đề'}
+                    title={!ttsHasVoice ? 'Chưa chọn giọng đọc — vào Chuẩn bị · Giọng đọc để chọn; hiện chỉ phụ đề' : ttsOn ? 'Đang đọc tiếng — bấm để chỉ phụ đề' : 'Chỉ phụ đề — bấm để bật đọc tiếng'}
+                    tone={ttsOn && ttsHasVoice ? 'active' : 'default'} disabled={!ttsHasVoice} onClick={() => applyTtsOn(!ttsOn)} />
+                <RoundBtn icon="speed" label={`${ttsRate.toFixed(1)}×`} title="Tốc độ giọng đọc" tone={panel === 'speed' ? 'active' : 'default'} onClick={() => setPanel((p) => (p === 'speed' ? null : 'speed'))} />
+                <RoundBtn icon="record_voice_over" label="Người nói" title="Điều phối người phát biểu" tone={panel === 'speaker' ? 'active' : 'default'} onClick={() => setPanel((p) => (p === 'speaker' ? null : 'speaker'))} />
+                <RoundBtn icon="menu_book" label="Từ điển" title="Mở Từ điển (cửa sổ mới)" onClick={() => window.open('/glossary', 'proyaku-glossary')} />
+
+                <div className="w-px h-12 bg-outline-variant mx-1"></div>
+                <RoundBtn icon="settings" label="Cài đặt" title="Cấu hình thiết bị & mô hình (pre-event)" onClick={() => { setPanel(null); setSettingsOpen(true); }} />
                 <RoundBtn icon="open_in_new" label="Tường" title="Mở Tường phụ đề" onClick={openWall} />
             </footer>
+
+            {/* ══════════ LIVE-CONTROL POPOVERS (anchored above the footer) ══════════ */}
+            {panel && (
+                <>
+                    <div className="absolute inset-0 z-30" onClick={() => setPanel(null)}></div>
+                    <div className="absolute bottom-[104px] left-1/2 -translate-x-1/2 z-40 w-[min(92vw,380px)] rounded-2xl border border-outline-variant bg-surface-container-high p-4 shadow-2xl"
+                        style={{ boxShadow: '0 18px 48px rgba(0,0,0,0.55)' }}>
+                        {panel === 'speed' && (
+                            <div className="flex flex-col gap-3">
+                                <div className="flex items-center justify-between">
+                                    <span className="font-label-caps text-label-caps text-on-surface-variant">TỐC ĐỘ GIỌNG ĐỌC</span>
+                                    <span className="text-title-md font-bold text-secondary tabular-nums">{ttsRate.toFixed(1)}×</span>
+                                </div>
+                                <div className="flex items-center gap-3">
+                                    <button onClick={() => applyRate(ttsRate - 0.1)} disabled={ttsRate <= 0.5}
+                                        className="w-9 h-9 shrink-0 rounded-full border border-outline-variant text-on-surface hover:bg-surface-container disabled:opacity-40 flex items-center justify-center">
+                                        <span className="material-symbols-outlined text-lg" aria-hidden="true">remove</span>
+                                    </button>
+                                    <input type="range" min={0.5} max={2} step={0.1} value={ttsRate}
+                                        onChange={(e) => applyRate(Number(e.target.value))} className="flex-1 accent-[var(--secondary)]" />
+                                    <button onClick={() => applyRate(ttsRate + 0.1)} disabled={ttsRate >= 2}
+                                        className="w-9 h-9 shrink-0 rounded-full border border-outline-variant text-on-surface hover:bg-surface-container disabled:opacity-40 flex items-center justify-center">
+                                        <span className="material-symbols-outlined text-lg" aria-hidden="true">add</span>
+                                    </button>
+                                </div>
+                                <div className="grid grid-cols-4 gap-2">
+                                    {[0.8, 1, 1.2, 1.5].map((v) => (
+                                        <button key={v} onClick={() => applyRate(v)}
+                                            className={`h-9 rounded-lg text-label-md font-medium border transition-colors ${Math.abs(ttsRate - v) < 0.05 ? 'border-secondary bg-secondary/15 text-secondary' : 'border-outline-variant text-on-surface-variant hover:text-on-surface'}`}>
+                                            {v}×
+                                        </button>
+                                    ))}
+                                </div>
+                                <p className="text-body-sm text-on-surface-variant">Áp ngay khi đang chạy; nếu chưa có phiên sẽ dùng ở lần Bắt đầu.</p>
+                            </div>
+                        )}
+                        {panel === 'speaker' && (
+                            <div className="flex flex-col gap-3">
+                                <div className="flex items-center justify-between">
+                                    <span className="font-label-caps text-label-caps text-on-surface-variant">NGƯỜI PHÁT BIỂU</span>
+                                    {speaker && (
+                                        <button onClick={() => { saveSpeakerLocal(''); session.sendCommand({ speaker: { name: '' } }); }}
+                                            className="text-label-md text-on-surface-variant hover:text-error">Xoá</button>
+                                    )}
+                                </div>
+                                {scheduledSpeakers.length > 0 ? (
+                                    <div className="flex flex-col gap-1.5 max-h-52 overflow-y-auto">
+                                        {scheduledSpeakers.map((s) => (
+                                            <button key={s.id} onClick={() => { dispatchSpeaker(s.name); setPanel(null); }}
+                                                className={`flex items-center gap-3 px-3 py-2 rounded-lg border text-left transition-colors ${speaker === s.name ? 'border-secondary bg-secondary/12' : 'border-outline-variant hover:bg-surface-container'}`}>
+                                                <span className="material-symbols-outlined text-xl text-on-surface-variant shrink-0" aria-hidden="true">person</span>
+                                                <span className="min-w-0">
+                                                    <span className="block text-body-md text-on-surface truncate">{s.name || '(chưa đặt tên)'}</span>
+                                                    {(s.role || s.lang) && <span className="block text-body-sm text-on-surface-variant truncate">{[s.role, s.lang ? s.lang.toUpperCase() : ''].filter(Boolean).join(' · ')}</span>}
+                                                </span>
+                                                {speaker === s.name && <span className="material-symbols-outlined text-lg text-secondary ml-auto shrink-0" aria-hidden="true">check</span>}
+                                            </button>
+                                        ))}
+                                    </div>
+                                ) : (
+                                    <p className="text-body-sm text-on-surface-variant">Chưa có người nói nào trong lịch. Nhập tay bên dưới hoặc thêm ở <span className="text-secondary">Chuẩn bị · Đặt lịch</span>.</p>
+                                )}
+                                <div className="flex items-center gap-2 pt-1 border-t border-outline-variant">
+                                    <input value={speaker} onChange={(e) => saveSpeakerLocal(e.target.value)}
+                                        onBlur={(e) => session.sendCommand({ speaker: { name: e.target.value } })}
+                                        placeholder="Nhập tên người nói…"
+                                        className="flex-1 min-w-0 bg-surface-container border border-outline-variant rounded-lg px-3 py-2 text-body-md text-on-surface placeholder:text-on-surface-variant focus:outline-none focus:border-secondary" />
+                                </div>
+                            </div>
+                        )}
+                    </div>
+                </>
+            )}
 
             {/* ══════════ SETTINGS DRAWER (pre-event config) ══════════ */}
             {settingsOpen && (
