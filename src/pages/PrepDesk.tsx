@@ -11,6 +11,7 @@ import {
 import type { Attest } from '../lib/prep';
 import PageHeader from '../components/PageHeader';
 import { eventDates } from '../lib/settings';
+import { toast } from '../lib/toast';
 
 type SigState = 'ok' | 'fail' | 'unknown';
 type Weight = 'blocker' | 'important' | 'nice';
@@ -76,44 +77,91 @@ const Ring: React.FC<{ pct: number; size?: number }> = ({ pct, size = 44 }) => {
     );
 };
 
-// Module-scope so its identity is STABLE across PrepDesk re-renders — otherwise typing in the
-// "Tên người ký" input would remount the row and drop focus after each keystroke.
-const SignalRow: React.FC<{
-    s: Signal; attest?: Attest; signValue: string;
-    onSignChange: (v: string) => void; onSign: () => void; onClear: () => void;
-}> = ({ s, attest, signValue, onSignChange, onSign, onClear }) => {
-    const warn = signedBeforeRehearsal(attest);
+const WEIGHT_LABEL: Record<Weight, string> = { blocker: 'Bắt buộc', important: 'Quan trọng', nice: 'Nên có' };
+
+// A refined, tappable readiness card (Mercury aesthetic): calm surface, clear status, subtle
+// "chi tiết →" reveal on hover. Clicking opens the detail drawer. Module-scope for stable identity.
+const SignalCard: React.FC<{ s: Signal; attest?: Attest; onOpen: () => void }> = ({ s, attest, onOpen }) => {
     const st = STATE_ICON[s.state];
+    const subCls = s.state === 'ok' ? 'text-secondary' : s.state === 'fail' ? 'text-error' : 'text-on-surface-variant';
     return (
-        <div className="flex items-start gap-3 py-3 border-t border-outline-variant/50 first:border-t-0">
-            <span className={`material-symbols-outlined shrink-0 ${st.cls}`} title={st.title} aria-hidden="true">{st.icon}</span>
-            <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2">
-                    {s.weight === 'blocker' && <span className="w-1.5 h-1.5 rounded-full bg-error shrink-0" title="Bắt buộc"></span>}
-                    <span className="font-medium text-on-surface">{s.label}</span>
-                    <span className="material-symbols-outlined text-[15px] text-on-surface-variant/60 shrink-0" title={s.kind === 'attest' ? 'Người xác nhận' : 'Máy tự đo'} aria-hidden="true">{s.kind === 'attest' ? 'stylus_note' : 'speed'}</span>
+        <button type="button" onClick={onOpen}
+            className="group text-left w-full bg-surface-container border border-outline-variant rounded-2xl p-4 flex flex-col gap-3 hover:border-secondary/40 hover:bg-surface-container-high transition-all">
+            <div className="flex items-start justify-between gap-2">
+                <span className={`material-symbols-outlined ${st.cls}`} aria-hidden="true">{st.icon}</span>
+                <div className="flex items-center gap-1.5 shrink-0">
+                    {s.kind === 'attest' && <span className="material-symbols-outlined text-[15px] text-on-surface-variant/50" title="Người ký" aria-hidden="true">stylus_note</span>}
+                    {s.weight === 'blocker' && <span className="font-label-caps text-[9px] px-1.5 py-0.5 rounded-full bg-error/15 text-error">Bắt buộc</span>}
                 </div>
-                {s.state !== 'ok' && <div className="text-sm text-on-surface-variant mt-0.5">{s.detail}</div>}
-                {s.kind === 'attest' && (
-                    <div className="flex items-center gap-2 flex-wrap mt-2">
-                        {attest ? (
-                            <>
-                                <span className="text-xs text-secondary">✓ {attest.by} · {fmtTs(attest.ts)}</span>
-                                {warn && <span className="text-xs text-error">⚠ ký trước tổng duyệt</span>}
-                                <button onClick={onClear} className="text-xs text-on-surface-variant hover:text-error underline">Rút</button>
-                            </>
-                        ) : (
-                            <>
-                                <input value={signValue} onChange={(e) => onSignChange(e.target.value)}
-                                    placeholder="Tên người ký" className="bg-surface text-on-surface border border-outline-variant rounded-DEFAULT px-2.5 py-1 text-sm w-40" />
-                                <button onClick={onSign} className="border border-secondary text-secondary px-3 py-1 text-sm rounded-DEFAULT hover:opacity-80">Ký</button>
-                            </>
+            </div>
+            <div className="flex-1">
+                <div className="font-medium text-on-surface text-[15px] leading-snug">{s.label}</div>
+                <div className={`text-xs mt-1 ${subCls}`}>{st.title}{s.kind === 'attest' && attest ? ` · ${attest.by}` : ''}</div>
+            </div>
+            <div className="flex items-center gap-1 text-xs text-on-surface-variant opacity-0 group-hover:opacity-100 transition-opacity">
+                Chi tiết<span className="material-symbols-outlined text-[15px]" aria-hidden="true">arrow_forward</span>
+            </div>
+        </button>
+    );
+};
+
+// The detail drawer (Raycast aesthetic): tap a card → a slide-over shows the full context + the
+// available actions (đi tới trang, hoặc ký/rút xác nhận). Module-scope so the sign input keeps focus.
+const SignalDrawer: React.FC<{
+    s: Signal; attest?: Attest; signValue: string;
+    onSignChange: (v: string) => void; onSign: () => void; onClear: () => void; onClose: () => void;
+}> = ({ s, attest, signValue, onSignChange, onSign, onClear, onClose }) => {
+    const st = STATE_ICON[s.state];
+    const warn = signedBeforeRehearsal(attest);
+    const chip = 'px-2.5 py-1 rounded-full font-label-caps text-label-caps';
+    return (
+        <>
+            <div className="absolute inset-0 bg-background/60 z-30" onClick={onClose}></div>
+            <aside className="absolute top-0 right-0 h-full w-full max-w-[440px] bg-surface-container-lowest border-l border-outline-variant z-40 flex flex-col shadow-2xl toast-in">
+                <div className="shrink-0 flex items-center gap-3 px-5 h-16 border-b border-outline-variant">
+                    <span className={`material-symbols-outlined ${st.cls}`} aria-hidden="true">{st.icon}</span>
+                    <span className="font-semibold text-on-surface flex-1 leading-snug">{s.label}</span>
+                    <button onClick={onClose} title="Đóng" className="shrink-0 w-9 h-9 rounded-full flex items-center justify-center text-on-surface-variant hover:text-on-surface hover:bg-surface-container"><span className="material-symbols-outlined" aria-hidden="true">close</span></button>
+                </div>
+                <div className="flex-1 overflow-y-auto p-5 space-y-5">
+                    <div className="flex flex-wrap items-center gap-2">
+                        <span className={`${chip} ${s.state === 'ok' ? 'bg-secondary text-on-secondary' : s.state === 'fail' ? 'bg-error/15 text-error' : 'border border-outline-variant text-on-surface-variant'}`}>{st.title}</span>
+                        <span className={`${chip} border ${s.weight === 'blocker' ? 'border-error/50 text-error' : 'border-outline-variant text-on-surface-variant'}`}>{WEIGHT_LABEL[s.weight]}</span>
+                        <span className={`${chip} border border-outline-variant text-on-surface-variant inline-flex items-center gap-1`}><span className="material-symbols-outlined text-[14px]" aria-hidden="true">{s.kind === 'attest' ? 'stylus_note' : 'speed'}</span>{s.kind === 'attest' ? 'Người ký' : 'Máy đo'}</span>
+                    </div>
+                    <p className="text-sm text-on-surface-variant leading-relaxed">{s.detail}</p>
+                    <div className="space-y-3">
+                        {s.to && (
+                            <Link to={s.to} onClick={onClose} className="flex items-center justify-between gap-2 bg-surface-container border border-outline-variant rounded-xl px-4 py-3 hover:border-secondary/40 transition-colors">
+                                <span className="text-on-surface font-medium">{s.toLabel ?? 'Mở trang'}</span>
+                                <span className="material-symbols-outlined text-primary" aria-hidden="true">arrow_forward</span>
+                            </Link>
+                        )}
+                        {s.kind === 'attest' && (
+                            <div className="bg-surface-container border border-outline-variant rounded-xl p-4">
+                                {attest ? (
+                                    <div className="space-y-2">
+                                        <div className="flex items-center gap-2 text-secondary text-sm"><span className="material-symbols-outlined text-[18px]" aria-hidden="true">verified</span>Đã ký: <b>{attest.by}</b></div>
+                                        <div className="text-xs text-on-surface-variant">{fmtTs(attest.ts)}</div>
+                                        {warn && <div className="text-xs text-error">⚠ ký trước ngày tổng duyệt</div>}
+                                        <button onClick={onClear} className="text-sm text-on-surface-variant hover:text-error underline">Rút xác nhận</button>
+                                    </div>
+                                ) : (
+                                    <div className="space-y-2.5">
+                                        <label className="font-label-caps text-label-caps text-on-surface-variant block">Ký xác nhận (người chịu trách nhiệm)</label>
+                                        <div className="flex gap-2">
+                                            <input value={signValue} onChange={(e) => onSignChange(e.target.value)} placeholder="Tên người ký"
+                                                className="flex-1 bg-surface text-on-surface border border-outline-variant rounded-lg px-3 py-2 text-sm focus:border-secondary focus:outline-none" />
+                                            <button onClick={onSign} disabled={!signValue.trim()} className="bg-secondary text-on-secondary px-4 py-2 rounded-lg font-label-caps text-label-caps hover:opacity-80 disabled:opacity-40">Ký</button>
+                                        </div>
+                                    </div>
+                                )}
+                            </div>
                         )}
                     </div>
-                )}
-            </div>
-            {s.to && <Link to={s.to} title={s.toLabel ?? 'Mở'} className="shrink-0 w-8 h-8 flex items-center justify-center rounded-full text-primary hover:bg-surface-container"><span className="material-symbols-outlined text-[20px]" aria-hidden="true">arrow_forward</span></Link>}
-        </div>
+                </div>
+            </aside>
+        </>
     );
 };
 
@@ -125,6 +173,7 @@ const PrepDesk: React.FC = () => {
     const [signName, setSignName] = useState<Record<string, string>>({});
     const [selPhase, setSelPhase] = useState<Phase>('pre');
     const [incident, setIncident] = useState('');
+    const [openId, setOpenId] = useState<string | null>(null);
 
     // Fetch every backend-dependent artefact independently — one failure must not sink the rest.
     useEffect(() => {
@@ -158,8 +207,8 @@ const PrepDesk: React.FC = () => {
         }
     }, [session.status]);
 
-    const doSign = (id: string) => setPrepState(signAttest(id, signName[id] ?? ''));
-    const doClear = (id: string) => setPrepState(clearAttest(id));
+    const doSign = (id: string) => { setPrepState(signAttest(id, signName[id] ?? '')); toast.success('Đã ký xác nhận'); };
+    const doClear = (id: string) => { setPrepState(clearAttest(id)); toast.info('Đã rút xác nhận'); };
 
     const signals: Signal[] = useMemo(() => {
         const tts = loadTtsPrefs();   // localStorage; re-read whenever this memo recomputes
@@ -337,12 +386,16 @@ const PrepDesk: React.FC = () => {
     const _ev = eventDates();
     const dRehearsal = daysUntil(_ev.rehearsal), dGala = daysUntil(_ev.gala);
     const shownSignals = signals.filter((s) => s.phase === selPhase);
+    const openSignal = openId ? signals.find((s) => s.id === openId) ?? null : null;
     const openPre = preSignals.filter((s) => s.state !== 'ok').length;
     const v = VERDICT_UI[verdict];
     const blockPct = blockers.length ? Math.round((blockersOk / blockers.length) * 100) : 0;
+    const tone = verdict === 'GO' ? { wrap: 'bg-secondary/10 border-secondary/40', text: 'text-secondary' }
+        : verdict === 'DEGRADED' ? { wrap: 'bg-primary/10 border-primary/40', text: 'text-primary' }
+            : { wrap: 'bg-error/10 border-error/30', text: 'text-error' };
 
     return (
-        <div className="h-full flex flex-col bg-background text-on-background overflow-hidden">
+        <div className="h-full flex flex-col bg-background text-on-background overflow-hidden relative">
             <PageHeader
                 icon="dashboard"
                 title="Bảng chỉ huy"
@@ -353,24 +406,24 @@ const PrepDesk: React.FC = () => {
 
             <div className="flex-1 overflow-y-auto">
                 <main className="max-w-3xl mx-auto px-6 py-8 space-y-6">
-                    {/* VERDICT — friendly hero */}
-                    <div className={`rounded-xl px-6 py-5 flex items-center gap-5 ${v.box}`}>
-                        <Ring pct={blockPct} size={68} />
+                    {/* VERDICT — refined hero (Mercury: soft tint, calm) */}
+                    <div className={`rounded-2xl border p-6 flex items-center gap-5 ${tone.wrap}`}>
+                        <Ring pct={blockPct} size={72} />
                         <div className="flex-1 min-w-0">
-                            <div className="flex items-center gap-2">
+                            <div className={`flex items-center gap-2 ${tone.text}`}>
                                 <span className="material-symbols-outlined" aria-hidden="true">{v.icon}</span>
                                 <span className="text-xl md:text-2xl font-bold tracking-tight">{v.word}</span>
                             </div>
-                            <div className="text-sm mt-1 opacity-90">
+                            <div className="text-sm mt-1.5 text-on-surface-variant">
                                 {verdict === 'GO'
                                     ? 'Mọi hạng mục bắt buộc đã hoàn tất.'
                                     : `Còn ${openPre} việc cần hoàn tất${nextBlocker ? ` — kế tiếp: ${nextBlocker.label}` : ''}.`}
                             </div>
                         </div>
                         {nextBlocker?.to
-                            ? <Link to={nextBlocker.to} className="shrink-0 flex items-center gap-1.5 bg-background/20 border border-current px-4 py-2 rounded-full font-label-caps text-label-caps hover:opacity-80">{nextBlocker.toLabel ?? 'Xử lý'}<span className="material-symbols-outlined text-[18px]" aria-hidden="true">arrow_forward</span></Link>
+                            ? <Link to={nextBlocker.to} className={`shrink-0 flex items-center gap-1.5 border border-outline-variant px-4 py-2 rounded-full font-label-caps text-label-caps hover:bg-surface-container transition-colors ${tone.text}`}>{nextBlocker.toLabel ?? 'Xử lý'}<span className="material-symbols-outlined text-[18px]" aria-hidden="true">arrow_forward</span></Link>
                             : verdict === 'GO'
-                                ? <Link to="/audio" className="shrink-0 flex items-center gap-1.5 bg-background/20 border border-current px-4 py-2 rounded-full font-label-caps text-label-caps hover:opacity-80">Vào điều khiển<span className="material-symbols-outlined text-[18px]" aria-hidden="true">arrow_forward</span></Link>
+                                ? <Link to="/audio" className={`shrink-0 flex items-center gap-1.5 border border-outline-variant px-4 py-2 rounded-full font-label-caps text-label-caps hover:bg-surface-container transition-colors ${tone.text}`}>Vào điều khiển<span className="material-symbols-outlined text-[18px]" aria-hidden="true">arrow_forward</span></Link>
                                 : null}
                     </div>
 
@@ -402,13 +455,10 @@ const PrepDesk: React.FC = () => {
                         </div>
                     )}
 
-                    {/* CHECKLIST */}
-                    <div className="bg-surface-container-lowest border border-outline-variant rounded-xl px-4 py-1">
+                    {/* READINESS CARDS (Mercury) — bấm thẻ mở panel chi tiết (Raycast) */}
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                         {shownSignals.map((s) => (
-                            <SignalRow key={s.id} s={s} attest={prep.attest[s.id]}
-                                signValue={signName[s.id] ?? ''}
-                                onSignChange={(val) => setSignName((m) => ({ ...m, [s.id]: val }))}
-                                onSign={() => doSign(s.id)} onClear={() => doClear(s.id)} />
+                            <SignalCard key={s.id} s={s} attest={prep.attest[s.id]} onOpen={() => setOpenId(s.id)} />
                         ))}
                     </div>
 
@@ -446,6 +496,14 @@ const PrepDesk: React.FC = () => {
                     )}
                 </main>
             </div>
+
+            {openSignal && (
+                <SignalDrawer s={openSignal} attest={prep.attest[openSignal.id]}
+                    signValue={signName[openSignal.id] ?? ''}
+                    onSignChange={(val) => setSignName((m) => ({ ...m, [openSignal.id]: val }))}
+                    onSign={() => doSign(openSignal.id)} onClear={() => doClear(openSignal.id)}
+                    onClose={() => setOpenId(null)} />
+            )}
         </div>
     );
 };
