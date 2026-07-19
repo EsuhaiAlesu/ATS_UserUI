@@ -1,5 +1,4 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
 import {
     getTtsVoices, previewTts, getVoiceScript, saveVoiceScript, recordVoice, learnVoice,
 } from '../lib/api';
@@ -286,8 +285,7 @@ const VoiceStudio: React.FC = () => {
     return (
         <div className="bg-background text-on-background min-h-screen w-full overflow-y-auto">
             <header className="bg-surface border-b border-outline-variant flex items-center gap-6 w-full px-container-padding h-20">
-                <Link to="/prep" className="text-on-surface-variant font-label-caps text-label-caps hover:text-primary">&lt; ĐIỀU PHỐI</Link>
-                <span className="font-bold text-xl tracking-tight text-secondary">Giọng nói &amp; Phát âm — PROYAKU</span>
+                <span className="font-bold text-xl tracking-tight text-on-surface">Giọng đọc &amp; Phát âm</span>
             </header>
 
             <main className="max-w-4xl mx-auto px-container-padding py-10 space-y-10">

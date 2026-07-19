@@ -1,5 +1,4 @@
 import React, { useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
 import { getScript, saveScript, pretranslate } from '../lib/api';
 import type { ScriptEntry } from '../lib/api';
 
@@ -107,8 +106,7 @@ const ScriptPrep: React.FC = () => {
     return (
         <div className="bg-background text-on-background min-h-screen w-full overflow-y-auto">
             <header className="bg-surface border-b border-outline-variant flex items-center gap-6 w-full px-container-padding h-20 sticky top-0 z-20">
-                <Link to="/prep" className="text-on-surface-variant font-label-caps text-label-caps hover:text-primary">&lt; ĐIỀU PHỐI</Link>
-                <span className="font-bold text-xl tracking-tight text-secondary">Kịch bản &amp; Bản dịch duyệt sẵn — PROYAKU</span>
+                <span className="font-bold text-xl tracking-tight text-on-surface">Kịch bản &amp; Bản dịch duyệt sẵn</span>
                 <div className="ml-auto flex items-center gap-3">
                     <span className="font-label-caps text-label-caps text-on-surface-variant">{rows.length} dòng · {approvedCount} duyệt{dirty ? ' · chưa lưu' : ''}</span>
                     <button onClick={load} disabled={loading} className="border border-outline-variant text-on-surface-variant px-3 py-2 text-sm hover:text-primary hover:border-primary disabled:opacity-40">Tải lại</button>

@@ -332,8 +332,7 @@ const PrepDesk: React.FC = () => {
     return (
         <div className="bg-background text-on-background min-h-screen w-full overflow-y-auto">
             <header className="bg-surface border-b border-outline-variant flex items-center gap-6 w-full px-container-padding h-20 sticky top-0 z-20">
-                <Link to="/" className="text-on-surface-variant font-label-caps text-label-caps hover:text-primary">&lt; TRANG CHỦ</Link>
-                <span className="font-bold text-xl tracking-tight text-secondary">TRUNG TÂM ĐIỀU PHỐI — PROYAKU</span>
+                <span className="font-bold text-xl tracking-tight text-on-surface">Bảng chỉ huy</span>
                 <div className="ml-auto flex items-center gap-4">
                     <span className="font-label-caps text-label-caps text-on-surface-variant">
                         Tổng duyệt {dRehearsal >= 0 ? `còn ${dRehearsal}n` : 'đã qua'} · Gala {dGala >= 0 ? `còn ${dGala}n` : 'đã qua'}

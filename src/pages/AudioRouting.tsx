@@ -1,5 +1,4 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Link } from 'react-router-dom';
 import {
     getAudioDevices, getAudioOutputs, getBlocks, getLiveFast, playTestTone, setLiveFast,
 } from '../lib/api';
@@ -178,79 +177,22 @@ const AudioRouting: React.FC = () => {
         }
     })();
 
-    const statusLabel =
-        session.status === 'connecting' ? 'CONNECTING…'
-        : session.status === 'reconnecting' ? 'RECONNECTING…'
-        : session.status === 'warming' ? `WARMING ${session.warming?.step ?? 0}/${session.warming?.steps ?? 0}`
-        : session.status === 'ready' ? 'READY'
-        : session.status === 'listening' ? 'LISTENING'
-        : session.status === 'error' ? 'ERROR'
-        : 'STANDBY';
 
     return (
-        <div className="flex flex-1 w-full relative overflow-y-auto">
-                {/* SideNavBar (Desktop) */}
-                <aside className="hidden md:flex sticky top-0 h-full flex-col z-40 bg-surface-container dark:bg-surface-container w-64 border-r border-outline-variant dark:border-outline-variant shrink-0">
-                    <div className="p-6 border-b border-outline-variant">
-                        <h2 className="font-headline-sm text-headline-sm text-secondary">TECHNICAL CONTROL</h2>
-                        <p className="font-label-caps text-label-caps text-on-surface-variant mt-2">V2.0 ANNIVERSARY</p>
-                    </div>
-                    <nav className="flex-1 overflow-y-auto py-4">
-                        <div className="flex items-center gap-4 text-on-surface-variant p-4 font-label-caps text-label-caps">
-                            <span className="material-symbols-outlined">dns</span>
-                            Backend
-                            <span className={`ml-auto w-2.5 h-2.5 rounded-full ${session.backendOnline ? 'bg-secondary listening-pulse' : 'bg-error'}`}></span>
-                        </div>
-                        <div className="flex items-center gap-4 text-on-surface-variant p-4 font-label-caps text-label-caps">
-                            <span className="material-symbols-outlined">graphic_eq</span>
-                            Session
-                            <span className="ml-auto text-primary">{statusLabel}</span>
-                        </div>
-                        <button
-                            onClick={handleToggleFast}
-                            className="w-full flex items-center gap-4 text-on-surface-variant p-4 font-label-caps text-label-caps hover:bg-surface-container-high"
-                        >
-                            <span className="material-symbols-outlined">bolt</span>
-                            Fast Mode
-                            <span className={`ml-auto ${fastMode ? 'text-secondary' : 'text-outline-variant'}`}>{fastMode ? 'ON' : 'OFF'}</span>
-                        </button>
-                    </nav>
-                    <div className="p-4 border-t border-outline-variant">
-                        <button
-                            onClick={() => session.stop()}
-                            className="w-full bg-error text-on-error font-label-caps text-label-caps py-3 mb-4 rounded-DEFAULT hover:opacity-80"
-                        >
-                            EMERGENCY STOP
-                        </button>
-                        <Link to="/prep" className="flex items-center gap-4 text-secondary dark:text-secondary p-3 font-label-caps text-label-caps hover:bg-surface-container-high">
-                            <span className="material-symbols-outlined">dashboard</span> Trung tâm điều phối
-                        </Link>
-                        <Link to="/voices" className="flex items-center gap-4 text-on-surface-variant dark:text-on-surface-variant p-3 font-label-caps text-label-caps hover:bg-surface-container-high">
-                            <span className="material-symbols-outlined">record_voice_over</span> Giọng nói / Voices
-                        </Link>
-                        <Link to="/glossary" className="flex items-center gap-4 text-on-surface-variant dark:text-on-surface-variant p-3 font-label-caps text-label-caps hover:bg-surface-container-high">
-                            <span className="material-symbols-outlined">menu_book</span> Glossary / Tên riêng
-                        </Link>
-                        <Link to="/script" className="flex items-center gap-4 text-on-surface-variant dark:text-on-surface-variant p-3 font-label-caps text-label-caps hover:bg-surface-container-high">
-                            <span className="material-symbols-outlined">theater_comedy</span> Kịch bản / Duyệt dịch
-                        </Link>
-                    </div>
-                </aside>
-
+        <div className="w-full min-h-full relative">
                 {/* Main Content Canvas */}
-                <div className="flex-1 flex flex-col min-w-0 relative">
+                <div className="flex flex-col min-w-0 relative">
                     <main className="flex-1 flex flex-col items-center justify-start py-10 px-container-padding relative w-full overflow-x-hidden">
-                        {/* Background SVG Connections (Decorative) */}
-                        <svg className="absolute inset-0 w-full h-full pointer-events-none z-0 hidden lg:block" style={{ opacity: 0.1 }}>
-                            <path className="connecting-line" d="M 250 400 C 400 400, 500 200, 700 200" fill="none"></path>
-                            <path className="connecting-line" d="M 250 400 C 400 400, 500 600, 700 600" fill="none"></path>
-                        </svg>
-                        <div className="w-full max-w-6xl z-10">
+                        <div className="w-full max-w-5xl z-10">
                             {/* A3.2 Master Annunciator — one dominant state, readable across the room */}
                             <div className="mb-6 flex items-center gap-4 border border-outline-variant rounded-DEFAULT bg-surface-container-lowest px-5 py-4">
                                 <span className={`w-4 h-4 rounded-full ${master.dot} ${master.anim}`}></span>
                                 <span className={`font-headline-sm text-headline-sm tracking-wide ${master.text}`}>{master.label}</span>
-                                {fastMode && <span className="ml-auto font-label-caps text-label-caps text-secondary">⚡ FAST MODE</span>}
+                                <button onClick={handleToggleFast} title="Chế độ nhanh (giảm độ trễ, có thể giảm độ chính xác)"
+                                    className="ml-auto flex items-center gap-2 font-label-caps text-label-caps text-on-surface-variant hover:text-on-surface">
+                                    <span className="material-symbols-outlined text-base">bolt</span>Fast Mode
+                                    <span className={fastMode ? 'text-secondary' : 'text-outline-variant'}>{fastMode ? 'ON' : 'OFF'}</span>
+                                </button>
                             </div>
                             {(session.error || deviceError) && (
                                 <div className="mb-6 border border-error text-error font-label-caps text-label-caps px-4 py-3">
