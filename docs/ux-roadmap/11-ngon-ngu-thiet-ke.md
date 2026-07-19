@@ -1,5 +1,7 @@
 # 11 — Ngôn ngữ thiết kế PROYAKU · Định hướng "KIM SẮC"
 
+> ⚠️ **CẬP NHẬT 2026-07-19 — theme đã BUILD & LIVE, khác mô tả cũ bên dưới.** Bảng màu THẬT hiện dùng: **đen `#100d07`/`#16120a` · vàng gold `#e8b84b`/`#f4d06a` · chữ kem `#f3ead3` · đỏ `#ff6b60` CHỈ báo động** (áp trong `src/index.css`). Phần mô tả "rượu vang `#1a0b0b` / than hồng đỏ" bên dưới là **định hướng cũ, đã thay** — giữ để tham chiếu lịch sử. Màu chuẩn xem `index.css` + [00](00-dong-bo-hien-trang.md).
+
 [← 10 Đo lường & kiểm thử](10-do-luong-kiem-thu.md) · Tiếp: [12 — Thư viện mẫu giao diện →](12-thu-vien-mau-giao-dien.md)
 
 > File này chắt lọc **tinh hoa của 8 trang tham chiếu** (Linear · Raycast · Vercel · Stripe · DeepL · Otter · Wordly · Interprefy) và hoà chúng thành **MỘT ngôn ngữ thiết kế nhất quán, có bản sắc riêng** cho PROYAKU — không sao chép, mà chuyển hoá thành nhận diện Esuhai (đỏ/vàng, kanji PROYAKU, tinh thần lễ 20 năm).

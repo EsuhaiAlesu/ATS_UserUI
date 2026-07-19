@@ -1,5 +1,7 @@
 # 03 — Hệ thống thiết kế (Design System) & Ngôn ngữ thị giác
 
+> ⚠️ **CẬP NHẬT 2026-07-19:** theme đã đổi sang **vàng–đen KIM SẮC (đã build & LIVE)** — các mô tả "nền wine · accent đỏ · đỏ thương hiệu biến mất" bên dưới là **hiện trạng CŨ đã sửa**. Màu chuẩn: `src/index.css` + [11](11-ngon-ngu-thiet-ke.md) + [00](00-dong-bo-hien-trang.md).
+
 [← 02 Đối chiếu app](02-doi-chieu-app-hang-dau.md) · Tiếp: [04 — Màn phụ đề →](04-man-hinh-phu-de.md)
 
 **Điểm lăng kính: 6/10** — *Nền tảng Material-3 thật, nhưng hệ thống mới nửa vời, gần như không tái sử dụng component, bo góc lỗi, đỏ thương hiệu biến mất ở dark mode, và Times New Roman ở màn hình khán giả nhìn vào.*
