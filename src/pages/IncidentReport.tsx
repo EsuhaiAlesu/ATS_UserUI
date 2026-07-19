@@ -52,7 +52,7 @@ const IncidentReport: React.FC = () => {
             <div className="flex-1 overflow-y-auto">
                 <main className="max-w-[1100px] mx-auto px-6 md:px-10 py-8 space-y-8">
                     {/* Tình trạng hệ thống + gợi ý khắc phục */}
-                    <section>
+                    <section id="status" className="scroll-mt-4">
                         <h2 className="font-label-caps text-label-caps text-on-surface-variant mb-3">Tình trạng hệ thống</h2>
                         <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
                             {checks.map((c, i) => {
@@ -78,7 +78,7 @@ const IncidentReport: React.FC = () => {
                     </section>
 
                     {/* Nhật ký sự cố (tay, offline) */}
-                    <section>
+                    <section id="log" className="scroll-mt-4">
                         <h2 className="font-label-caps text-label-caps text-on-surface-variant mb-1">Nhật ký sự cố</h2>
                         <p className="text-[13px] text-on-surface-variant/70 mb-3">Ghi để rút kinh nghiệm cho lần sau — lưu tại máy này (không đồng bộ backend).</p>
                         <div className="flex gap-2">

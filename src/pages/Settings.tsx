@@ -17,8 +17,8 @@ const APP_VERSION = '1.0 · 2026-07';
 const INPUT = 'w-full bg-surface text-on-surface border border-outline-variant rounded-DEFAULT py-2 px-3 text-sm focus:ring-0 focus:border-secondary';
 const BTN = 'inline-flex items-center gap-2 px-4 py-2 rounded-full font-label-caps text-label-caps transition-colors';
 
-const Section: React.FC<{ icon: string; title: string; desc?: string; children: React.ReactNode }> = ({ icon, title, desc, children }) => (
-    <section className="bg-surface-container border border-outline-variant rounded-xl p-5">
+const Section: React.FC<{ id?: string; icon: string; title: string; desc?: string; children: React.ReactNode }> = ({ id, icon, title, desc, children }) => (
+    <section id={id} className="scroll-mt-4 bg-surface-container border border-outline-variant rounded-xl p-5">
         <div className="flex items-center gap-2.5">
             <span className="material-symbols-outlined text-secondary" aria-hidden="true">{icon}</span>
             <h2 className="font-headline-sm text-headline-sm text-on-surface">{title}</h2>
@@ -119,7 +119,7 @@ const Settings: React.FC = () => {
                 <main className="max-w-2xl mx-auto px-6 py-8 space-y-5">
 
                     {/* KẾT NỐI */}
-                    <Section icon="lan" title="Kết nối" desc="Địa chỉ lõi dịch (backend). Để trống = dùng cùng máy chủ (proxy).">
+                    <Section id="kn" icon="lan" title="Kết nối" desc="Địa chỉ lõi dịch (backend). Để trống = dùng cùng máy chủ (proxy).">
                         <div className="flex items-center gap-2">
                             <span className={`w-2.5 h-2.5 rounded-full ${session.backendOnline ? 'bg-secondary' : 'bg-error'}`}></span>
                             <span className={`font-label-caps text-label-caps ${session.backendOnline ? 'text-secondary' : 'text-error'}`}>{session.backendOnline ? 'ĐANG KẾT NỐI' : 'OFFLINE'}</span>
@@ -140,7 +140,7 @@ const Settings: React.FC = () => {
                     </Section>
 
                     {/* SỰ KIỆN */}
-                    <Section icon="event" title="Sự kiện" desc="Tên & mốc thời gian — dùng cho đếm ngược ở Bảng chỉ huy.">
+                    <Section id="sk" icon="event" title="Sự kiện" desc="Tên & mốc thời gian — dùng cho đếm ngược ở Bảng chỉ huy.">
                         <Field label="Tên sự kiện">
                             <input value={eventName} onChange={(e) => setEventName(e.target.value)} className={INPUT} />
                         </Field>
@@ -157,7 +157,7 @@ const Settings: React.FC = () => {
                     </Section>
 
                     {/* HIỂN THỊ */}
-                    <Section icon="format_size" title="Hiển thị phụ đề" desc="Cỡ chữ mặc định cho Tường phụ đề (trước đây chỉ chỉnh được bằng phím +/−).">
+                    <Section id="pd" icon="format_size" title="Hiển thị phụ đề" desc="Cỡ chữ mặc định cho Tường phụ đề (trước đây chỉ chỉnh được bằng phím +/−).">
                         <div className="flex items-center gap-3">
                             <button onClick={() => changeCap(capScale - 0.1)} className="w-9 h-9 rounded-full border border-outline-variant text-on-surface-variant hover:border-primary hover:text-primary flex items-center justify-center" title="Nhỏ hơn"><span className="material-symbols-outlined" aria-hidden="true">remove</span></button>
                             <input type="range" min={0.5} max={3} step={0.1} value={capScale} onChange={(e) => changeCap(Number(e.target.value))} className="flex-1 accent-secondary" />
@@ -171,7 +171,7 @@ const Settings: React.FC = () => {
                     </Section>
 
                     {/* GIỌNG ĐỌC */}
-                    <Section icon="record_voice_over" title="Giọng đọc (TTS)" desc="Máy đọc thành tiếng, hay chỉ hiện phụ đề.">
+                    <Section id="gd" icon="record_voice_over" title="Giọng đọc (TTS)" desc="Máy đọc thành tiếng, hay chỉ hiện phụ đề.">
                         <label className="flex items-center justify-between gap-3 cursor-pointer">
                             <span className="text-on-surface">{ttsEnabled ? 'BẬT đọc tiếng' : 'CHỈ phụ đề (khuyến nghị cho gala)'}</span>
                             <button onClick={toggleTts} className={`font-label-caps text-label-caps px-3 py-1.5 rounded-full ${ttsEnabled ? 'bg-secondary text-on-secondary' : 'border border-outline-variant text-on-surface-variant'}`}>{ttsEnabled ? 'ON' : 'OFF'}</button>
@@ -183,7 +183,7 @@ const Settings: React.FC = () => {
                     </Section>
 
                     {/* TÀI KHOẢN */}
-                    <Section icon="account_circle" title="Tài khoản & Bảo mật" desc="Đăng nhập được bật/tắt trên máy chủ (Railway · AUTH_PASSWORD).">
+                    <Section id="tk" icon="account_circle" title="Tài khoản & Bảo mật" desc="Đăng nhập được bật/tắt trên máy chủ (Railway · AUTH_PASSWORD).">
                         <div className="text-sm text-on-surface-variant">Người dùng: <span className="text-on-surface">leson@esuhai.com</span></div>
                         <a href="/logout" className={`${BTN} border border-error text-error hover:bg-error hover:text-on-error`}>
                             <span className="material-symbols-outlined text-[18px]" aria-hidden="true">logout</span>Đăng xuất
@@ -191,7 +191,7 @@ const Settings: React.FC = () => {
                     </Section>
 
                     {/* DỮ LIỆU */}
-                    <Section icon="database" title="Dữ liệu" desc="Cấu hình & xác nhận được lưu trên chính máy này (localStorage).">
+                    <Section id="dl" icon="database" title="Dữ liệu" desc="Cấu hình & xác nhận được lưu trên chính máy này (localStorage).">
                         <div className="flex flex-wrap gap-2">
                             <button onClick={doExport} className={`${BTN} border border-outline-variant text-on-surface-variant hover:text-primary hover:border-primary`}>
                                 <span className="material-symbols-outlined text-[18px]" aria-hidden="true">download</span>Xuất cấu hình (JSON)

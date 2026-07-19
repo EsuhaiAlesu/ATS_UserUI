@@ -1,36 +1,8 @@
 import React from 'react';
-import { useLiveSession, isSessionActive } from '../lib/LiveSessionContext';
 
-// One shared top bar for every operator surface (the Zoom/Teams "family" chrome): identical
-// height, background, border, typography and a compact session StatusPill on the right — so the
-// whole app reads as one system. Each page passes its own icon + title and its own action
-// controls as children (they render just left of the status pill). Pages that need a richer bar
-// (e.g. /audio's live cockpit) keep their bespoke bar in the same visual language.
-
-/** Compact global session/backend indicator, mirroring the rail's safety state. */
-const StatusPill: React.FC = () => {
-    const session = useLiveSession();
-    const active = isSessionActive(session.status);
-    let dot = 'bg-error', text = 'text-error', label = 'OFFLINE', anim = '';
-    if (active) {
-        switch (session.status) {
-            case 'listening': dot = 'bg-secondary'; text = 'text-secondary'; label = 'LIVE'; anim = 'listening-pulse'; break;
-            case 'ready': dot = 'bg-secondary'; text = 'text-secondary'; label = 'SẴN SÀNG'; break;
-            case 'warming': dot = 'bg-primary'; text = 'text-primary'; label = 'ĐANG WARM'; anim = 'animate-pulse'; break;
-            case 'connecting': dot = 'bg-primary'; text = 'text-primary'; label = 'ĐANG NỐI'; anim = 'animate-pulse'; break;
-            case 'reconnecting': dot = 'bg-error'; text = 'text-error'; label = 'NỐI LẠI'; anim = 'animate-pulse'; break;
-            default: dot = 'bg-secondary'; text = 'text-secondary'; label = 'LIVE'; anim = 'listening-pulse';
-        }
-    } else if (session.backendOnline) {
-        dot = 'bg-secondary'; text = 'text-secondary'; label = 'ONLINE';
-    }
-    return (
-        <span className={`flex items-center gap-1.5 font-label-caps text-label-caps px-2.5 py-1 rounded-full border border-outline-variant ${text}`}>
-            <span className={`w-2 h-2 rounded-full ${dot} ${anim}`}></span>
-            {label}
-        </span>
-    );
-};
+// One shared page toolbar for every operator surface — identical height/background/border/typography
+// so the whole app reads as one system. It sits UNDER the global head bar (which owns the session
+// status + Emergency Stop), and carries the page's own icon + title + action controls (children).
 
 const PageHeader: React.FC<{
     icon: string;
@@ -46,10 +18,7 @@ const PageHeader: React.FC<{
                 {subtitle && <div className="font-label-caps text-label-caps text-on-surface-variant truncate leading-tight">{subtitle}</div>}
             </div>
         </div>
-        <div className="ml-auto flex items-center gap-2.5">
-            {children}
-            <StatusPill />
-        </div>
+        {children && <div className="ml-auto flex items-center gap-2.5">{children}</div>}
     </header>
 );
 
