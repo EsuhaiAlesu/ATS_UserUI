@@ -5,9 +5,17 @@ import PageHeader from '../components/PageHeader';
 import EmptyState from '../components/EmptyState';
 import { SkeletonRows } from '../components/Skeleton';
 import { toast } from '../lib/toast';
+import { useSaveHotkey, useUnsavedGuard } from '../lib/guards';
 
 const BTN_PRI = 'inline-flex items-center gap-1.5 bg-secondary text-on-secondary px-4 py-2 rounded-full font-label-caps text-label-caps hover:opacity-80 transition-opacity disabled:opacity-40';
 const BTN_OUT = 'inline-flex items-center gap-1.5 border border-outline-variant text-on-surface-variant px-3.5 py-2 rounded-full text-sm hover:text-primary hover:border-primary transition-colors disabled:opacity-40';
+
+// Match a term against the search box (VI · JA · reading · note · misheard variants).
+const matchTerm = (r: GlossaryEntry, q: string): boolean => {
+    if (!q) return true;
+    const s = q.toLowerCase();
+    return [r.vi, r.ja, r.reading, r.note, ...(r.misheard ?? [])].some((v) => (v ?? '').toLowerCase().includes(s));
+};
 
 const TYPES = ['name', 'company', 'keigo', 'tech', 'award', 'term', 'keep', 'other'];
 
@@ -36,6 +44,7 @@ const GlossaryEditor: React.FC = () => {
     const [saving, setSaving] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const [dirty, setDirty] = useState(false);
+    const [query, setQuery] = useState('');
 
     const load = () => {
         setLoading(true); setError(null);
@@ -77,6 +86,10 @@ const GlossaryEditor: React.FC = () => {
         }
     };
 
+    useSaveHotkey(save, dirty && !saving);
+    useUnsavedGuard(dirty);
+    const filtered = rows.map((r, i) => ({ r, i })).filter(({ r }) => matchTerm(r, query));
+
     const inputCls = 'w-full bg-transparent text-on-surface border-b border-outline-variant/60 py-1.5 px-1 text-sm focus:border-secondary focus:outline-none placeholder:text-on-surface-variant/50';
 
     return (
@@ -84,7 +97,7 @@ const GlossaryEditor: React.FC = () => {
             <PageHeader icon="menu_book" title="Từ điển & Tên riêng">
                 <span className="hidden md:inline font-label-caps text-label-caps text-on-surface-variant">{rows.length} thuật ngữ{dirty ? ' · chưa lưu' : ''}</span>
                 <button onClick={load} disabled={loading} className="border border-outline-variant text-on-surface-variant px-3 py-1.5 text-sm rounded-full hover:text-primary hover:border-primary disabled:opacity-40">Tải lại</button>
-                <button onClick={save} disabled={saving || !dirty} className="inline-flex items-center gap-1.5 bg-secondary text-on-secondary px-4 py-1.5 text-sm font-label-caps text-label-caps rounded-full hover:opacity-80 disabled:opacity-40"><span className="material-symbols-outlined text-[18px]" aria-hidden="true">save</span>{saving ? 'Đang lưu…' : 'Lưu'}</button>
+                <button onClick={save} disabled={saving || !dirty} title="Lưu (Ctrl+S)" className="inline-flex items-center gap-1.5 bg-secondary text-on-secondary px-4 py-1.5 text-sm font-label-caps text-label-caps rounded-full hover:opacity-80 disabled:opacity-40"><span className="material-symbols-outlined text-[18px]" aria-hidden="true">save</span>{saving ? 'Đang lưu…' : 'Lưu'}</button>
             </PageHeader>
 
             <div className="flex-1 overflow-y-auto">
@@ -99,6 +112,12 @@ const GlossaryEditor: React.FC = () => {
                     <div className="flex flex-wrap items-center gap-2">
                         <button onClick={addRow} className={BTN_OUT}><span className="material-symbols-outlined text-[18px]" aria-hidden="true">add</span>Thêm dòng</button>
                         <button onClick={seedCritical} className={BTN_OUT}><span className="material-symbols-outlined text-[18px]" aria-hidden="true">star</span>Nạp mẫu trọng yếu</button>
+                        <div className="ml-auto flex items-center gap-2 bg-surface-container border border-outline-variant rounded-full px-3 py-1.5 focus-within:border-secondary transition-colors">
+                            <span className="material-symbols-outlined text-[18px] text-on-surface-variant" aria-hidden="true">search</span>
+                            <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Tìm thuật ngữ…" className="bg-transparent text-sm text-on-surface focus:outline-none w-36 md:w-48 placeholder:text-on-surface-variant/60" />
+                            {query && <button onClick={() => setQuery('')} title="Xoá tìm" className="text-on-surface-variant hover:text-on-surface"><span className="material-symbols-outlined text-[16px]" aria-hidden="true">close</span></button>}
+                        </div>
+                        {query && <span className="font-label-caps text-label-caps text-secondary tabular-nums">{filtered.length}/{rows.length}</span>}
                     </div>
 
                     {loading ? (
@@ -109,6 +128,11 @@ const GlossaryEditor: React.FC = () => {
                             <button onClick={seedCritical} className={BTN_PRI}><span className="material-symbols-outlined text-[18px]" aria-hidden="true">star</span>Nạp mẫu trọng yếu</button>
                             <button onClick={addRow} className={BTN_OUT}><span className="material-symbols-outlined text-[18px]" aria-hidden="true">add</span>Thêm dòng</button>
                         </EmptyState>
+                    ) : filtered.length === 0 ? (
+                        <div className="py-14 text-center text-on-surface-variant">
+                            <span className="material-symbols-outlined text-[28px] opacity-60 block mb-2" aria-hidden="true">search_off</span>
+                            Không tìm thấy “<span className="text-on-surface">{query}</span>”.
+                        </div>
                     ) : (
                         <div className="overflow-x-auto border border-outline-variant rounded-xl">
                             <table className="w-full text-sm border-collapse min-w-[900px]">
@@ -126,7 +150,7 @@ const GlossaryEditor: React.FC = () => {
                                     </tr>
                                 </thead>
                                 <tbody>
-                                    {rows.map((r, i) => (
+                                    {filtered.map(({ r, i }) => (
                                         <tr key={i} className="border-t border-outline-variant/60 align-top hover:bg-surface-container/30 transition-colors">
                                             <td className="px-3 py-2 text-center">{r.asr_hotword ? <span className="material-symbols-outlined text-secondary align-middle" style={{ fontSize: '1.1rem' }} title="Đã khoá (hotword)" aria-label="Đã khoá hotword">lock</span> : ''}</td>
                                             <td className="px-3 py-2"><input className={inputCls} value={r.vi ?? ''} onChange={(e) => updateRow(i, { vi: e.target.value })} /></td>

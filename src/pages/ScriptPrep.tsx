@@ -5,6 +5,7 @@ import PageHeader from '../components/PageHeader';
 import EmptyState from '../components/EmptyState';
 import { SkeletonRows } from '../components/Skeleton';
 import { toast } from '../lib/toast';
+import { useSaveHotkey, useUnsavedGuard } from '../lib/guards';
 
 const BTN_PRI = 'inline-flex items-center gap-1.5 bg-secondary text-on-secondary px-4 py-2 rounded-full font-label-caps text-label-caps hover:opacity-80 transition-opacity disabled:opacity-40';
 const BTN_OUT = 'inline-flex items-center gap-1.5 border border-outline-variant text-on-surface-variant px-3.5 py-2 rounded-full text-sm hover:text-primary hover:border-primary transition-colors disabled:opacity-40';
@@ -108,14 +109,16 @@ const ScriptPrep: React.FC = () => {
     };
 
     const approvedCount = rows.filter((r) => r.status === 'approved').length;
-    const ta = 'w-full bg-surface text-on-surface border border-outline-variant rounded-lg py-2 px-2.5 text-base leading-snug resize-y focus:border-secondary focus:outline-none';
+    useSaveHotkey(save, dirty && !saving);
+    useUnsavedGuard(dirty);
+    const ta ='w-full bg-surface text-on-surface border border-outline-variant rounded-lg py-2 px-2.5 text-base leading-snug resize-y focus:border-secondary focus:outline-none';
 
     return (
         <div className="h-full flex flex-col bg-background text-on-background overflow-hidden">
             <PageHeader icon="theater_comedy" title="Kịch bản & Bản dịch duyệt sẵn">
                 <span className="hidden md:inline font-label-caps text-label-caps text-on-surface-variant">{rows.length} dòng · {approvedCount} duyệt{dirty ? ' · chưa lưu' : ''}</span>
                 <button onClick={load} disabled={loading} className="border border-outline-variant text-on-surface-variant px-3 py-1.5 text-sm rounded-full hover:text-primary hover:border-primary disabled:opacity-40">Tải lại</button>
-                <button onClick={save} disabled={saving || !dirty} className="inline-flex items-center gap-1.5 bg-secondary text-on-secondary px-4 py-1.5 text-sm font-label-caps text-label-caps rounded-full hover:opacity-80 disabled:opacity-40"><span className="material-symbols-outlined text-[18px]" aria-hidden="true">save</span>{saving ? 'Đang lưu…' : 'Lưu'}</button>
+                <button onClick={save} disabled={saving || !dirty} title="Lưu (Ctrl+S)" className="inline-flex items-center gap-1.5 bg-secondary text-on-secondary px-4 py-1.5 text-sm font-label-caps text-label-caps rounded-full hover:opacity-80 disabled:opacity-40"><span className="material-symbols-outlined text-[18px]" aria-hidden="true">save</span>{saving ? 'Đang lưu…' : 'Lưu'}</button>
             </PageHeader>
 
             <div className="flex-1 overflow-y-auto">

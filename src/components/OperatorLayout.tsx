@@ -2,6 +2,7 @@ import React from 'react';
 import { NavLink, Outlet, useLocation } from 'react-router-dom';
 import { useLiveSession, isSessionActive } from '../lib/LiveSessionContext';
 import type { LiveStatus } from '../lib/LiveSessionContext';
+import { hasUnsaved } from '../lib/guards';
 
 // The ONE navigation spine — a compact ICON rail (Zoom/Teams app-rail style). Icon + tiny label,
 // grouped by the event lifecycle, with a pinned SAFETY block (status + Emergency Stop) always
@@ -45,7 +46,8 @@ const OperatorLayout: React.FC = () => {
     // Emergency Stop is NEVER guarded.
     const guardLeave = (e: React.MouseEvent, to: string) => {
         if (to === loc.pathname) return;
-        if (isSessionActive(session.status) && !window.confirm('Phiên đang chạy — rời trang?')) e.preventDefault();
+        if (isSessionActive(session.status) && !window.confirm('Phiên đang chạy — rời trang?')) { e.preventDefault(); return; }
+        if (hasUnsaved() && !window.confirm('Có thay đổi chưa lưu — vẫn rời trang?')) e.preventDefault();
     };
 
     const itemClass = (isActive: boolean) =>
