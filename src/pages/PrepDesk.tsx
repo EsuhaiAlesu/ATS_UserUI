@@ -9,6 +9,7 @@ import {
     signedBeforeRehearsal, daysUntil, REHEARSAL_DATE, GALA_DATE,
 } from '../lib/prep';
 import type { Attest } from '../lib/prep';
+import PageHeader from '../components/PageHeader';
 
 type SigState = 'ok' | 'fail' | 'unknown';
 type Weight = 'blocker' | 'important' | 'nice';
@@ -330,21 +331,16 @@ const PrepDesk: React.FC = () => {
     const shownSignals = signals.filter((s) => s.phase === selPhase);
 
     return (
-        <div className="bg-background text-on-background min-h-screen w-full overflow-y-auto">
-            <header className="bg-surface border-b border-outline-variant flex items-center gap-6 w-full px-container-padding h-20 sticky top-0 z-20">
-                <span className="font-bold text-xl tracking-tight text-on-surface">Bảng chỉ huy</span>
-                <div className="ml-auto flex items-center gap-4">
-                    <span className="font-label-caps text-label-caps text-on-surface-variant">
-                        Tổng duyệt {dRehearsal >= 0 ? `còn ${dRehearsal}n` : 'đã qua'} · Gala {dGala >= 0 ? `còn ${dGala}n` : 'đã qua'}
-                    </span>
-                    <span className={`flex items-center gap-2 font-label-caps text-label-caps px-3 py-1.5 rounded-DEFAULT border ${session.backendOnline ? 'border-secondary text-secondary' : 'border-error text-error'}`}>
-                        <span className={`w-2 h-2 rounded-full ${session.backendOnline ? 'bg-secondary' : 'bg-error'}`}></span>
-                        {session.backendOnline ? `ONLINE${data.health ? ` · ${data.health.blocks} khối` : ''}` : 'OFFLINE'}
-                    </span>
-                    <button onClick={() => setTick((t) => t + 1)} disabled={data.loading} className="border border-outline-variant text-on-surface-variant px-3 py-2 text-sm hover:text-primary hover:border-primary disabled:opacity-40">{data.loading ? 'Đang đo…' : 'Đo lại'}</button>
-                </div>
-            </header>
+        <div className="h-full flex flex-col bg-background text-on-background overflow-hidden">
+            <PageHeader
+                icon="dashboard"
+                title="Bảng chỉ huy"
+                subtitle={`Tổng duyệt ${dRehearsal >= 0 ? `còn ${dRehearsal}n` : 'đã qua'} · Gala ${dGala >= 0 ? `còn ${dGala}n` : 'đã qua'}${data.health ? ` · ${data.health.blocks} khối` : ''}`}
+            >
+                <button onClick={() => setTick((t) => t + 1)} disabled={data.loading} className="border border-outline-variant text-on-surface-variant px-3 py-1.5 text-sm rounded-DEFAULT hover:text-primary hover:border-primary disabled:opacity-40">{data.loading ? 'Đang đo…' : 'Đo lại'}</button>
+            </PageHeader>
 
+            <div className="flex-1 overflow-y-auto">
             <main className="max-w-5xl mx-auto px-container-padding py-8 space-y-6">
                 {/* VERDICT STRIP */}
                 <div className={`rounded-DEFAULT px-6 py-5 flex items-center gap-6 ${verdictBox[verdict]}`}>
@@ -449,6 +445,7 @@ const PrepDesk: React.FC = () => {
                     </div>
                 )}
             </main>
+            </div>
         </div>
     );
 };

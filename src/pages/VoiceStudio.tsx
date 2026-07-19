@@ -4,6 +4,7 @@ import {
 } from '../lib/api';
 import type { TtsVoice } from '../lib/api';
 import { loadTtsPrefs, saveTtsPrefs, type VoicePick } from '../lib/ttsPrefs';
+import PageHeader from '../components/PageHeader';
 
 // ---------------------------------------------------------------- TTS voice lane (per language)
 
@@ -283,11 +284,10 @@ const VoiceStudio: React.FC = () => {
     useEffect(() => { saveTtsPrefs(prefs); }, [prefs]);
 
     return (
-        <div className="bg-background text-on-background min-h-screen w-full overflow-y-auto">
-            <header className="bg-surface border-b border-outline-variant flex items-center gap-6 w-full px-container-padding h-20">
-                <span className="font-bold text-xl tracking-tight text-on-surface">Giọng đọc &amp; Phát âm</span>
-            </header>
+        <div className="h-full flex flex-col bg-background text-on-background overflow-hidden">
+            <PageHeader icon="record_voice_over" title="Giọng đọc & Phát âm" subtitle="Chọn giọng máy đọc · luyện phát âm tên riêng" />
 
+            <div className="flex-1 overflow-y-auto">
             <main className="max-w-4xl mx-auto px-container-padding py-10 space-y-10">
                 {/* Card 1 — TTS voice selection */}
                 <section className="bg-surface-container border border-outline-variant rounded-DEFAULT p-6">
@@ -332,6 +332,7 @@ const VoiceStudio: React.FC = () => {
                     <PronunciationClinic />
                 </section>
             </main>
+            </div>
         </div>
     );
 };

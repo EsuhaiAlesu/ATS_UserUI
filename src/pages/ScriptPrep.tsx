@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { getScript, saveScript, pretranslate } from '../lib/api';
 import type { ScriptEntry } from '../lib/api';
+import PageHeader from '../components/PageHeader';
 
 const LANGS: Record<string, string> = { vi: 'VI', ja: 'JA' };
 const genId = () => 's' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
@@ -104,16 +105,14 @@ const ScriptPrep: React.FC = () => {
     const ta = 'w-full bg-surface text-on-surface border border-outline-variant rounded-DEFAULT py-1.5 px-2 text-base leading-snug resize-y focus:border-secondary';
 
     return (
-        <div className="bg-background text-on-background min-h-screen w-full overflow-y-auto">
-            <header className="bg-surface border-b border-outline-variant flex items-center gap-6 w-full px-container-padding h-20 sticky top-0 z-20">
-                <span className="font-bold text-xl tracking-tight text-on-surface">Kịch bản &amp; Bản dịch duyệt sẵn</span>
-                <div className="ml-auto flex items-center gap-3">
-                    <span className="font-label-caps text-label-caps text-on-surface-variant">{rows.length} dòng · {approvedCount} duyệt{dirty ? ' · chưa lưu' : ''}</span>
-                    <button onClick={load} disabled={loading} className="border border-outline-variant text-on-surface-variant px-3 py-2 text-sm hover:text-primary hover:border-primary disabled:opacity-40">Tải lại</button>
-                    <button onClick={save} disabled={saving || !dirty} className="bg-secondary text-on-secondary px-4 py-2 text-sm font-label-caps text-label-caps rounded-DEFAULT hover:opacity-80 disabled:opacity-40">{saving ? 'Đang lưu…' : 'LƯU'}</button>
-                </div>
-            </header>
+        <div className="h-full flex flex-col bg-background text-on-background overflow-hidden">
+            <PageHeader icon="theater_comedy" title="Kịch bản & Bản dịch duyệt sẵn">
+                <span className="hidden md:inline font-label-caps text-label-caps text-on-surface-variant">{rows.length} dòng · {approvedCount} duyệt{dirty ? ' · chưa lưu' : ''}</span>
+                <button onClick={load} disabled={loading} className="border border-outline-variant text-on-surface-variant px-3 py-1.5 text-sm rounded-DEFAULT hover:text-primary hover:border-primary disabled:opacity-40">Tải lại</button>
+                <button onClick={save} disabled={saving || !dirty} className="bg-secondary text-on-secondary px-4 py-1.5 text-sm font-label-caps text-label-caps rounded-DEFAULT hover:opacity-80 disabled:opacity-40">{saving ? 'Đang lưu…' : 'LƯU'}</button>
+            </PageHeader>
 
+            <div className="flex-1 overflow-y-auto">
             <main className="max-w-6xl mx-auto px-container-padding py-8 space-y-4">
                 <div className="border border-outline-variant rounded-DEFAULT bg-surface-container-lowest px-4 py-3 font-label-caps text-label-caps text-on-surface-variant">
                     ⓘ Dòng <b className="text-secondary">ĐÃ DUYỆT</b> được Cascade Matcher <b>tái dùng nguyên văn</b> khi khớp cao — đây là <b>trần chất lượng</b> của lễ. Dịch tự động chỉ là bản nháp; <b className="text-secondary">luôn duyệt tay</b> trước khi khoá. Lưu về <code>data/script.json</code>.
@@ -192,6 +191,7 @@ const ScriptPrep: React.FC = () => {
                     </table>
                 </div>
             </main>
+            </div>
         </div>
     );
 };

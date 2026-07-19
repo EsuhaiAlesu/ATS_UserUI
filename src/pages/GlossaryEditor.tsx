@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { getGlossary, saveGlossary } from '../lib/api';
 import type { GlossaryEntry } from '../lib/api';
+import PageHeader from '../components/PageHeader';
 
 const TYPES = ['name', 'company', 'keigo', 'tech', 'award', 'term', 'keep', 'other'];
 
@@ -75,15 +76,13 @@ const GlossaryEditor: React.FC = () => {
     const inputCls = 'w-full bg-surface text-on-surface border-b border-outline-variant py-1 px-1 text-sm focus:border-secondary';
 
     return (
-        <div className="bg-background text-on-background min-h-screen w-full overflow-y-auto">
-            <header className="bg-surface border-b border-outline-variant flex items-center gap-6 w-full px-container-padding h-20 sticky top-0 z-20">
-                <span className="font-bold text-xl tracking-tight text-on-surface">Từ điển &amp; Tên riêng</span>
-                <div className="ml-auto flex items-center gap-3">
-                    <button onClick={load} disabled={loading} className="border border-outline-variant text-on-surface-variant px-3 py-2 text-sm hover:text-primary hover:border-primary disabled:opacity-40">Tải lại</button>
-                    <button onClick={save} disabled={saving || !dirty} className="bg-secondary text-on-secondary px-4 py-2 text-sm font-label-caps text-label-caps rounded-DEFAULT hover:opacity-80 disabled:opacity-40">{saving ? 'Đang lưu…' : 'LƯU'}</button>
-                </div>
-            </header>
+        <div className="h-full flex flex-col bg-background text-on-background overflow-hidden">
+            <PageHeader icon="menu_book" title="Từ điển & Tên riêng">
+                <button onClick={load} disabled={loading} className="border border-outline-variant text-on-surface-variant px-3 py-1.5 text-sm rounded-DEFAULT hover:text-primary hover:border-primary disabled:opacity-40">Tải lại</button>
+                <button onClick={save} disabled={saving || !dirty} className="bg-secondary text-on-secondary px-4 py-1.5 text-sm font-label-caps text-label-caps rounded-DEFAULT hover:opacity-80 disabled:opacity-40">{saving ? 'Đang lưu…' : 'LƯU'}</button>
+            </PageHeader>
 
+            <div className="flex-1 overflow-y-auto">
             <main className="max-w-6xl mx-auto px-container-padding py-8 space-y-4">
                 <div className="border border-outline-variant rounded-DEFAULT bg-surface-container-lowest px-4 py-3 font-label-caps text-label-caps text-on-surface-variant">
                     ⓘ Glossary lái <b className="text-secondary">cách dịch · hotword nhận dạng · post-correct</b> cùng lúc — artefact quan trọng nhất trước sự kiện. Để <b>JA trống</b> = <b>giữ nguyên tên</b> (không dịch). Bật <b>Hotword</b> (khoá nhận dạng) cho tên riêng để máy nghe đúng. Lưu về <code>data/glossary.json</code>, hiệu lực phiên kế.
@@ -143,6 +142,7 @@ const GlossaryEditor: React.FC = () => {
                     </table>
                 </div>
             </main>
+            </div>
         </div>
     );
 };
