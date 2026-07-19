@@ -170,6 +170,36 @@ const BilingualStream: React.FC<Props> = ({ isEmbedded = false }) => {
 
     const [frozenLines, setFrozenLines] = useState<LiveLine[] | null>(null);
 
+    // Ceremonial "LÊN SÓNG" moment: plays once when the wall is cut TO live (skipped under reduced-motion).
+    const [igniting, setIgniting] = useState(false);
+    const prevCutRef = useRef(cut);
+    useEffect(() => {
+        const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+        if (prevCutRef.current !== 'live' && cut === 'live' && !reduce) {
+            setIgniting(true);
+            const t = setTimeout(() => setIgniting(false), 1700);
+            prevCutRef.current = cut;
+            return () => clearTimeout(t);
+        }
+        prevCutRef.current = cut;
+    }, [cut]);
+
+    // Speaker lower-third — operator-set, persisted per-machine, synced across /stream windows.
+    const readSpeaker = (): { name: string; title: string } => {
+        try { return { name: '', title: '', ...JSON.parse(localStorage.getItem('proyaku_speaker') || '{}') }; }
+        catch { return { name: '', title: '' }; }
+    };
+    const [speaker, setSpeaker] = useState(readSpeaker);
+    useEffect(() => {
+        const onStorage = (e: StorageEvent) => { if (e.key === 'proyaku_speaker') setSpeaker(readSpeaker()); };
+        window.addEventListener('storage', onStorage);
+        return () => window.removeEventListener('storage', onStorage);
+    }, []);
+    const saveSpeaker = (s: { name: string; title: string }) => {
+        setSpeaker(s);
+        try { localStorage.setItem('proyaku_speaker', JSON.stringify(s)); } catch { /* ignore */ }
+    };
+
     // Demo timer — only runs before the FIRST session start this page-load (never again after).
     useEffect(() => {
         if (!showDemo) return;
@@ -368,8 +398,22 @@ const BilingualStream: React.FC<Props> = ({ isEmbedded = false }) => {
         <div className="bg-background h-screen w-full overflow-hidden flex items-center justify-center font-body-md text-body-md text-on-surface selection:bg-secondary selection:text-on-secondary">
             {/* Exit control (audience surface) */}
             {!isEmbedded && (
-                <div className="absolute top-4 left-4 z-50">
-                    <Link to="/" className="text-on-surface-variant font-label-caps text-label-caps hover:text-primary">&lt; BACK</Link>
+                <div className={`absolute top-4 left-4 z-50 transition-opacity duration-500 ${controlsVisible ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}>
+                    <Link to="/prep" className="flex items-center gap-1 text-on-surface-variant font-label-caps text-label-caps hover:text-secondary">
+                        <span className="material-symbols-outlined text-base">close</span> Thoát
+                    </Link>
+                </div>
+            )}
+
+            {/* Speaker lower-third setter (operator, standalone /stream only) */}
+            {!isEmbedded && (
+                <div className={`absolute top-4 left-1/2 -translate-x-1/2 z-50 flex items-center gap-2 bg-surface-container/90 border border-outline-variant rounded-full px-3 py-1.5 shadow-lg backdrop-blur-sm transition-opacity duration-500 ${controlsVisible ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}>
+                    <span className="material-symbols-outlined text-base text-on-surface-variant">person</span>
+                    <input value={speaker.name} onChange={(e) => saveSpeaker({ ...speaker, name: e.target.value })} placeholder="Tên diễn giả"
+                        className="bg-transparent text-sm text-on-surface placeholder:text-on-surface-variant focus:outline-none w-36" />
+                    <span className="w-px h-5 bg-outline-variant"></span>
+                    <input value={speaker.title} onChange={(e) => saveSpeaker({ ...speaker, title: e.target.value })} placeholder="Chức danh"
+                        className="bg-transparent text-sm text-on-surface placeholder:text-on-surface-variant focus:outline-none w-36" />
                 </div>
             )}
 
@@ -421,10 +465,30 @@ const BilingualStream: React.FC<Props> = ({ isEmbedded = false }) => {
                 {/* Neutral STANDBY slate — after STOP, on a fresh display, or on a 'slate' cut.
                     Opaque so it truly covers the wall (take-to-safe). NEVER the scripted demo. */}
                 {showStandby && (
-                    <div className="absolute inset-0 z-30 flex flex-col items-center justify-center gap-4 pointer-events-none bg-background">
-                        <span className="material-symbols-outlined text-secondary opacity-80" style={{ fontSize: '44px' }}>pause_circle</span>
-                        <span className="font-label-caps text-lg md:text-2xl text-secondary tracking-[0.3em] uppercase opacity-90">PROYAKU — CHỜ TÍN HIỆU</span>
-                        <span className="jp-text font-label-caps text-sm text-on-surface-variant tracking-widest opacity-70">スタンバイ · STANDBY</span>
+                    <div className="absolute inset-0 z-30 flex flex-col items-center justify-center gap-7 pointer-events-none bg-background">
+                        {/* 20th-anniversary ceremonial lockup */}
+                        <div className="flex flex-col items-center">
+                            <div className="flex items-end gap-3">
+                                <span className="font-brand text-secondary leading-none" style={{ fontSize: 'clamp(5rem, 18vh, 12rem)', textShadow: '0 0 44px rgba(232,184,75,0.35)' }}>20</span>
+                                <span className="jp-text text-secondary font-bold pb-3 opacity-90" style={{ fontSize: 'clamp(1.5rem, 5vh, 3rem)' }}>周年</span>
+                            </div>
+                            <div className="mt-2 flex items-center gap-4 font-label-caps text-sm md:text-base text-on-surface-variant tracking-[0.35em]">
+                                <span className="h-px w-10 bg-outline-variant"></span>2006 – 2026<span className="h-px w-10 bg-outline-variant"></span>
+                            </div>
+                            <span className="mt-3 font-bold tracking-[0.24em] text-on-surface uppercase text-lg md:text-2xl">ESUHAI</span>
+                        </div>
+                        <div className="flex flex-col items-center gap-1 opacity-80">
+                            <span className="font-label-caps text-label-caps text-on-surface-variant tracking-[0.3em] uppercase">PROYAKU · CHỜ TÍN HIỆU</span>
+                            <span className="jp-text font-label-caps text-xs text-on-surface-variant tracking-widest opacity-70">スタンバイ · STANDBY</span>
+                        </div>
+                    </div>
+                )}
+
+                {/* Ceremonial "LÊN SÓNG" — plays once when cut to live. */}
+                {igniting && (
+                    <div className="ignite absolute inset-0 z-40 flex flex-col items-center justify-center gap-6 pointer-events-none bg-background">
+                        <span className="ignite-mark font-brand" style={{ fontSize: 'clamp(3rem, 9vh, 6rem)' }}>PROYAKU</span>
+                        <div className="ignite-line w-4/5 max-w-3xl"></div>
                     </div>
                 )}
 
@@ -434,6 +498,16 @@ const BilingualStream: React.FC<Props> = ({ isEmbedded = false }) => {
                         <span className="material-symbols-outlined text-secondary opacity-70 listening-pulse" style={{ fontSize: '44px' }}>hearing</span>
                         <span className="font-bold text-2xl md:text-4xl text-secondary opacity-90">Đang chờ diễn giả…</span>
                         <span className="jp-text text-lg md:text-xl text-on-surface-variant opacity-70">お待ちください</span>
+                    </div>
+                )}
+
+                {/* Speaker lower-third (broadcast style) — shown when a speaker is set and the wall is live. */}
+                {speaker.name && showLive && !showStandby && (
+                    <div className="absolute bottom-24 left-0 w-full px-section-gap z-20 pointer-events-none flex justify-start">
+                        <div className="border-l-2 border-secondary pl-4">
+                            <div className="font-bold text-xl md:text-3xl text-on-surface leading-tight">{speaker.name}</div>
+                            {speaker.title && <div className="font-label-caps text-label-caps text-on-surface-variant tracking-wider mt-1">{speaker.title}</div>}
+                        </div>
                     </div>
                 )}
 

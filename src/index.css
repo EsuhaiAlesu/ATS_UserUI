@@ -279,6 +279,27 @@
     background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)' opacity='0.02'/%3E%3C/svg%3E");
 }
 
+/* Ceremonial "LÊN SÓNG" moment — elegant minimal (gold line draws out, PROYAKU glows & dissolves).
+   Rendered only when the wall is cut to LIVE; skipped entirely under reduced-motion (guarded in JS). */
+.ignite { animation: igniteFade 1.7s ease-out forwards; }
+@keyframes igniteFade { 0% { opacity: 0; } 16% { opacity: 1; } 66% { opacity: 1; } 100% { opacity: 0; } }
+.ignite-line {
+    height: 2px; width: 0; align-self: center;
+    background: linear-gradient(90deg, transparent, var(--color-secondary), transparent);
+    box-shadow: 0 0 18px var(--color-secondary);
+    animation: igniteLine 1.7s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+@keyframes igniteLine { 0% { width: 0; opacity: 0; } 32% { width: 62%; opacity: 1; } 100% { width: 82%; opacity: 0; } }
+.ignite-mark {
+    color: var(--color-secondary); text-shadow: 0 0 34px var(--color-secondary);
+    animation: igniteMark 1.7s ease-out forwards;
+}
+@keyframes igniteMark {
+    0% { opacity: 0; transform: scale(0.96); letter-spacing: 0.55em; }
+    32% { opacity: 1; transform: scale(1); letter-spacing: 0.3em; }
+    100% { opacity: 0; transform: scale(1.05); letter-spacing: 0.3em; }
+}
+
 /* A2.4 / accessibility: honour the OS "Reduce Motion" setting — disable the decorative and
    in-reading-path animations, and show each element in its final (settled) state. */
 @media (prefers-reduced-motion: reduce) {
