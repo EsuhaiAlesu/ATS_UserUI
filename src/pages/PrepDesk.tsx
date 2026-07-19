@@ -97,31 +97,33 @@ const SignalCard: React.FC<{ s: Signal; attest?: Attest; onOpen: () => void; ind
     const st = STATE_ICON[s.state];
     const iconBg = s.state === 'ok' ? 'bg-secondary/15' : s.state === 'fail' ? 'bg-error/15' : 'bg-surface-container-high';
     const subCls = s.state === 'ok' ? 'text-secondary' : s.state === 'fail' ? 'text-error' : 'text-on-surface-variant';
-    const rail = active ? 'bg-secondary' : s.state === 'ok' ? 'bg-secondary/60' : s.state === 'fail' ? 'bg-error/70' : 'bg-outline-variant';
+    const rail = s.state === 'ok' ? 'bg-secondary/60' : s.state === 'fail' ? 'bg-error/70' : 'bg-outline-variant';
     const delay = `${Math.min(index * 40, 400)}ms`;
     return (
         <button type="button" onClick={onOpen} aria-pressed={active}
             style={active ? { animationDelay: delay, boxShadow: '0 12px 28px -10px rgba(244,208,106,0.28), 0 4px 12px -6px rgba(0,0,0,0.5)' } : { animationDelay: delay }}
-            className={`card-in group relative overflow-hidden text-left w-full rounded-2xl p-4 pl-5 flex flex-col gap-2 border-2 transition-all duration-200 ease-out will-change-transform motion-reduce:transition-none motion-reduce:hover:translate-y-0 ${active
+            className={`card-in group relative overflow-hidden text-left w-full h-[108px] rounded-2xl p-4 flex gap-3.5 border-2 transition-all duration-200 ease-out will-change-transform motion-reduce:transition-none motion-reduce:hover:translate-y-0 ${active
                 ? 'bg-surface-container-high bg-gradient-to-b from-surface-container-high to-surface-container border-secondary -translate-y-1'
                 : 'bg-surface-container bg-gradient-to-b from-surface-container to-surface border-outline-variant hover:border-outline hover:-translate-y-0.5 hover:shadow-lg hover:brightness-110'}`}>
-            {/* Thanh trái = trạng thái (hoặc vàng khi đang mở) */}
-            <span className={`absolute left-0 top-0 bottom-0 w-[3px] transition-colors ${rail}`} aria-hidden="true"></span>
-            <div className="flex items-center justify-between gap-2">
-                <span className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 transition-colors ${iconBg}`}>
-                    <span className={`material-symbols-outlined ${st.cls}`} style={{ fontSize: '20px' }} aria-hidden="true">{st.icon}</span>
-                </span>
-                <div className="flex items-center gap-1.5 shrink-0">
-                    {s.kind === 'attest' && <span className="material-symbols-outlined text-[14px] text-on-surface-variant/45" title="Người ký" aria-hidden="true">stylus_note</span>}
-                    <span className={`uppercase font-label-caps text-[9px] tracking-[0.14em] ${WEIGHT_EYEBROW[s.weight]}`}>{WEIGHT_LABEL[s.weight]}</span>
+            {/* Thanh trái = trạng thái — CHỈ khi chưa active; active thì viền vàng ĐỀU như thẻ cha */}
+            {!active && <span className={`absolute left-0 top-0 bottom-0 w-[3px] transition-colors ${rail}`} aria-hidden="true"></span>}
+            <span className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 self-start transition-colors ${iconBg}`}>
+                <span className={`material-symbols-outlined ${st.cls}`} style={{ fontSize: '22px' }} aria-hidden="true">{st.icon}</span>
+            </span>
+            <div className="flex-1 min-w-0 flex flex-col h-full">
+                <div className="flex items-start justify-between gap-2">
+                    <div className="font-semibold text-on-surface text-base leading-snug line-clamp-2">{s.label}</div>
+                    <div className="flex items-center gap-1.5 shrink-0 pt-0.5">
+                        {s.kind === 'attest' && <span className="material-symbols-outlined text-[16px] text-on-surface-variant/45" title="Người ký" aria-hidden="true">stylus_note</span>}
+                        <span className={`uppercase font-label-caps text-[11px] tracking-[0.14em] ${WEIGHT_EYEBROW[s.weight]}`}>{WEIGHT_LABEL[s.weight]}</span>
+                    </div>
                 </div>
-            </div>
-            <div className="font-semibold text-on-surface text-sm leading-snug">{s.label}</div>
-            <div className="flex items-center justify-between gap-2 mt-auto pt-0.5">
-                <span className={`text-xs font-medium ${subCls}`}>{st.title}{s.kind === 'attest' && attest ? ` · ${attest.by}` : ''}</span>
-                <span className={`flex items-center gap-0.5 text-xs shrink-0 transition-colors ${active ? 'text-secondary font-medium' : 'text-on-surface-variant/70 group-hover:text-secondary'}`}>
-                    {active ? 'Đang mở' : 'Chi tiết'}<span className={`material-symbols-outlined text-[14px] transition-transform ${active ? '' : 'group-hover:translate-x-0.5'}`} aria-hidden="true">arrow_forward</span>
-                </span>
+                <div className="flex items-center justify-between gap-2 mt-auto">
+                    <span className={`text-sm font-medium ${subCls}`}>{st.title}{s.kind === 'attest' && attest ? ` · ${attest.by}` : ''}</span>
+                    <span className={`flex items-center gap-0.5 text-sm shrink-0 transition-colors ${active ? 'text-secondary font-medium' : 'text-on-surface-variant/70 group-hover:text-secondary'}`}>
+                        {active ? 'Đang mở' : 'Chi tiết'}<span className={`material-symbols-outlined text-[16px] transition-transform ${active ? '' : 'group-hover:translate-x-0.5'}`} aria-hidden="true">arrow_forward</span>
+                    </span>
+                </div>
             </div>
         </button>
     );
@@ -148,7 +150,7 @@ const SignalDrawer: React.FC<{
                     <span className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${iconBg}`}>
                         <span className={`material-symbols-outlined ${st.cls}`} style={{ fontSize: '22px' }} aria-hidden="true">{st.icon}</span>
                     </span>
-                    <span className="font-semibold text-on-surface text-[15px] flex-1 leading-snug">{s.label}</span>
+                    <span className="font-semibold text-on-surface text-lg flex-1 leading-snug">{s.label}</span>
                     <button onClick={onClose} title="Đóng" className="shrink-0 w-9 h-9 rounded-full flex items-center justify-center text-on-surface-variant hover:text-on-surface hover:bg-surface-container transition-colors"><span className="material-symbols-outlined" aria-hidden="true">close</span></button>
                 </div>
                 <div className="flex-1 overflow-y-auto p-5 space-y-5">
@@ -157,7 +159,7 @@ const SignalDrawer: React.FC<{
                         <span className={`${chip} border ${s.weight === 'blocker' ? 'border-error/50 text-error' : 'border-outline-variant text-on-surface-variant'}`}>{WEIGHT_LABEL[s.weight]}</span>
                         <span className={`${chip} border border-outline-variant text-on-surface-variant inline-flex items-center gap-1`}><span className="material-symbols-outlined text-[14px]" aria-hidden="true">{s.kind === 'attest' ? 'stylus_note' : 'speed'}</span>{s.kind === 'attest' ? 'Người ký' : 'Máy đo'}</span>
                     </div>
-                    <p className="text-sm text-on-surface-variant leading-relaxed">{s.detail}</p>
+                    <p className="text-base text-on-surface-variant leading-relaxed">{s.detail}</p>
                     <div className="space-y-3">
                         {s.to && (
                             <Link to={s.to} onClick={onClose} className="flex items-center justify-between gap-2 bg-surface-container border border-outline-variant rounded-xl px-4 py-3 hover:border-secondary/40 transition-colors">
@@ -169,17 +171,17 @@ const SignalDrawer: React.FC<{
                             <div className="bg-surface-container border border-outline-variant rounded-xl p-4">
                                 {attest ? (
                                     <div className="space-y-2">
-                                        <div className="flex items-center gap-2 text-secondary text-sm"><span className="material-symbols-outlined text-[18px]" aria-hidden="true">verified</span>Đã ký: <b>{attest.by}</b></div>
-                                        <div className="text-xs text-on-surface-variant">{fmtTs(attest.ts)}</div>
-                                        {warn && <div className="text-xs text-error">⚠ ký trước ngày tổng duyệt</div>}
-                                        <button onClick={onClear} className="text-sm text-on-surface-variant hover:text-error underline">Rút xác nhận</button>
+                                        <div className="flex items-center gap-2 text-secondary text-base"><span className="material-symbols-outlined text-[20px]" aria-hidden="true">verified</span>Đã ký: <b>{attest.by}</b></div>
+                                        <div className="text-[13px] text-on-surface-variant">{fmtTs(attest.ts)}</div>
+                                        {warn && <div className="text-[13px] text-error">⚠ ký trước ngày tổng duyệt</div>}
+                                        <button onClick={onClear} className="text-base text-on-surface-variant hover:text-error underline">Rút xác nhận</button>
                                     </div>
                                 ) : (
                                     <div className="space-y-2.5">
-                                        <label className="font-label-caps text-label-caps text-on-surface-variant block">Ký xác nhận (người chịu trách nhiệm)</label>
+                                        <label className="font-label-caps text-[11px] tracking-[0.1em] text-on-surface-variant block">Ký xác nhận (người chịu trách nhiệm)</label>
                                         <div className="flex gap-2">
                                             <input value={signValue} onChange={(e) => onSignChange(e.target.value)} placeholder="Tên người ký"
-                                                className="flex-1 bg-surface text-on-surface border border-outline-variant rounded-lg px-3 py-2 text-sm focus:border-secondary focus:outline-none" />
+                                                className="flex-1 bg-surface text-on-surface border border-outline-variant rounded-lg px-3.5 py-2.5 text-base focus:border-secondary focus:outline-none" />
                                             <button onClick={onSign} disabled={!signValue.trim()} className="bg-secondary text-on-secondary px-4 py-2 rounded-lg font-label-caps text-label-caps hover:opacity-80 disabled:opacity-40">Ký</button>
                                         </div>
                                     </div>
@@ -492,10 +494,10 @@ const PrepDesk: React.FC = () => {
                         <Ring pct={blockPct} size={64} />
                         <div className="flex-1 min-w-0">
                             <div className={`flex items-center gap-2 ${tone.text}`}>
-                                <span className="material-symbols-outlined" aria-hidden="true">{v.icon}</span>
-                                <span className="text-xl md:text-2xl font-bold tracking-tight">{v.word}</span>
+                                <span className="material-symbols-outlined text-[28px]" aria-hidden="true">{v.icon}</span>
+                                <span className="text-2xl md:text-3xl font-bold tracking-tight">{v.word}</span>
                             </div>
-                            <div className="text-sm mt-1 text-on-surface-variant">
+                            <div className="text-base mt-1.5 text-on-surface-variant">
                                 {verdict === 'GO'
                                     ? 'Mọi hạng mục bắt buộc đã hoàn tất.'
                                     : `Còn ${openPre} việc cần hoàn tất${nextBlocker ? ` — kế tiếp: ${nextBlocker.label}` : ''}.`}
@@ -531,28 +533,28 @@ const PrepDesk: React.FC = () => {
                             <div className="flex flex-wrap items-center gap-3">
                                 <button onClick={exportKb} disabled={!data.glossary || !data.script}
                                     className="flex items-center gap-2 bg-secondary text-on-secondary px-4 py-2 rounded-full font-label-caps text-label-caps hover:opacity-80 disabled:opacity-40"><span className="material-symbols-outlined text-[18px]" aria-hidden="true">download</span>Xuất gói tri thức</button>
-                                <Link to="/glossary" className="flex items-center gap-1.5 border border-outline-variant text-on-surface-variant px-3 py-2 text-sm rounded-full hover:border-primary"><span className="material-symbols-outlined text-[18px]" aria-hidden="true">menu_book</span>Từ điển</Link>
-                                <Link to="/script" className="flex items-center gap-1.5 border border-outline-variant text-on-surface-variant px-3 py-2 text-sm rounded-full hover:border-primary"><span className="material-symbols-outlined text-[18px]" aria-hidden="true">theater_comedy</span>Kịch bản</Link>
+                                <Link to="/glossary" className="flex items-center gap-1.5 border border-outline-variant text-on-surface-variant px-3 py-2 text-base rounded-full hover:border-primary"><span className="material-symbols-outlined text-[18px]" aria-hidden="true">menu_book</span>Từ điển</Link>
+                                <Link to="/script" className="flex items-center gap-1.5 border border-outline-variant text-on-surface-variant px-3 py-2 text-base rounded-full hover:border-primary"><span className="material-symbols-outlined text-[18px]" aria-hidden="true">theater_comedy</span>Kịch bản</Link>
                             </div>
                             <div>
                                 <div className="font-label-caps text-label-caps text-on-surface-variant mb-2">Ghi sự cố (nền cho lần sau)</div>
                                 <div className="flex gap-2">
                                     <input value={incident} onChange={(e) => setIncident(e.target.value)} placeholder="vd: 'Kaizen' nghe thành 'kaisen'…"
-                                        className="flex-1 bg-surface text-on-surface border border-outline-variant rounded-DEFAULT px-3 py-2 text-sm" />
+                                        className="flex-1 bg-surface text-on-surface border border-outline-variant rounded-DEFAULT px-3 py-2 text-base" />
                                     <button onClick={() => { setPrepState(addIncident(incident)); setIncident(''); }} disabled={!incident.trim()}
-                                        className="border border-outline-variant text-on-surface-variant px-3 py-2 text-sm rounded-DEFAULT hover:border-primary disabled:opacity-40">Ghi</button>
+                                        className="border border-outline-variant text-on-surface-variant px-3 py-2 text-base rounded-DEFAULT hover:border-primary disabled:opacity-40">Ghi</button>
                                 </div>
                                 <ul className="mt-2 space-y-1">
                                     {prep.incidents.map((it, i) => (
-                                        <li key={i} className="text-sm text-on-surface-variant flex items-start gap-2">
+                                        <li key={i} className="text-base text-on-surface-variant flex items-start gap-2">
                                             <button onClick={() => setPrepState(removeIncident(i))} className="text-error hover:opacity-70">✕</button>
                                             <span>{it}</span>
                                         </li>
                                     ))}
                                 </ul>
                             </div>
-                            <label className="flex items-center gap-2 text-sm text-on-surface-variant">
-                                <input type="checkbox" checked={!!prep.debrief['done']} onChange={(e) => setPrepState(setDebrief('done', e.target.checked))} className="accent-secondary" />
+                            <label className="flex items-center gap-2 text-base text-on-surface-variant">
+                                <input type="checkbox" checked={!!prep.debrief['done']} onChange={(e) => setPrepState(setDebrief('done', e.target.checked))} className="w-4 h-4 accent-secondary" />
                                 Đã họp rút kinh nghiệm cho sự kiện kế
                             </label>
                         </div>
