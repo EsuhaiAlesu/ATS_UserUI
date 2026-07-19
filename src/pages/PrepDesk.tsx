@@ -427,17 +427,42 @@ const PrepDesk: React.FC = () => {
                 <button onClick={() => setTick((t) => t + 1)} disabled={data.loading} className="border border-outline-variant text-on-surface-variant px-3 py-1.5 text-sm rounded-DEFAULT hover:text-primary hover:border-primary disabled:opacity-40">{data.loading ? 'Đang đo…' : 'Đo lại'}</button>
             </PageHeader>
 
-            <div className="flex-1 overflow-y-auto">
-                <main className="max-w-[1600px] mx-auto px-6 md:px-10 py-8 space-y-6">
-                    {/* VERDICT — refined hero (Mercury: soft tint, calm) */}
-                    <div className={`rounded-2xl border p-6 flex items-center gap-5 ${tone.wrap}`}>
-                        <Ring pct={blockPct} size={72} />
+            <div className="flex-1 flex min-h-0 gap-5 p-5 md:p-8 overflow-hidden">
+                {/* CỘT 1 — menu pha: 3 ô chia đều chiều cao; active = viền + màu + icon + font to hơn */}
+                <aside className="w-60 xl:w-72 shrink-0 flex flex-col gap-3">
+                    {PHASES.map((ph) => {
+                        const c = phaseCount(ph.key);
+                        const activeP = selPhase === ph.key;
+                        return (
+                            <button key={ph.key} onClick={() => setSelPhase(ph.key)}
+                                className={`flex-1 flex flex-col justify-center gap-3 rounded-2xl border-2 p-5 text-left transition-all duration-200 ${activeP ? 'border-secondary bg-secondary/10 shadow-lg shadow-black/20' : 'border-outline-variant hover:border-primary/50 hover:bg-surface-container'}`}>
+                                <div className="flex items-center gap-3">
+                                    <span className={`w-11 h-11 rounded-xl flex items-center justify-center shrink-0 transition-colors ${activeP ? 'bg-secondary text-on-secondary' : 'bg-surface-container-high text-on-surface-variant'}`}>
+                                        <span className="material-symbols-outlined" style={{ fontSize: '24px' }} aria-hidden="true">{ph.icon}</span>
+                                    </span>
+                                    <div className="min-w-0">
+                                        <div className={`transition-all leading-tight ${activeP ? 'text-secondary font-bold text-lg' : 'text-on-surface font-semibold text-[15px]'}`}>{ph.name}</div>
+                                        <div className="text-xs text-on-surface-variant mt-0.5 tabular-nums">{c.ok}/{c.total} đạt{c.openBlockers > 0 ? ` · ${c.openBlockers} chặn` : ''}</div>
+                                    </div>
+                                </div>
+                                <div className="h-1.5 rounded-full bg-surface-container-high overflow-hidden">
+                                    <div className={`h-full rounded-full transition-all duration-500 ${activeP ? 'bg-secondary' : 'bg-outline/50'}`} style={{ width: `${c.pct}%` }}></div>
+                                </div>
+                            </button>
+                        );
+                    })}
+                </aside>
+
+                {/* CỘT 2–3 — verdict + thẻ nội dung của pha đang chọn */}
+                <div className="flex-1 flex flex-col min-h-0 gap-5">
+                    <div className={`shrink-0 rounded-2xl border p-5 flex items-center gap-5 ${tone.wrap}`}>
+                        <Ring pct={blockPct} size={64} />
                         <div className="flex-1 min-w-0">
                             <div className={`flex items-center gap-2 ${tone.text}`}>
                                 <span className="material-symbols-outlined" aria-hidden="true">{v.icon}</span>
                                 <span className="text-xl md:text-2xl font-bold tracking-tight">{v.word}</span>
                             </div>
-                            <div className="text-sm mt-1.5 text-on-surface-variant">
+                            <div className="text-sm mt-1 text-on-surface-variant">
                                 {verdict === 'GO'
                                     ? 'Mọi hạng mục bắt buộc đã hoàn tất.'
                                     : `Còn ${openPre} việc cần hoàn tất${nextBlocker ? ` — kế tiếp: ${nextBlocker.label}` : ''}.`}
@@ -450,26 +475,8 @@ const PrepDesk: React.FC = () => {
                                 : null}
                     </div>
 
-                    {/* PHASE CARDS */}
-                    <div className="grid grid-cols-3 gap-3">
-                        {PHASES.map((ph) => {
-                            const c = phaseCount(ph.key);
-                            const activeP = selPhase === ph.key;
-                            return (
-                                <button key={ph.key} onClick={() => setSelPhase(ph.key)}
-                                    className={`flex flex-col items-center gap-2 px-3 py-4 rounded-xl border transition-colors ${activeP ? 'border-secondary bg-surface-container' : 'border-outline-variant hover:border-primary'}`}>
-                                    <div className="relative flex items-center justify-center">
-                                        <Ring pct={c.pct} size={48} />
-                                        <span className={`material-symbols-outlined absolute text-[18px] ${activeP ? 'text-secondary' : 'text-on-surface-variant'}`} aria-hidden="true">{ph.icon}</span>
-                                    </div>
-                                    <div className={`font-label-caps text-label-caps ${activeP ? 'text-secondary' : 'text-on-surface'}`}>{ph.name}</div>
-                                    <div className="text-xs text-on-surface-variant tabular-nums">{c.ok}/{c.total}{c.openBlockers > 0 ? ` · ${c.openBlockers}✗` : ''}</div>
-                                </button>
-                            );
-                        })}
-                    </div>
-
-                    {/* In-event quick actions */}
+                    <div className="flex-1 overflow-y-auto min-h-0 -mr-2 pr-2 space-y-4">
+                        {/* In-event quick actions */}
                     {selPhase === 'in' && (
                         <div className="grid sm:grid-cols-3 gap-3">
                             <Link to="/audio" className="flex items-center justify-center gap-2 bg-primary text-on-primary rounded-xl px-4 py-3.5 font-label-caps text-label-caps hover:opacity-90"><span className="material-symbols-outlined text-[20px]" aria-hidden="true">tune</span>Điều khiển</Link>
@@ -478,12 +485,12 @@ const PrepDesk: React.FC = () => {
                         </div>
                     )}
 
-                    {/* READINESS CARDS (Mercury) — bấm thẻ mở panel chi tiết (Raycast) */}
-                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4 gap-4">
-                        {shownSignals.map((s, i) => (
-                            <SignalCard key={s.id} s={s} attest={prep.attest[s.id]} index={i} onOpen={() => openCard(s.id)} />
-                        ))}
-                    </div>
+                        {/* READINESS CARDS (Mercury) — bấm thẻ mở panel chi tiết (Raycast) */}
+                        <div className="grid grid-cols-1 xl:grid-cols-2 2xl:grid-cols-3 gap-4">
+                            {shownSignals.map((s, i) => (
+                                <SignalCard key={s.id} s={s} attest={prep.attest[s.id]} index={i} onOpen={() => openCard(s.id)} />
+                            ))}
+                        </div>
 
                     {/* POST-EVENT actions */}
                     {selPhase === 'post' && (
@@ -516,8 +523,9 @@ const PrepDesk: React.FC = () => {
                                 Đã họp rút kinh nghiệm cho sự kiện kế
                             </label>
                         </div>
-                    )}
-                </main>
+                        )}
+                    </div>
+                </div>
             </div>
 
             {openSignal && (
