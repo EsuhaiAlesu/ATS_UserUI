@@ -9,19 +9,25 @@ import { hasUnsaved } from '../lib/guards';
 // visible. Narrow so the content area stays wide-open. Reads context only; owns no session state.
 
 interface NavItem { to: string; label: string; icon: string; external?: boolean }
-const NAV: NavItem[][] = [
-    [{ to: '/prep', label: 'Chỉ huy', icon: 'dashboard' }],
-    [
+// 4 nhóm vòng đời (có nhãn trong rail): Chuẩn bị · Vận hành · Cài đặt · Sự cố.
+const NAV: { group: string; items: NavItem[] }[] = [
+    { group: 'Chuẩn bị', items: [
+        { to: '/prep', label: 'Chỉ huy', icon: 'dashboard' },
         { to: '/script', label: 'Kịch bản', icon: 'theater_comedy' },
         { to: '/glossary', label: 'Từ điển', icon: 'menu_book' },
         { to: '/voices', label: 'Giọng', icon: 'record_voice_over' },
-    ],
-    [
+    ] },
+    { group: 'Vận hành', items: [
         { to: '/audio', label: 'Điều khiển', icon: 'tune' },
         { to: '/stream', label: 'Tường', icon: 'subtitles', external: true },
         { to: '/reveal', label: 'Reveal', icon: 'auto_awesome', external: true },
-    ],
-    [{ to: '/settings', label: 'Cài đặt', icon: 'settings' }],
+    ] },
+    { group: 'Cài đặt', items: [
+        { to: '/settings', label: 'Cài đặt', icon: 'settings' },
+    ] },
+    { group: 'Sự cố', items: [
+        { to: '/report', label: 'Báo cáo', icon: 'report' },
+    ] },
 ];
 
 function master(backendOnline: boolean, status: LiveStatus): { text: string; cls: string; dot: string } {
@@ -63,18 +69,18 @@ const OperatorLayout: React.FC = () => {
                     <span className="font-label-caps text-on-surface-variant text-sm">訳</span>
                 </div>
 
-                <nav className="flex-1 overflow-y-auto py-2 px-2 flex flex-col gap-1">
-                    {NAV.map((group, gi) => (
-                        <React.Fragment key={gi}>
-                            {gi > 0 && <div className="h-px bg-outline-variant/50 mx-2 my-1.5"></div>}
-                            {group.map((it) => (
+                <nav className="flex-1 overflow-y-auto py-2 px-2 flex flex-col gap-2">
+                    {NAV.map((g, gi) => (
+                        <div key={gi} className="flex flex-col gap-1">
+                            <div className="px-0.5 pt-1 pb-0.5 text-center font-label-caps text-[8px] tracking-[0.06em] uppercase text-on-surface-variant/45 leading-none truncate" title={g.group}>{g.group}</div>
+                            {g.items.map((it) => (
                                 <NavLink key={it.to} to={it.to} title={it.label} onClick={(e) => guardLeave(e, it.to)} className={({ isActive }) => itemClass(isActive)}>
                                     <span className="material-symbols-outlined text-[22px]">{it.icon}</span>
                                     <span className="text-[10px] leading-none font-medium tracking-tight">{it.label}</span>
                                     {it.external && <span className="material-symbols-outlined absolute top-1 right-1 text-[11px] opacity-60">open_in_new</span>}
                                 </NavLink>
                             ))}
-                        </React.Fragment>
+                        </div>
                     ))}
                 </nav>
 
