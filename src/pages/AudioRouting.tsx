@@ -476,7 +476,7 @@ const AudioRouting: React.FC = () => {
 
                     {/* Footer */}
                     <footer className="bg-surface-container-lowest dark:bg-surface-container-lowest border-t border-outline-variant dark:border-outline-variant flex justify-between items-center w-full px-container-padding py-4 z-10 relative">
-                        <p className="font-label-caps text-label-caps text-on-surface-variant dark:text-on-surface-variant">© 2026 PRECISION LINGUISTICS. TWENTIETH ANNIVERSARY EDITION.</p>
+                        <p className="font-label-caps text-label-caps text-on-surface-variant dark:text-on-surface-variant">© 2026 PROYAKU · ESUHAI. TWENTIETH ANNIVERSARY EDITION.</p>
                         <div className="flex gap-6">
                             <a className="font-label-caps text-label-caps text-on-surface-variant hover:text-primary transition-colors" href="#">Privacy Protocol</a>
                             <a className="font-label-caps text-label-caps text-on-surface-variant hover:text-primary transition-colors" href="#">Service Terms</a>

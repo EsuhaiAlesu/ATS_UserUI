@@ -49,7 +49,7 @@ const RevealMoment: React.FC<Props> = ({ isEmbedded = false }) => {
                 {/* Central Branding */}
                 <div className="mb-section-gap reveal-text reveal-delay-1 flex flex-col items-center">
                     <h1 className="font-display-lg text-display-lg md:font-display-lg md:text-display-lg text-secondary tracking-tighter" style={{ textShadow: '0 0 20px var(--color-secondary)' }}>
-                        花訳 | Hana-Yaku
+                        PROYAKU
                     </h1>
                     <div className="h-[1px] w-32 bg-secondary opacity-50 mt-stack-md mx-auto"></div>
                 </div>

@@ -91,7 +91,7 @@ function loginPage(error) {
     color:#f4e9ea;font-size:15px}
   input:focus{outline:none;border-color:#e8b84b}
   button{width:100%;margin-top:22px;padding:12px;border:0;border-radius:9px;cursor:pointer;
-    background:#c8102e;color:#fff;font-weight:700;font-size:15px;letter-spacing:.03em}
+    background:#e8b84b;color:#241a03;font-weight:700;font-size:15px;letter-spacing:.03em}
   button:hover{opacity:.9}
   .err{margin-top:16px;color:#ff9aa2;font-size:13px;text-align:center}
   .foot{margin-top:18px;color:#8f7276;font-size:11px;text-align:center}

@@ -365,7 +365,7 @@ const BilingualStream: React.FC<Props> = ({ isEmbedded = false }) => {
     const canvasClass = fill ? 'audience-fill' : 'audience-display';
 
     return (
-        <div className="bg-primary-container h-screen w-full overflow-hidden flex items-center justify-center font-body-md text-body-md text-on-surface selection:bg-secondary selection:text-on-secondary">
+        <div className="bg-background h-screen w-full overflow-hidden flex items-center justify-center font-body-md text-body-md text-on-surface selection:bg-secondary selection:text-on-secondary">
             {/* Minimal nav just for testing */}
             {!isEmbedded && (
                 <div className="absolute top-4 left-4 z-50">
@@ -374,7 +374,7 @@ const BilingualStream: React.FC<Props> = ({ isEmbedded = false }) => {
             )}
 
             {/* Main Display Canvas — 16:9 letterbox, or fills the screen for a single-language monitor */}
-            <main className={`${canvasClass} w-full bg-primary-container relative flex flex-col ceremonial-bg overflow-hidden shadow-2xl`}>
+            <main className={`${canvasClass} w-full bg-background relative flex flex-col ceremonial-bg overflow-hidden shadow-2xl`}>
                 {/* Ambient Top Glow for Depth */}
                 <div className="absolute top-0 left-0 w-full h-[30%] bg-gradient-to-b from-surface-container/50 to-transparent pointer-events-none z-0"></div>
 
@@ -387,7 +387,7 @@ const BilingualStream: React.FC<Props> = ({ isEmbedded = false }) => {
                     {/* Branding (Moved from Footer to Header Center) */}
                     <div className="flex-1 flex flex-col items-center justify-center gap-1">
                         <span className="material-symbols-outlined text-secondary opacity-90" style={{ fontVariationSettings: "'FILL' 1", fontSize: '32px' }}>all_inclusive</span>
-                        <span className="font-label-caps text-xs md:text-sm font-bold text-secondary tracking-[0.3em] opacity-80 uppercase">Hana-Yaku AI</span>
+                        <span className="font-label-caps text-xs md:text-sm font-bold text-secondary tracking-[0.3em] opacity-80 uppercase">PROYAKU AI</span>
                     </div>
 
                     <div className="flex-1 flex justify-end">
@@ -421,7 +421,7 @@ const BilingualStream: React.FC<Props> = ({ isEmbedded = false }) => {
                 {/* Neutral STANDBY slate — after STOP, on a fresh display, or on a 'slate' cut.
                     Opaque so it truly covers the wall (take-to-safe). NEVER the scripted demo. */}
                 {showStandby && (
-                    <div className="absolute inset-0 z-30 flex flex-col items-center justify-center gap-4 pointer-events-none bg-primary-container">
+                    <div className="absolute inset-0 z-30 flex flex-col items-center justify-center gap-4 pointer-events-none bg-background">
                         <span className="material-symbols-outlined text-secondary opacity-80" style={{ fontSize: '44px' }}>pause_circle</span>
                         <span className="font-label-caps text-lg md:text-2xl text-secondary tracking-[0.3em] uppercase opacity-90">PROYAKU — CHỜ TÍN HIỆU</span>
                         <span className="jp-text font-label-caps text-sm text-on-surface-variant tracking-widest opacity-70">スタンバイ · STANDBY</span>
