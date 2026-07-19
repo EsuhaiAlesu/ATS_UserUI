@@ -203,7 +203,7 @@ const AudioRouting: React.FC = () => {
                             {active && (
                                 <div className="mb-6 border border-outline-variant bg-surface-container-lowest rounded-DEFAULT px-4 py-3">
                                     <div className="flex flex-wrap items-center gap-x-6 gap-y-2 font-label-caps text-label-caps" style={{ fontFamily: 'ui-monospace, monospace' }}>
-                                        <span className="text-secondary">TRUST HUD</span>
+                                        <span className="text-on-surface-variant">TRUST HUD</span>
                                         <span className="text-on-surface-variant">
                                             HƯỚNG <span className="text-primary">{dir || '—'}</span>
                                             {session.sourceLang ? ` ${pct(session.sourceLang.prob)}` : ''}
@@ -231,8 +231,8 @@ const AudioRouting: React.FC = () => {
                                         <div className="pulse-dot"></div>
                                     </div>
                                     <div className="flex items-center gap-3 mb-6 pb-4 border-b border-outline-variant">
-                                        <span className="material-symbols-outlined text-secondary">mic_external_on</span>
-                                        <h3 className="font-headline-sm text-headline-sm text-secondary">Source</h3>
+                                        <span className="material-symbols-outlined text-on-surface-variant">mic_external_on</span>
+                                        <h3 className="font-headline-sm text-headline-sm text-on-surface">Source</h3>
                                     </div>
                                     <div className="space-y-4">
                                         <div>
@@ -279,7 +279,7 @@ const AudioRouting: React.FC = () => {
                                 <div className="flex flex-col items-center w-full lg:w-1/4 my-8 lg:my-0">
                                     <div className="h-16 w-px bg-outline-variant lg:hidden"></div>
                                     <div className={`bg-surface-container-lowest border p-4 rounded-DEFAULT text-center w-full relative ${session.backendOnline ? 'border-secondary' : 'border-error'}`}>
-                                        <span className="font-label-caps text-label-caps text-secondary block mb-1">CORE ENGINE</span>
+                                        <span className="font-label-caps text-label-caps text-on-surface-variant block mb-1">CORE ENGINE</span>
                                         <span className="font-body-md text-body-md text-on-surface block">
                                             {session.backendOnline ? 'Lõi dịch PROYAKU' : 'BACKEND OFFLINE'}
                                         </span>
@@ -360,7 +360,7 @@ const AudioRouting: React.FC = () => {
                                     {/* VI Channel */}
                                     <div className="bg-surface-container border border-outline-variant p-6 rounded-DEFAULT relative">
                                         <div className="flex justify-between items-center mb-4 border-b border-outline-variant pb-2">
-                                            <span className="font-label-caps text-label-caps text-primary">VIETNAMESE CH</span>
+                                            <span className="font-label-caps text-label-caps text-on-surface-variant">VIETNAMESE CH</span>
                                             <span className="font-label-caps text-label-caps text-on-surface-variant">JA → VI</span>
                                         </div>
                                         <div className="space-y-4">
@@ -387,7 +387,7 @@ const AudioRouting: React.FC = () => {
                                     {/* JA Channel */}
                                     <div className="bg-surface-container border border-outline-variant p-6 rounded-DEFAULT relative">
                                         <div className="flex justify-between items-center mb-4 border-b border-outline-variant pb-2">
-                                            <span className="font-label-caps text-label-caps text-primary">JAPANESE CH</span>
+                                            <span className="font-label-caps text-label-caps text-on-surface-variant">JAPANESE CH</span>
                                             <span className="font-label-caps text-label-caps text-on-surface-variant">VI → JA</span>
                                         </div>
                                         <div className="space-y-4">

@@ -81,7 +81,7 @@ const VoiceLane: React.FC<{
     return (
         <div className="border border-outline-variant rounded-DEFAULT p-4 bg-surface">
             <div className="flex items-center justify-between mb-3">
-                <span className="font-label-caps text-label-caps text-secondary">{title}</span>
+                <span className="font-label-caps text-label-caps text-on-surface">{title}</span>
                 <span className="font-label-caps text-label-caps text-on-surface-variant">{lang === 'vi' ? 'JA → VI' : 'VI → JA'}</span>
             </div>
             <div className="space-y-3">
@@ -293,7 +293,7 @@ const VoiceStudio: React.FC = () => {
                 <section className="bg-surface-container border border-outline-variant rounded-DEFAULT p-6">
                     <div className="flex items-start justify-between gap-4 mb-4 pb-3 border-b border-outline-variant">
                         <div>
-                            <h2 className="font-headline-sm text-headline-sm text-secondary">1 · Chọn giọng đọc (TTS)</h2>
+                            <h2 className="font-headline-sm text-headline-sm text-on-surface">1 · Chọn giọng đọc (TTS)</h2>
                             <p className="font-label-caps text-label-caps text-on-surface-variant mt-1">Chọn &amp; nghe thử giọng máy đọc cho từng ngôn ngữ.</p>
                         </div>
                         <label className="flex items-center gap-2 shrink-0 cursor-pointer">
@@ -326,7 +326,7 @@ const VoiceStudio: React.FC = () => {
                 {/* Card 2 — Pronunciation Clinic */}
                 <section className="bg-surface-container border border-outline-variant rounded-DEFAULT p-6">
                     <div className="mb-4 pb-3 border-b border-outline-variant">
-                        <h2 className="font-headline-sm text-headline-sm text-secondary">2 · Phòng luyện phát âm (Pronunciation Clinic)</h2>
+                        <h2 className="font-headline-sm text-headline-sm text-on-surface">2 · Phòng luyện phát âm (Pronunciation Clinic)</h2>
                         <p className="font-label-caps text-label-caps text-on-surface-variant mt-1">Đọc to tên riêng &amp; thuật ngữ → máy học nghe đúng (thêm luật misheard→correct vào glossary).</p>
                     </div>
                     <PronunciationClinic />
