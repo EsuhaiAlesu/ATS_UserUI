@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useLiveSession } from '../lib/LiveSessionContext';
 import { API_BASE, getHealth, getGlossary, getScript, getAudioDevices, getAudioOutputs } from '../lib/api';
@@ -81,25 +81,29 @@ const WEIGHT_LABEL: Record<Weight, string> = { blocker: 'Bắt buộc', importan
 
 // A refined, tappable readiness card (Mercury aesthetic): calm surface, clear status, subtle
 // "chi tiết →" reveal on hover. Clicking opens the detail drawer. Module-scope for stable identity.
-const SignalCard: React.FC<{ s: Signal; attest?: Attest; onOpen: () => void }> = ({ s, attest, onOpen }) => {
+const SignalCard: React.FC<{ s: Signal; attest?: Attest; onOpen: () => void; index: number }> = ({ s, attest, onOpen, index }) => {
     const st = STATE_ICON[s.state];
+    const iconBg = s.state === 'ok' ? 'bg-secondary/15' : s.state === 'fail' ? 'bg-error/15' : 'bg-surface-container-high';
     const subCls = s.state === 'ok' ? 'text-secondary' : s.state === 'fail' ? 'text-error' : 'text-on-surface-variant';
     return (
         <button type="button" onClick={onOpen}
-            className="group text-left w-full bg-surface-container border border-outline-variant rounded-2xl p-4 flex flex-col gap-3 hover:border-secondary/40 hover:bg-surface-container-high transition-all">
+            className="card-in group text-left w-full bg-surface-container border border-outline-variant rounded-2xl p-5 flex flex-col gap-4 hover:border-secondary/50 hover:bg-surface-container-high hover:-translate-y-0.5 hover:shadow-lg hover:shadow-black/25 transition-all duration-200"
+            style={{ animationDelay: `${Math.min(index * 40, 400)}ms` }}>
             <div className="flex items-start justify-between gap-2">
-                <span className={`material-symbols-outlined ${st.cls}`} aria-hidden="true">{st.icon}</span>
+                <span className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${iconBg}`}>
+                    <span className={`material-symbols-outlined ${st.cls}`} style={{ fontSize: '22px' }} aria-hidden="true">{st.icon}</span>
+                </span>
                 <div className="flex items-center gap-1.5 shrink-0">
-                    {s.kind === 'attest' && <span className="material-symbols-outlined text-[15px] text-on-surface-variant/50" title="Người ký" aria-hidden="true">stylus_note</span>}
-                    {s.weight === 'blocker' && <span className="font-label-caps text-[9px] px-1.5 py-0.5 rounded-full bg-error/15 text-error">Bắt buộc</span>}
+                    {s.kind === 'attest' && <span className="material-symbols-outlined text-[16px] text-on-surface-variant/50" title="Người ký" aria-hidden="true">stylus_note</span>}
+                    {s.weight === 'blocker' && <span className="font-label-caps text-[9px] px-2 py-0.5 rounded-full bg-error/15 text-error">Bắt buộc</span>}
                 </div>
             </div>
             <div className="flex-1">
-                <div className="font-medium text-on-surface text-[15px] leading-snug">{s.label}</div>
-                <div className={`text-xs mt-1 ${subCls}`}>{st.title}{s.kind === 'attest' && attest ? ` · ${attest.by}` : ''}</div>
+                <div className="font-semibold text-on-surface text-[15px] leading-snug">{s.label}</div>
+                <div className={`text-xs mt-1.5 font-medium ${subCls}`}>{st.title}{s.kind === 'attest' && attest ? ` · ${attest.by}` : ''}</div>
             </div>
-            <div className="flex items-center gap-1 text-xs text-on-surface-variant opacity-0 group-hover:opacity-100 transition-opacity">
-                Chi tiết<span className="material-symbols-outlined text-[15px]" aria-hidden="true">arrow_forward</span>
+            <div className="flex items-center gap-1 text-xs text-on-surface-variant/70 group-hover:text-secondary transition-colors">
+                Chi tiết<span className="material-symbols-outlined text-[15px] transition-transform group-hover:translate-x-0.5" aria-hidden="true">arrow_forward</span>
             </div>
         </button>
     );
@@ -108,16 +112,17 @@ const SignalCard: React.FC<{ s: Signal; attest?: Attest; onOpen: () => void }> =
 // The detail drawer (Raycast aesthetic): tap a card → a slide-over shows the full context + the
 // available actions (đi tới trang, hoặc ký/rút xác nhận). Module-scope so the sign input keeps focus.
 const SignalDrawer: React.FC<{
-    s: Signal; attest?: Attest; signValue: string;
+    s: Signal; attest?: Attest; signValue: string; shown: boolean;
     onSignChange: (v: string) => void; onSign: () => void; onClear: () => void; onClose: () => void;
-}> = ({ s, attest, signValue, onSignChange, onSign, onClear, onClose }) => {
+}> = ({ s, attest, signValue, shown, onSignChange, onSign, onClear, onClose }) => {
     const st = STATE_ICON[s.state];
     const warn = signedBeforeRehearsal(attest);
     const chip = 'px-2.5 py-1 rounded-full font-label-caps text-label-caps';
     return (
         <>
-            <div className="absolute inset-0 bg-background/60 z-30" onClick={onClose}></div>
-            <aside className="absolute top-0 right-0 h-full w-full max-w-[440px] bg-surface-container-lowest border-l border-outline-variant z-40 flex flex-col shadow-2xl toast-in">
+            <div className={`absolute inset-0 bg-background/50 backdrop-blur-[1px] z-30 transition-opacity duration-300 ${shown ? 'opacity-100' : 'opacity-0'}`} onClick={onClose}></div>
+            <aside style={{ transitionTimingFunction: 'cubic-bezier(0.16,1,0.3,1)' }}
+                className={`absolute top-0 right-0 h-full w-full max-w-[460px] bg-surface-container-lowest border-l border-outline-variant z-40 flex flex-col shadow-2xl transition-transform duration-300 will-change-transform ${shown ? 'translate-x-0' : 'translate-x-full'}`}>
                 <div className="shrink-0 flex items-center gap-3 px-5 h-16 border-b border-outline-variant">
                     <span className={`material-symbols-outlined ${st.cls}`} aria-hidden="true">{st.icon}</span>
                     <span className="font-semibold text-on-surface flex-1 leading-snug">{s.label}</span>
@@ -174,6 +179,8 @@ const PrepDesk: React.FC = () => {
     const [selPhase, setSelPhase] = useState<Phase>('pre');
     const [incident, setIncident] = useState('');
     const [openId, setOpenId] = useState<string | null>(null);
+    const [drawerShown, setDrawerShown] = useState(false);
+    const closeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
     // Fetch every backend-dependent artefact independently — one failure must not sink the rest.
     useEffect(() => {
@@ -209,6 +216,22 @@ const PrepDesk: React.FC = () => {
 
     const doSign = (id: string) => { setPrepState(signAttest(id, signName[id] ?? '')); toast.success('Đã ký xác nhận'); };
     const doClear = (id: string) => { setPrepState(clearAttest(id)); toast.info('Đã rút xác nhận'); };
+
+    // Detail-drawer open/close: enter via a CSS keyframe (reliable), exit via a transform transition
+    // then unmount after it finishes (300ms).
+    const openCard = (id: string) => {
+        if (closeTimer.current) { clearTimeout(closeTimer.current); closeTimer.current = null; }
+        setOpenId(id);
+        if (!drawerShown) {
+            setDrawerShown(false);                          // mount off-screen…
+            setTimeout(() => setDrawerShown(true), 20);     // …then slide in via the transform transition
+        }
+    };
+    const closeDrawer = () => {
+        setDrawerShown(false);
+        if (closeTimer.current) clearTimeout(closeTimer.current);
+        closeTimer.current = setTimeout(() => setOpenId(null), 300);
+    };
 
     const signals: Signal[] = useMemo(() => {
         const tts = loadTtsPrefs();   // localStorage; re-read whenever this memo recomputes
@@ -405,7 +428,7 @@ const PrepDesk: React.FC = () => {
             </PageHeader>
 
             <div className="flex-1 overflow-y-auto">
-                <main className="max-w-3xl mx-auto px-6 py-8 space-y-6">
+                <main className="max-w-[1600px] mx-auto px-6 md:px-10 py-8 space-y-6">
                     {/* VERDICT — refined hero (Mercury: soft tint, calm) */}
                     <div className={`rounded-2xl border p-6 flex items-center gap-5 ${tone.wrap}`}>
                         <Ring pct={blockPct} size={72} />
@@ -456,9 +479,9 @@ const PrepDesk: React.FC = () => {
                     )}
 
                     {/* READINESS CARDS (Mercury) — bấm thẻ mở panel chi tiết (Raycast) */}
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                        {shownSignals.map((s) => (
-                            <SignalCard key={s.id} s={s} attest={prep.attest[s.id]} onOpen={() => setOpenId(s.id)} />
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4 gap-4">
+                        {shownSignals.map((s, i) => (
+                            <SignalCard key={s.id} s={s} attest={prep.attest[s.id]} index={i} onOpen={() => openCard(s.id)} />
                         ))}
                     </div>
 
@@ -498,11 +521,11 @@ const PrepDesk: React.FC = () => {
             </div>
 
             {openSignal && (
-                <SignalDrawer s={openSignal} attest={prep.attest[openSignal.id]}
+                <SignalDrawer s={openSignal} attest={prep.attest[openSignal.id]} shown={drawerShown}
                     signValue={signName[openSignal.id] ?? ''}
                     onSignChange={(val) => setSignName((m) => ({ ...m, [openSignal.id]: val }))}
                     onSign={() => doSign(openSignal.id)} onClear={() => doClear(openSignal.id)}
-                    onClose={() => setOpenId(null)} />
+                    onClose={closeDrawer} />
             )}
         </div>
     );

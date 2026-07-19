@@ -325,6 +325,21 @@
     100% { background-position: -100% 0; }
 }
 
+/* Card entrance — a soft staggered fade-up. `backwards` fill hides it during the stagger delay,
+   then releases so :hover transforms still work after it settles. */
+.card-in { animation: cardIn 0.42s cubic-bezier(0.16, 1, 0.3, 1) backwards; }
+@keyframes cardIn {
+    from { opacity: 0; transform: translateY(10px); }
+    to { opacity: 1; transform: none; }
+}
+
+/* Detail drawer — CSS-driven enter (reliable even when rAF is throttled in a background tab);
+   exit is handled by a transform transition when `shown` flips to false. */
+.drawer-slide-in { animation: drawerSlideIn 0.32s cubic-bezier(0.16, 1, 0.3, 1); }
+@keyframes drawerSlideIn { from { transform: translateX(100%); } to { transform: translateX(0); } }
+.drawer-fade-in { animation: drawerFadeIn 0.3s ease; }
+@keyframes drawerFadeIn { from { opacity: 0; } to { opacity: 1; } }
+
 /* A2.4 / accessibility: honour the OS "Reduce Motion" setting — disable the decorative and
    in-reading-path animations, and show each element in its final (settled) state. */
 @media (prefers-reduced-motion: reduce) {
@@ -335,6 +350,9 @@
     .animate-splash-content,
     .toast-in,
     .skeleton,
+    .card-in,
+    .drawer-slide-in,
+    .drawer-fade-in,
     .reveal-text {
         animation: none !important;
     }
