@@ -97,16 +97,13 @@ const SignalCard: React.FC<{ s: Signal; attest?: Attest; onOpen: () => void; ind
     const st = STATE_ICON[s.state];
     const iconBg = s.state === 'ok' ? 'bg-secondary/15' : s.state === 'fail' ? 'bg-error/15' : 'bg-surface-container-high';
     const subCls = s.state === 'ok' ? 'text-secondary' : s.state === 'fail' ? 'text-error' : 'text-on-surface-variant';
-    const rail = s.state === 'ok' ? 'bg-secondary/60' : s.state === 'fail' ? 'bg-error/70' : 'bg-outline-variant';
     const delay = `${Math.min(index * 40, 400)}ms`;
     return (
         <button type="button" onClick={onOpen} aria-pressed={active}
             style={active ? { animationDelay: delay, boxShadow: '0 12px 28px -10px rgba(244,208,106,0.28), 0 4px 12px -6px rgba(0,0,0,0.5)' } : { animationDelay: delay }}
-            className={`card-in group relative overflow-hidden text-left w-full h-[108px] rounded-2xl p-4 flex gap-3.5 border-2 transition-all duration-200 ease-out will-change-transform motion-reduce:transition-none motion-reduce:hover:translate-y-0 ${active
+            className={`card-in group text-left w-full h-[108px] rounded-2xl p-4 flex gap-3.5 border-2 transition-all duration-200 ease-out will-change-transform motion-reduce:transition-none motion-reduce:hover:translate-y-0 ${active
                 ? 'bg-surface-container-high bg-gradient-to-b from-surface-container-high to-surface-container border-secondary -translate-y-1'
                 : 'bg-surface-container bg-gradient-to-b from-surface-container to-surface border-outline-variant hover:border-outline hover:-translate-y-0.5 hover:shadow-lg hover:brightness-110'}`}>
-            {/* Thanh trái = trạng thái — CHỈ khi chưa active; active thì viền vàng ĐỀU như thẻ cha */}
-            {!active && <span className={`absolute left-0 top-0 bottom-0 w-[3px] transition-colors ${rail}`} aria-hidden="true"></span>}
             <span className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 self-start transition-colors ${iconBg}`}>
                 <span className={`material-symbols-outlined ${st.cls}`} style={{ fontSize: '22px' }} aria-hidden="true">{st.icon}</span>
             </span>
