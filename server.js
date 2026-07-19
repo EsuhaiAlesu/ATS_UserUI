@@ -80,24 +80,29 @@ function loginPage(error) {
 <style>
   :root{color-scheme:dark}
   *{box-sizing:border-box}
-  body{margin:0;min-height:100vh;display:grid;place-items:center;background:#100d07;
-    color:#f3ead3;font-family:system-ui,-apple-system,"Segoe UI",Roboto,"Be Vietnam Pro",sans-serif}
-  .card{width:min(92vw,380px);background:#16120a;border:1px solid #3c3520;border-radius:14px;
-    padding:34px 30px;box-shadow:0 20px 60px rgba(0,0,0,.55)}
-  .brand{font-weight:800;font-size:26px;letter-spacing:-.02em;color:#e8b84b;margin:0 0 2px}
-  .sub{color:#cdbf95;font-size:13px;margin:0 0 22px;text-transform:uppercase;letter-spacing:.12em}
-  label{display:block;font-size:12px;letter-spacing:.1em;text-transform:uppercase;color:#cdbf95;margin:14px 0 6px}
-  input{width:100%;padding:11px 13px;border-radius:9px;border:1px solid #3c3520;background:#0b0905;
-    color:#f3ead3;font-size:15px}
+  body{margin:0;min-height:100vh;display:grid;place-items:center;
+    background:radial-gradient(circle at 50% 32%, rgba(232,184,75,.09) 0%, #0b1020 60%);
+    color:#e7ebf5;font-family:system-ui,-apple-system,"Segoe UI",Roboto,"Be Vietnam Pro",sans-serif}
+  .card{position:relative;width:min(92vw,380px);background:#141b2e;border:1px solid #2a3450;border-radius:16px;
+    padding:38px 30px 30px;box-shadow:0 24px 70px rgba(0,0,0,.5);overflow:hidden}
+  .card::before{content:"";position:absolute;top:0;left:0;right:0;height:2px;
+    background:linear-gradient(90deg,transparent,#e8b84b,transparent)}
+  .mark{display:flex;align-items:baseline;gap:7px;margin:0 0 2px}
+  .brand{font-weight:800;font-size:27px;letter-spacing:-.02em;color:#e8b84b;margin:0}
+  .jp{color:#a7b2ca;font-size:15px;font-weight:600}
+  .sub{color:#a7b2ca;font-size:12.5px;margin:2px 0 24px;text-transform:uppercase;letter-spacing:.14em}
+  label{display:block;font-size:12px;letter-spacing:.1em;text-transform:uppercase;color:#a7b2ca;margin:14px 0 6px}
+  input{width:100%;padding:11px 13px;border-radius:10px;border:1px solid #2a3450;background:#0f1526;
+    color:#e7ebf5;font-size:15px}
   input:focus{outline:none;border-color:#e8b84b}
-  button{width:100%;margin-top:22px;padding:12px;border:0;border-radius:9px;cursor:pointer;
+  button{width:100%;margin-top:24px;padding:12px;border:0;border-radius:999px;cursor:pointer;
     background:#e8b84b;color:#241a03;font-weight:700;font-size:15px;letter-spacing:.03em}
   button:hover{opacity:.9}
   .err{margin-top:16px;color:#ff6b60;font-size:13px;text-align:center}
-  .foot{margin-top:18px;color:#8b7c50;font-size:11px;text-align:center}
+  .foot{margin-top:20px;color:#5e6b8a;font-size:11px;text-align:center;letter-spacing:.04em}
 </style></head><body>
   <form class="card" method="POST" action="/login" autocomplete="on">
-    <p class="brand">PROYAKU</p>
+    <div class="mark"><p class="brand">PROYAKU</p><span class="jp">訳</span></div>
     <p class="sub">Phiên dịch VI ⇄ JA · Esuhai</p>
     <label for="user">Tài khoản</label>
     <input id="user" name="user" type="text" value="${AUTH_USER.replace(/"/g, '&quot;')}" autocomplete="username">
