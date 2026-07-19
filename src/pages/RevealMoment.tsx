@@ -34,7 +34,7 @@ const RevealMoment: React.FC<Props> = ({ isEmbedded = false }) => {
 
     return (
         <div className="bg-background text-on-background min-h-screen overflow-hidden flex flex-col items-center justify-center relative font-body-md bg-gradient-radial">
-            {/* Minimal nav just for testing */}
+            {/* Exit control */}
             {!isEmbedded && (
                 <div className="absolute top-4 left-4 z-50">
                     <Link to="/" className="text-on-surface-variant font-label-caps text-label-caps hover:text-primary">&lt; BACK</Link>

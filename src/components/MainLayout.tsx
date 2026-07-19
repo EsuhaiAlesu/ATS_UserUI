@@ -78,8 +78,6 @@ const MainLayout: React.FC = () => {
                     <button onClick={toggleTheme} className="material-symbols-outlined text-primary cursor-pointer hover:opacity-80 focus:outline-none transition-transform active:scale-90">
                         {isDarkMode ? 'light_mode' : 'dark_mode'}
                     </button>
-                    <span className="material-symbols-outlined text-primary cursor-pointer hover:opacity-80">settings</span>
-                    <span className="material-symbols-outlined text-primary cursor-pointer hover:opacity-80">account_circle</span>
                 </div>
             </header>
 

@@ -57,10 +57,10 @@ export default {
         "inverse-surface": "var(--color-inverse-surface)"
       },
       borderRadius: {
-        "DEFAULT": "0.125rem",
-        "lg": "0.25rem",
-        "xl": "0.5rem",
-        "full": "0.75rem"
+        "DEFAULT": "0.375rem",
+        "lg": "0.625rem",
+        "xl": "0.875rem",
+        "full": "9999px"
       },
       spacing: {
         "stack-md": "16px",

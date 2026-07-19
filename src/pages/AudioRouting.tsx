@@ -339,7 +339,7 @@ const AudioRouting: React.FC = () => {
                                     <div className={`bg-surface-container-lowest border p-4 rounded-DEFAULT text-center w-full relative ${session.backendOnline ? 'border-secondary' : 'border-error'}`}>
                                         <span className="font-label-caps text-label-caps text-secondary block mb-1">CORE ENGINE</span>
                                         <span className="font-body-md text-body-md text-on-surface block">
-                                            {session.backendOnline ? 'HanDichThuat Studio' : 'BACKEND OFFLINE'}
+                                            {session.backendOnline ? 'Lõi dịch PROYAKU' : 'BACKEND OFFLINE'}
                                         </span>
                                         <div className="mt-3">
                                             <label className="font-label-caps text-label-caps text-on-surface-variant block mb-1">Translation Model</label>
@@ -473,16 +473,6 @@ const AudioRouting: React.FC = () => {
                             </div>
                         </div>
                     </main>
-
-                    {/* Footer */}
-                    <footer className="bg-surface-container-lowest dark:bg-surface-container-lowest border-t border-outline-variant dark:border-outline-variant flex justify-between items-center w-full px-container-padding py-4 z-10 relative">
-                        <p className="font-label-caps text-label-caps text-on-surface-variant dark:text-on-surface-variant">© 2026 PROYAKU · ESUHAI. TWENTIETH ANNIVERSARY EDITION.</p>
-                        <div className="flex gap-6">
-                            <a className="font-label-caps text-label-caps text-on-surface-variant hover:text-primary transition-colors" href="#">Privacy Protocol</a>
-                            <a className="font-label-caps text-label-caps text-on-surface-variant hover:text-primary transition-colors" href="#">Service Terms</a>
-                            <a className="font-label-caps text-label-caps text-on-surface-variant hover:text-primary transition-colors" href="#">API Documentation</a>
-                        </div>
-                    </footer>
                 </div>
         </div>
     );

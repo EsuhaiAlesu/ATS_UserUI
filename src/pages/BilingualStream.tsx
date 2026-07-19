@@ -366,7 +366,7 @@ const BilingualStream: React.FC<Props> = ({ isEmbedded = false }) => {
 
     return (
         <div className="bg-background h-screen w-full overflow-hidden flex items-center justify-center font-body-md text-body-md text-on-surface selection:bg-secondary selection:text-on-secondary">
-            {/* Minimal nav just for testing */}
+            {/* Exit control (audience surface) */}
             {!isEmbedded && (
                 <div className="absolute top-4 left-4 z-50">
                     <Link to="/" className="text-on-surface-variant font-label-caps text-label-caps hover:text-primary">&lt; BACK</Link>

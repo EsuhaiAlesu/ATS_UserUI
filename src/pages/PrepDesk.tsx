@@ -176,7 +176,7 @@ const PrepDesk: React.FC = () => {
 
         const list: Signal[] = [
             {
-                id: 'backend-reachable', label: 'Backend HanDichThuat phản hồi (health.ok)', phase: 'pre', weight: 'blocker', kind: 'measured',
+                id: 'backend-reachable', label: 'Lõi dịch phản hồi (backend health.ok)', phase: 'pre', weight: 'blocker', kind: 'measured',
                 state: session.backendOnline ? 'ok' : 'fail',
                 detail: session.backendOnline ? `Online tại ${API_BASE || '127.0.0.1:8080'}` : `Không phản hồi — ${API_BASE || '127.0.0.1:8080'}`,
                 to: '/audio', toLabel: 'Mở console',
