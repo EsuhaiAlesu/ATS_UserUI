@@ -20,6 +20,7 @@ const NAV: NavItem[][] = [
         { to: '/stream', label: 'Tường', icon: 'subtitles', external: true },
         { to: '/reveal', label: 'Reveal', icon: 'auto_awesome', external: true },
     ],
+    [{ to: '/settings', label: 'Cài đặt', icon: 'settings' }],
 ];
 
 function master(backendOnline: boolean, status: LiveStatus): { text: string; cls: string; dot: string } {

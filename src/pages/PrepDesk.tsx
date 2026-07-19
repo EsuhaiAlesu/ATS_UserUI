@@ -6,10 +6,11 @@ import type { GlossaryEntry, ScriptEntry } from '../lib/api';
 import { loadTtsPrefs } from '../lib/ttsPrefs';
 import {
     getPrep, signAttest, clearAttest, markReachedReady, setDebrief, addIncident, removeIncident,
-    signedBeforeRehearsal, daysUntil, REHEARSAL_DATE, GALA_DATE,
+    signedBeforeRehearsal, daysUntil,
 } from '../lib/prep';
 import type { Attest } from '../lib/prep';
 import PageHeader from '../components/PageHeader';
+import { eventDates } from '../lib/settings';
 
 type SigState = 'ok' | 'fail' | 'unknown';
 type Weight = 'blocker' | 'important' | 'nice';
@@ -333,7 +334,8 @@ const PrepDesk: React.FC = () => {
         URL.revokeObjectURL(url);
     };
 
-    const dRehearsal = daysUntil(REHEARSAL_DATE), dGala = daysUntil(GALA_DATE);
+    const _ev = eventDates();
+    const dRehearsal = daysUntil(_ev.rehearsal), dGala = daysUntil(_ev.gala);
     const shownSignals = signals.filter((s) => s.phase === selPhase);
     const openPre = preSignals.filter((s) => s.state !== 'ok').length;
     const v = VERDICT_UI[verdict];

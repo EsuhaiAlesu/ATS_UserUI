@@ -7,6 +7,7 @@ import VoiceStudio from './pages/VoiceStudio'
 import GlossaryEditor from './pages/GlossaryEditor'
 import ScriptPrep from './pages/ScriptPrep'
 import PrepDesk from './pages/PrepDesk'
+import Settings from './pages/Settings'
 import OperatorLayout from './components/OperatorLayout'
 import SplashScreen from './components/SplashScreen'
 import { LiveSessionProvider } from './lib/LiveSessionContext'
@@ -35,6 +36,7 @@ const App: React.FC = () => {
               <Route path="/script" element={<ScriptPrep />} />
               <Route path="/glossary" element={<GlossaryEditor />} />
               <Route path="/voices" element={<VoiceStudio />} />
+              <Route path="/settings" element={<Settings />} />
             </Route>
 
             {/* Audience / ceremonial surfaces are full-screen — no operator chrome. */}

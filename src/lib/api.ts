@@ -1,9 +1,18 @@
 // REST + WebSocket client for the HanDichThuat backend.
 // Endpoint contract: docs/API.md (verified against webui/api.py of the backend repo).
 
-// VITE_API_BASE overrides the backend origin (e.g. "http://127.0.0.1:8080").
-// When unset, requests go to the same origin and the Vite dev proxy forwards /api.
-const configured = (import.meta.env.VITE_API_BASE as string | undefined) ?? '';
+// Backend origin resolution (highest priority first):
+//   1. a runtime override saved from the Settings page (localStorage `proyaku_settings`.apiBase)
+//   2. the build-time VITE_API_BASE env var
+//   3. same origin (the Vite dev proxy / prod server forwards /api)
+// The runtime override is read once at module load, so changing it needs a page reload to apply.
+const storedBase = (() => {
+    try {
+        const s = JSON.parse(localStorage.getItem('proyaku_settings') || '{}');
+        return typeof s?.apiBase === 'string' ? s.apiBase : '';
+    } catch { return ''; }
+})();
+const configured = storedBase || (import.meta.env.VITE_API_BASE as string | undefined) || '';
 export const API_BASE = configured.replace(/\/+$/, '');
 
 function apiUrl(path: string): string {
