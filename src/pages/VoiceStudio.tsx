@@ -80,7 +80,7 @@ const VoiceLane: React.FC<{
     }, [engine, voiceId, sample]);
 
     return (
-        <div className="border border-outline-variant rounded-DEFAULT p-4 bg-surface">
+        <div className="border border-outline-variant rounded-xl p-4 bg-surface">
             <div className="flex items-center justify-between mb-3">
                 <span className="font-label-caps text-label-caps text-on-surface">{title}</span>
                 <span className="font-label-caps text-label-caps text-on-surface-variant">{lang === 'vi' ? 'JA → VI' : 'VI → JA'}</span>
@@ -192,7 +192,7 @@ const PronunciationClinic: React.FC = () => {
 
     return (
         <div className="space-y-4">
-            <div className="border border-outline-variant rounded-DEFAULT p-4 bg-surface text-on-surface-variant font-label-caps text-label-caps">
+            <div className="border border-outline-variant rounded-xl p-4 bg-surface text-on-surface-variant font-label-caps text-label-caps">
                 ⓘ Việc thu âm diễn ra trên <b className="text-secondary">chính máy chạy backend</b> (Mac Studio), không phải trên trình duyệt này. Đọc to đoạn kịch bản để máy học cách nghe đúng tên riêng &amp; thuật ngữ.
             </div>
 
@@ -232,7 +232,7 @@ const PronunciationClinic: React.FC = () => {
             </div>
 
             {(heard || peak !== null || recError) && (
-                <div className="border border-outline-variant rounded-DEFAULT p-4 bg-surface space-y-2">
+                <div className="border border-outline-variant rounded-xl p-4 bg-surface space-y-2">
                     {recError && <p className="font-label-caps text-label-caps text-error">{recError}</p>}
                     {peak !== null && (
                         <p className="font-label-caps text-label-caps text-on-surface-variant">
@@ -258,7 +258,7 @@ const PronunciationClinic: React.FC = () => {
             )}
 
             {added && (
-                <div className="border border-secondary rounded-DEFAULT p-4 bg-surface">
+                <div className="border border-secondary rounded-xl p-4 bg-surface">
                     <p className="font-label-caps text-label-caps text-secondary mb-2">Đã thêm {added.length} luật vào glossary (hiệu lực phiên kế):</p>
                     {added.length === 0
                         ? <p className="font-label-caps text-label-caps text-on-surface-variant">Không có khác biệt cần sửa.</p>
@@ -290,7 +290,7 @@ const VoiceStudio: React.FC = () => {
             <div className="flex-1 overflow-y-auto">
             <main className="max-w-4xl mx-auto px-container-padding py-10 space-y-10">
                 {/* Card 1 — TTS voice selection */}
-                <section className="bg-surface-container border border-outline-variant rounded-DEFAULT p-6">
+                <section className="bg-surface-container border border-outline-variant rounded-xl p-6">
                     <div className="flex items-start justify-between gap-4 mb-4 pb-3 border-b border-outline-variant">
                         <div>
                             <h2 className="font-headline-sm text-headline-sm text-on-surface">1 · Chọn giọng đọc (TTS)</h2>
@@ -324,7 +324,7 @@ const VoiceStudio: React.FC = () => {
                 </section>
 
                 {/* Card 2 — Pronunciation Clinic */}
-                <section className="bg-surface-container border border-outline-variant rounded-DEFAULT p-6">
+                <section className="bg-surface-container border border-outline-variant rounded-xl p-6">
                     <div className="mb-4 pb-3 border-b border-outline-variant">
                         <h2 className="font-headline-sm text-headline-sm text-on-surface">2 · Phòng luyện phát âm (Pronunciation Clinic)</h2>
                         <p className="font-label-caps text-label-caps text-on-surface-variant mt-1">Đọc to tên riêng &amp; thuật ngữ → máy học nghe đúng (thêm luật misheard→correct vào glossary).</p>
