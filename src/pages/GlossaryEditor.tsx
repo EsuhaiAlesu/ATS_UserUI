@@ -86,7 +86,7 @@ const GlossaryEditor: React.FC = () => {
 
             <main className="max-w-6xl mx-auto px-container-padding py-8 space-y-4">
                 <div className="border border-outline-variant rounded-DEFAULT bg-surface-container-lowest px-4 py-3 font-label-caps text-label-caps text-on-surface-variant">
-                    ⓘ Glossary lái <b className="text-secondary">cách dịch · hotword nhận dạng · post-correct</b> cùng lúc — artefact quan trọng nhất trước sự kiện. Để <b>JA trống</b> = <b>giữ nguyên tên</b> (không dịch). Bật <b>Hotword 🔒</b> cho tên riêng để máy nghe đúng. Lưu về <code>data/glossary.json</code>, hiệu lực phiên kế.
+                    ⓘ Glossary lái <b className="text-secondary">cách dịch · hotword nhận dạng · post-correct</b> cùng lúc — artefact quan trọng nhất trước sự kiện. Để <b>JA trống</b> = <b>giữ nguyên tên</b> (không dịch). Bật <b>Hotword</b> (khoá nhận dạng) cho tên riêng để máy nghe đúng. Lưu về <code>data/glossary.json</code>, hiệu lực phiên kế.
                 </div>
 
                 {error && <div className="border border-error text-error font-label-caps text-label-caps px-4 py-3 rounded-DEFAULT">{error}</div>}
@@ -120,7 +120,7 @@ const GlossaryEditor: React.FC = () => {
                             )}
                             {rows.map((r, i) => (
                                 <tr key={i} className="border-t border-outline-variant align-top">
-                                    <td className="p-2 text-center">{r.asr_hotword ? <span title="Đã khoá (hotword)">🔒</span> : ''}</td>
+                                    <td className="p-2 text-center">{r.asr_hotword ? <span className="material-symbols-outlined text-secondary align-middle" style={{ fontSize: '1.1rem' }} title="Đã khoá (hotword)" aria-label="Đã khoá hotword">lock</span> : ''}</td>
                                     <td className="p-2"><input className={inputCls} value={r.vi ?? ''} onChange={(e) => updateRow(i, { vi: e.target.value })} /></td>
                                     <td className="p-2"><input className={`${inputCls} jp-text`} value={r.ja ?? ''} placeholder="—" onChange={(e) => updateRow(i, { ja: e.target.value })} /></td>
                                     <td className="p-2"><input className={`${inputCls} jp-text`} value={r.reading ?? ''} onChange={(e) => updateRow(i, { reading: e.target.value })} /></td>

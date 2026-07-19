@@ -6,6 +6,15 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Accessibility: a visible keyboard-focus ring (gold), for operators using the keyboard at a live
+   event. :where() keeps specificity 0 so components can still override; :focus-visible shows it only
+   for keyboard focus, not mouse clicks. */
+:where(a, button, input, select, textarea, [tabindex]):focus-visible {
+    outline: 2px solid var(--color-secondary);
+    outline-offset: 2px;
+    border-radius: 3px;
+}
+
 /* ===== KIM SẮC — Vàng & Đen (đen nền · vàng gold nhấn · chữ kem · đỏ dành cho lỗi) =====
    Áp cho CẢ :root và .dark để app luôn vàng-đen, không phụ thuộc toggle sáng/tối. */
 :root {

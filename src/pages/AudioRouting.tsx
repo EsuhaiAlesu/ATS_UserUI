@@ -170,7 +170,7 @@ const AudioRouting: React.FC = () => {
                     ? { label: 'LIVE · KHÔNG CÓ TÍN HIỆU', dot: 'bg-error', text: 'text-error', anim: 'animate-pulse' }
                     : (e2e != null && e2e >= 2500)
                         ? { label: 'DEGRADED · TRỄ CAO', dot: 'bg-error', text: 'text-error', anim: 'animate-pulse' }
-                        : { label: '● LIVE', dot: 'bg-secondary', text: 'text-secondary', anim: 'listening-pulse' };
+                        : { label: 'LIVE', dot: 'bg-secondary', text: 'text-secondary', anim: 'listening-pulse' };
             case 'reconnecting': return { label: 'MẤT KẾT NỐI · ĐANG KẾT NỐI LẠI', dot: 'bg-error', text: 'text-error', anim: 'animate-pulse' };
             case 'error': return { label: 'FAULT · LỖI', dot: 'bg-error', text: 'text-error', anim: '' };
             default: return { label: 'STANDBY', dot: 'bg-outline-variant', text: 'text-on-surface-variant', anim: '' };
@@ -214,7 +214,7 @@ const AudioRouting: React.FC = () => {
                                         </span>
                                         <span className="text-on-surface-variant">KHỚP KỊCH BẢN <span className="text-secondary">{pct(lastOnScript)}</span></span>
                                         <span className="text-on-surface-variant">SỬA TÊN <span className="text-secondary">{session.nameFixCount}</span></span>
-                                        {session.speakingLang && <span className="text-secondary">🔊 ĐANG ĐỌC {session.speakingLang.toUpperCase()}</span>}
+                                        {session.speakingLang && <span className="text-secondary inline-flex items-center gap-1"><span className="material-symbols-outlined" style={{ fontSize: '1rem' }} aria-hidden="true">volume_up</span>ĐANG ĐỌC {session.speakingLang.toUpperCase()}</span>}
                                     </div>
                                     {session.contextSummary && (
                                         <div className="mt-2 font-label-caps text-label-caps text-on-surface-variant truncate">NGỮ CẢNH: {session.contextSummary}</div>
@@ -264,8 +264,8 @@ const AudioRouting: React.FC = () => {
                                         <div className="pt-4">
                                             <div className="flex justify-between items-center mb-2">
                                                 <label className="font-label-caps text-label-caps text-on-surface-variant">Signal Level</label>
-                                                <span className={`font-label-caps text-label-caps ${noSignal ? 'text-error animate-pulse' : 'text-primary'}`}>
-                                                    {noSignal ? '⚠ KHÔNG CÓ TÍN HIỆU' : `${vuDb}dB`}
+                                                <span className={`font-label-caps text-label-caps inline-flex items-center gap-1 ${noSignal ? 'text-error animate-pulse' : 'text-primary'}`}>
+                                                    {noSignal ? (<><span className="material-symbols-outlined" style={{ fontSize: '1rem' }} aria-hidden="true">warning</span>KHÔNG CÓ TÍN HIỆU</>) : `${vuDb}dB`}
                                                 </span>
                                             </div>
                                             <div className={`vu-meter-bar ${noSignal ? 'ring-1 ring-error' : ''}`}>
@@ -308,23 +308,33 @@ const AudioRouting: React.FC = () => {
                                                 </span>
                                             </div>
                                         )}
-                                        {/* A3.5 Pre-flight checklist (shown before START) */}
-                                        {!active && (
-                                            <div className="mt-4 text-left space-y-1">
-                                                {preflight.map((it) => (
-                                                    <div key={it.label} className="flex items-center gap-2 font-label-caps text-label-caps">
-                                                        <span className={it.ok ? 'text-secondary' : 'text-error'}>{it.ok ? '✓' : '✕'}</span>
-                                                        <span className={it.ok ? 'text-on-surface-variant' : 'text-error'}>{it.label}</span>
-                                                    </div>
-                                                ))}
-                                                {!preflightOk && (
-                                                    <label className="flex items-center gap-2 mt-1 font-label-caps text-label-caps text-on-surface-variant cursor-pointer">
-                                                        <input type="checkbox" checked={override} onChange={(e) => setOverride(e.target.checked)} />
-                                                        Bỏ qua kiểm tra (override)
-                                                    </label>
-                                                )}
-                                            </div>
-                                        )}
+                                        {/* A3.5 Pre-flight — mục ĐẠT gộp 1 dòng, chỉ liệt kê mục CHƯA ĐẠT */}
+                                        {!active && (() => {
+                                            const passed = preflight.filter((it) => it.ok);
+                                            const failed = preflight.filter((it) => !it.ok);
+                                            return (
+                                                <div className="mt-4 text-left space-y-1">
+                                                    {passed.length > 0 && (
+                                                        <div className="flex items-center gap-2 font-label-caps text-label-caps text-on-surface-variant">
+                                                            <span className="material-symbols-outlined text-secondary" style={{ fontSize: '1.1rem' }} aria-hidden="true">check_circle</span>
+                                                            {passed.length}/{preflight.length} mục đã đạt
+                                                        </div>
+                                                    )}
+                                                    {failed.map((it) => (
+                                                        <div key={it.label} className="flex items-center gap-2 font-label-caps text-label-caps">
+                                                            <span className="material-symbols-outlined text-error" style={{ fontSize: '1.1rem' }} aria-hidden="true">cancel</span>
+                                                            <span className="text-error">{it.label}</span>
+                                                        </div>
+                                                    ))}
+                                                    {!preflightOk && (
+                                                        <label className="flex items-center gap-2 mt-1 font-label-caps text-label-caps text-on-surface-variant cursor-pointer">
+                                                            <input type="checkbox" checked={override} onChange={(e) => setOverride(e.target.checked)} />
+                                                            Bỏ qua kiểm tra (override)
+                                                        </label>
+                                                    )}
+                                                </div>
+                                            );
+                                        })()}
                                         {/* A3.4 START (gated by pre-flight) / STOP (hold-to-confirm) */}
                                         {active ? (
                                             <button
