@@ -98,29 +98,30 @@ const SignalCard: React.FC<{ s: Signal; attest?: Attest; onOpen: () => void; ind
     const iconBg = s.state === 'ok' ? 'bg-secondary/15' : s.state === 'fail' ? 'bg-error/15' : 'bg-surface-container-high';
     const subCls = s.state === 'ok' ? 'text-secondary' : s.state === 'fail' ? 'text-error' : 'text-on-surface-variant';
     const rail = active ? 'bg-secondary' : s.state === 'ok' ? 'bg-secondary/60' : s.state === 'fail' ? 'bg-error/70' : 'bg-outline-variant';
+    const delay = `${Math.min(index * 40, 400)}ms`;
     return (
         <button type="button" onClick={onOpen} aria-pressed={active}
-            className={`card-in group relative overflow-hidden text-left w-full rounded-2xl p-5 pl-6 flex flex-col gap-3.5 border transition-all duration-200 ease-out motion-reduce:transition-none ${active
-                ? 'bg-surface-container-high border-secondary shadow-lg shadow-secondary/10'
-                : 'bg-surface-container border-outline-variant hover:border-secondary/40 hover:bg-surface-container-high hover:-translate-y-0.5 hover:shadow-lg hover:shadow-black/25 motion-reduce:hover:translate-y-0'}`}
-            style={{ animationDelay: `${Math.min(index * 40, 400)}ms` }}>
+            style={active ? { animationDelay: delay, boxShadow: '0 12px 28px -10px rgba(244,208,106,0.28), 0 4px 12px -6px rgba(0,0,0,0.5)' } : { animationDelay: delay }}
+            className={`card-in group relative overflow-hidden text-left w-full rounded-2xl p-4 pl-5 flex flex-col gap-2 border-2 transition-all duration-200 ease-out will-change-transform motion-reduce:transition-none motion-reduce:hover:translate-y-0 ${active
+                ? 'bg-surface-container-high bg-gradient-to-b from-surface-container-high to-surface-container border-secondary -translate-y-1'
+                : 'bg-surface-container bg-gradient-to-b from-surface-container to-surface border-outline-variant hover:border-outline hover:-translate-y-0.5 hover:shadow-lg hover:brightness-110'}`}>
             {/* Thanh trái = trạng thái (hoặc vàng khi đang mở) */}
             <span className={`absolute left-0 top-0 bottom-0 w-[3px] transition-colors ${rail}`} aria-hidden="true"></span>
-            <div className="flex items-start justify-between gap-2">
-                <span className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 transition-colors ${iconBg}`}>
-                    <span className={`material-symbols-outlined ${st.cls}`} style={{ fontSize: '22px' }} aria-hidden="true">{st.icon}</span>
+            <div className="flex items-center justify-between gap-2">
+                <span className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 transition-colors ${iconBg}`}>
+                    <span className={`material-symbols-outlined ${st.cls}`} style={{ fontSize: '20px' }} aria-hidden="true">{st.icon}</span>
                 </span>
                 <div className="flex items-center gap-1.5 shrink-0">
-                    {s.kind === 'attest' && <span className="material-symbols-outlined text-[15px] text-on-surface-variant/45" title="Người ký" aria-hidden="true">stylus_note</span>}
+                    {s.kind === 'attest' && <span className="material-symbols-outlined text-[14px] text-on-surface-variant/45" title="Người ký" aria-hidden="true">stylus_note</span>}
                     <span className={`uppercase font-label-caps text-[9px] tracking-[0.14em] ${WEIGHT_EYEBROW[s.weight]}`}>{WEIGHT_LABEL[s.weight]}</span>
                 </div>
             </div>
-            <div className="flex-1">
-                <div className="font-semibold text-on-surface text-[15px] leading-snug">{s.label}</div>
-                <div className={`text-[13px] mt-1.5 font-medium ${subCls}`}>{st.title}{s.kind === 'attest' && attest ? ` · ${attest.by}` : ''}</div>
-            </div>
-            <div className={`flex items-center gap-1 text-xs transition-colors ${active ? 'text-secondary font-medium' : 'text-on-surface-variant/70 group-hover:text-secondary'}`}>
-                {active ? 'Đang mở' : 'Chi tiết'}<span className={`material-symbols-outlined text-[15px] transition-transform ${active ? '' : 'group-hover:translate-x-0.5'}`} aria-hidden="true">arrow_forward</span>
+            <div className="font-semibold text-on-surface text-sm leading-snug">{s.label}</div>
+            <div className="flex items-center justify-between gap-2 mt-auto pt-0.5">
+                <span className={`text-xs font-medium ${subCls}`}>{st.title}{s.kind === 'attest' && attest ? ` · ${attest.by}` : ''}</span>
+                <span className={`flex items-center gap-0.5 text-xs shrink-0 transition-colors ${active ? 'text-secondary font-medium' : 'text-on-surface-variant/70 group-hover:text-secondary'}`}>
+                    {active ? 'Đang mở' : 'Chi tiết'}<span className={`material-symbols-outlined text-[14px] transition-transform ${active ? '' : 'group-hover:translate-x-0.5'}`} aria-hidden="true">arrow_forward</span>
+                </span>
             </div>
         </button>
     );
@@ -518,7 +519,7 @@ const PrepDesk: React.FC = () => {
                     )}
 
                         {/* READINESS CARDS (Mercury) — bấm thẻ mở panel chi tiết (Raycast) */}
-                        <div className="grid grid-cols-1 xl:grid-cols-2 2xl:grid-cols-3 gap-4">
+                        <div className="grid grid-cols-1 xl:grid-cols-2 2xl:grid-cols-3 gap-3">
                             {shownSignals.map((s, i) => (
                                 <SignalCard key={s.id} s={s} attest={prep.attest[s.id]} index={i} active={openId === s.id} onOpen={() => openCard(s.id)} />
                             ))}
