@@ -80,21 +80,21 @@ function loginPage(error) {
 <style>
   :root{color-scheme:dark}
   *{box-sizing:border-box}
-  body{margin:0;min-height:100vh;display:grid;place-items:center;background:#1a1013;
-    color:#f4e9ea;font-family:system-ui,-apple-system,"Segoe UI",Roboto,"Be Vietnam Pro",sans-serif}
-  .card{width:min(92vw,380px);background:#241519;border:1px solid #4a2f36;border-radius:14px;
-    padding:34px 30px;box-shadow:0 20px 60px rgba(0,0,0,.45)}
+  body{margin:0;min-height:100vh;display:grid;place-items:center;background:#100d07;
+    color:#f3ead3;font-family:system-ui,-apple-system,"Segoe UI",Roboto,"Be Vietnam Pro",sans-serif}
+  .card{width:min(92vw,380px);background:#16120a;border:1px solid #3c3520;border-radius:14px;
+    padding:34px 30px;box-shadow:0 20px 60px rgba(0,0,0,.55)}
   .brand{font-weight:800;font-size:26px;letter-spacing:-.02em;color:#e8b84b;margin:0 0 2px}
-  .sub{color:#c9a9ad;font-size:13px;margin:0 0 22px;text-transform:uppercase;letter-spacing:.12em}
-  label{display:block;font-size:12px;letter-spacing:.1em;text-transform:uppercase;color:#c9a9ad;margin:14px 0 6px}
-  input{width:100%;padding:11px 13px;border-radius:9px;border:1px solid #4a2f36;background:#1a1013;
-    color:#f4e9ea;font-size:15px}
+  .sub{color:#cdbf95;font-size:13px;margin:0 0 22px;text-transform:uppercase;letter-spacing:.12em}
+  label{display:block;font-size:12px;letter-spacing:.1em;text-transform:uppercase;color:#cdbf95;margin:14px 0 6px}
+  input{width:100%;padding:11px 13px;border-radius:9px;border:1px solid #3c3520;background:#0b0905;
+    color:#f3ead3;font-size:15px}
   input:focus{outline:none;border-color:#e8b84b}
   button{width:100%;margin-top:22px;padding:12px;border:0;border-radius:9px;cursor:pointer;
     background:#e8b84b;color:#241a03;font-weight:700;font-size:15px;letter-spacing:.03em}
   button:hover{opacity:.9}
-  .err{margin-top:16px;color:#ff9aa2;font-size:13px;text-align:center}
-  .foot{margin-top:18px;color:#8f7276;font-size:11px;text-align:center}
+  .err{margin-top:16px;color:#ff6b60;font-size:13px;text-align:center}
+  .foot{margin-top:18px;color:#8b7c50;font-size:11px;text-align:center}
 </style></head><body>
   <form class="card" method="POST" action="/login" autocomplete="on">
     <p class="brand">PROYAKU</p>

@@ -32,7 +32,7 @@ const SplashScreen: React.FC<Props> = ({ onStateChange }) => {
                 <img src={logoEsuhaiSmall} alt="ESUHAI Logo" className="w-16 md:w-20 mb-4 object-contain drop-shadow-xl" />
                 <h1
                     className="font-brand text-4xl md:text-6xl text-primary font-bold mb-3 tracking-[0.2em] text-center"
-                    style={{ textShadow: '0 0 25px rgba(220, 38, 38, 0.5)' }}
+                    style={{ textShadow: '0 0 25px rgba(232, 184, 75, 0.5)' }}
                 >
                     ESUHAI
                 </h1>
