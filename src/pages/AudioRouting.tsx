@@ -3,38 +3,36 @@ import {
     getAudioDevices, getAudioOutputs, getBlocks, getLiveFast, playTestTone, setLiveFast,
 } from '../lib/api';
 import type { AudioInputDevice, AudioOutputDevice, LiveConfig } from '../lib/api';
-import type { LiveLine, AudienceCut } from '../lib/LiveSessionContext';
+import type { LiveLine } from '../lib/LiveSessionContext';
 import { isSessionActive, useLiveSession } from '../lib/LiveSessionContext';
 import { useMeter } from '../lib/useMeter';
 import { buildTtsConfig, loadTtsPrefs } from '../lib/ttsPrefs';
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Operator console, laid out like a video-meeting cockpit (Zoom/Teams pattern):
-//   • a slim TOP bar  = state + session identity (annunciator · direction · timer)
-//   • a big  STAGE    = the live bilingual RESULT (or the pre-flight setup when idle)
-//   • a  BOTTOM bar   = the operation controls (mic · START/STOP · take-to-safe)
-// The center is the content; the chrome recedes. All the safety behaviour (A3.2
-// annunciator, A3.1 trust HUD, A3.4 hold-STOP + no-signal, A3.5 pre-flight) is kept
-// verbatim — only the presentation changed.
+// Operator console as a clean video-meeting cockpit (Zoom/Teams pattern):
+//   • the CENTER is ALWAYS "the screen" — a live bilingual result stage, or a calm
+//     standby stage before the event (never a wall of config);
+//   • operation controls are a centered row of ICON buttons at the bottom (in-event);
+//   • all device/model setup lives behind a ⚙ Settings drawer (pre-event), off the stage.
+// Every safety behaviour (A3.2 annunciator, A3.1 trust HUD, A3.4 hold-STOP + no-signal,
+// A3.5 pre-flight) is preserved — only the presentation was reorganised.
 // ─────────────────────────────────────────────────────────────────────────────
 
 const SELECT_CLS =
-    'w-full bg-surface text-on-surface border-b border-outline-variant rounded-none py-2 px-0 ' +
+    'w-full bg-surface text-on-surface border border-outline-variant rounded-DEFAULT py-2 px-3 ' +
     'focus:ring-0 focus:border-secondary appearance-none cursor-pointer disabled:opacity-50 text-sm';
 
 const langLines = (lines: LiveLine[], lang: string) =>
     lines.filter((l) => l.lang.toLowerCase().startsWith(lang) && l.text.trim());
 
-// Monitor sizing: readable on the operator's screen (NOT the 10m wall — that's /stream).
-// Newest line is brightest gold; the just-spoken line stays legible; older lines recede.
 const monitorLineClass = (age: number) =>
     age === 0
-        ? 'fade-current text-secondary font-bold text-2xl md:text-[1.75rem] leading-snug'
+        ? 'fade-current text-secondary font-bold text-2xl md:text-[1.9rem] leading-snug'
         : age === 1
             ? 'fade-older text-on-surface font-semibold text-lg md:text-xl leading-snug'
             : 'text-on-surface-variant opacity-70 font-medium text-base md:text-lg leading-snug';
 
-/** One language column of the operator result monitor — pins to the newest line. */
+/** One language column of the live result monitor — pins to the newest line. */
 const MonitorColumn: React.FC<{ label: React.ReactNode; lines: LiveLine[]; jp?: boolean }> = ({ label, lines, jp }) => {
     const ref = useRef<HTMLDivElement>(null);
     const dep = `${lines.length}|${lines[lines.length - 1]?.text ?? ''}`;
@@ -44,20 +42,14 @@ const MonitorColumn: React.FC<{ label: React.ReactNode; lines: LiveLine[]; jp?: 
     }, [dep]);
     return (
         <div className="flex flex-col min-h-0 h-full">
-            <div className="shrink-0 flex items-center justify-center py-2.5 border-b border-outline-variant/60">
-                {label}
-            </div>
-            <div ref={ref} className="flex-1 overflow-y-auto px-6 md:px-8">
+            <div className="shrink-0 flex items-center justify-center py-2.5">{label}</div>
+            <div ref={ref} className="flex-1 overflow-y-auto px-6 md:px-10">
                 <div className={`min-h-full flex flex-col justify-end gap-4 py-4 ${jp ? 'jp-text' : ''}`}>
                     {lines.map((line, i) => {
                         const age = lines.length - 1 - i;
                         return (
-                            <p
-                                key={line.lid}
-                                lang={jp ? 'ja' : 'vi'}
-                                className={monitorLineClass(age)}
-                                style={{ lineBreak: jp ? 'strict' : undefined, textShadow: age === 0 ? '0 0 22px rgba(232,184,75,0.28)' : undefined }}
-                            >
+                            <p key={line.lid} lang={jp ? 'ja' : 'vi'} className={monitorLineClass(age)}
+                                style={{ lineBreak: jp ? 'strict' : undefined, textShadow: age === 0 ? '0 0 22px rgba(232,184,75,0.28)' : undefined }}>
                                 {line.text}
                             </p>
                         );
@@ -65,6 +57,28 @@ const MonitorColumn: React.FC<{ label: React.ReactNode; lines: LiveLine[]; jp?: 
                 </div>
             </div>
         </div>
+    );
+};
+
+/** A round icon control button (bottom cluster). Kept module-scope for stable identity. */
+const RoundBtn: React.FC<{
+    icon: string; label: string; title?: string; onClick?: () => void;
+    tone?: 'default' | 'active' | 'primary' | 'danger'; disabled?: boolean;
+}> = ({ icon, label, title, onClick, tone = 'default', disabled }) => {
+    const big = tone === 'primary' || tone === 'danger';
+    const ring =
+        tone === 'primary' ? 'w-16 h-16 bg-secondary text-on-secondary shadow-lg shadow-secondary/25 hover:opacity-90'
+            : tone === 'danger' ? 'w-16 h-16 bg-error text-on-error hover:opacity-90'
+                : tone === 'active' ? 'w-14 h-14 bg-secondary/15 text-secondary border border-secondary/50'
+                    : 'w-14 h-14 bg-surface-container text-on-surface-variant border border-outline-variant hover:text-on-surface hover:border-outline';
+    return (
+        <button type="button" title={title ?? label} onClick={onClick} disabled={disabled}
+            className="flex flex-col items-center gap-1.5 disabled:opacity-40 disabled:cursor-not-allowed">
+            <span className={`rounded-full flex items-center justify-center transition-all ${ring}`}>
+                <span className="material-symbols-outlined" style={{ fontSize: big ? '30px' : '25px' }} aria-hidden="true">{icon}</span>
+            </span>
+            <span className="text-[10px] font-label-caps text-on-surface-variant leading-none">{label}</span>
+        </button>
     );
 };
 
@@ -87,6 +101,10 @@ const AudioRouting: React.FC = () => {
     const [mtModel, setMtModel] = useState('');
     const [fastMode, setFastMode] = useState(false);
     const [toneStatus, setToneStatus] = useState<Record<string, string>>({});
+
+    // --- UI chrome ---
+    const [settingsOpen, setSettingsOpen] = useState(false);
+    const [isFs, setIsFs] = useState(false);
 
     useEffect(() => {
         getAudioDevices()
@@ -118,8 +136,7 @@ const AudioRouting: React.FC = () => {
         getLiveFast().then((r) => setFastMode(r.fast)).catch(() => { /* default off */ });
     }, []);
 
-    // VU meter: the live session owns the mic while running (its `level` events feed
-    // the bar); otherwise open a dedicated /ws/meter stream on the selected input.
+    // VU meter: the live session owns the mic while running; otherwise open a dedicated meter stream.
     const meter = useMeter(active ? null : inputDevice);
     const vuLevel = active ? session.level : meter.level;
     const vuDb = useMemo(() => {
@@ -127,7 +144,7 @@ const AudioRouting: React.FC = () => {
         return rms > 0 ? Math.max(-60, Math.round(20 * Math.log10(rms))) : -60;
     }, [active, vuLevel, meter.rms]);
 
-    // Trust HUD signals (A3.1) — the backend streams these; the UI previously dropped them.
+    // Trust HUD signals (A3.1).
     const lastLine = session.lines[session.lines.length - 1];
     const lastOnScript = lastLine?.onScript;
     const srcLang = session.sourceLang?.lang?.toLowerCase() ?? '';
@@ -156,22 +173,12 @@ const AudioRouting: React.FC = () => {
     };
 
     const handleStartStop = () => {
-        if (active) {
-            session.stop();
-            return;
-        }
-        // Include a TTS block only if the operator opted in on the Voice Studio page (default:
-        // subtitles-only, per the audit). The multi-language shape is best-effort — see doc 15.
+        if (active) { session.stop(); return; }
         const ttsBlock = buildTtsConfig(loadTtsPrefs());
         const config: LiveConfig = {
             device: 'mic',
             ...(inputDevice !== null ? { device_index: inputDevice } : {}),
-            single_auto: {
-                model: sttModel,
-                mt_model: mtModel,
-                beam_size: 1,
-                targets: { vi: 'ja', ja: 'vi', en: 'ja' },
-            },
+            single_auto: { model: sttModel, mt_model: mtModel, beam_size: 1, targets: { vi: 'ja', ja: 'vi', en: 'ja' } },
             post_correct: true,
             hotwords: true,
             ...(ttsBlock ? { tts: ttsBlock } : {}),
@@ -180,7 +187,7 @@ const AudioRouting: React.FC = () => {
         session.start(config);
     };
 
-    // --- A3.4: NO-SIGNAL alarm — level stuck near the floor while a session is live ---
+    // --- A3.4: NO-SIGNAL alarm ---
     const [noSignal, setNoSignal] = useState(false);
     const lastAboveRef = useRef(Date.now());
     useEffect(() => { if (vuLevel > 0.02) lastAboveRef.current = Date.now(); }, [vuLevel]);
@@ -190,7 +197,7 @@ const AudioRouting: React.FC = () => {
         return () => clearInterval(id);
     }, [active]);
 
-    // --- A3.4: hold-to-confirm STOP — guards the primary transport against a fat-finger click ---
+    // --- A3.4: hold-to-confirm STOP ---
     const [holdPct, setHoldPct] = useState(0);
     const holdRef = useRef<ReturnType<typeof setInterval> | null>(null);
     const cancelHold = () => { if (holdRef.current) { clearInterval(holdRef.current); holdRef.current = null; } setHoldPct(0); };
@@ -205,7 +212,7 @@ const AudioRouting: React.FC = () => {
     };
     useEffect(() => () => cancelHold(), []);
 
-    // --- Session timer (mm:ss since start) — shown in the top bar while a session is live ---
+    // --- Session timer (mm:ss) ---
     const [elapsed, setElapsed] = useState(0);
     const startAtRef = useRef<number | null>(null);
     useEffect(() => {
@@ -216,7 +223,18 @@ const AudioRouting: React.FC = () => {
     }, [active]);
     const mmss = `${String(Math.floor(elapsed / 60)).padStart(2, '0')}:${String(elapsed % 60).padStart(2, '0')}`;
 
-    // --- A3.5: pre-flight readiness — START is gated until every check passes (or explicit override) ---
+    // --- Fullscreen (wide-open stage) ---
+    useEffect(() => {
+        const h = () => setIsFs(!!document.fullscreenElement);
+        document.addEventListener('fullscreenchange', h);
+        return () => document.removeEventListener('fullscreenchange', h);
+    }, []);
+    const toggleFullscreen = () => {
+        if (!document.fullscreenElement) document.documentElement.requestFullscreen?.().catch(() => { /* ignore */ });
+        else document.exitFullscreen?.().catch(() => { /* ignore */ });
+    };
+
+    // --- A3.5: pre-flight readiness ---
     const preflight = [
         { ok: session.backendOnline, label: 'Backend online' },
         { ok: inputDevice !== null, label: 'Đã chọn mic' },
@@ -226,11 +244,12 @@ const AudioRouting: React.FC = () => {
         { ok: outJa !== null, label: 'Ngõ ra JA' },
         { ok: outVi === null || outJa === null || outVi !== outJa, label: 'VI ≠ JA (khác loa)' },
     ];
+    const preflightPass = preflight.filter((i) => i.ok).length;
     const preflightOk = preflight.every((i) => i.ok);
     const [override, setOverride] = useState(false);
     const canStart = preflightOk || override;
 
-    // --- A3.2: Master Annunciator — one dominant, room-readable state ---
+    // --- A3.2: Master Annunciator ---
     const master = (() => {
         if (!session.backendOnline && !active) return { label: 'BACKEND OFFLINE', dot: 'bg-error', text: 'text-error', anim: '' };
         switch (session.status) {
@@ -249,252 +268,73 @@ const AudioRouting: React.FC = () => {
         }
     })();
 
-    // Only surface the raw device-catalog error when the backend is actually reachable; while
-    // OFFLINE the annunciator already says so (no noisy "Unexpected token '<'" parse error on stage).
+    // Hide the raw offline parse error (annunciator already says OFFLINE); surface real errors.
     const shownError = session.error ?? (session.backendOnline ? deviceError : null);
 
     const viLive = langLines(session.lines, 'vi');
     const jaLive = langLines(session.lines, 'ja');
     const setupPhase = session.status === 'connecting' || session.status === 'warming';
-
     const openWall = () => window.open('/stream', 'proyaku-wall');
 
-    // Small building blocks kept local so the file reads top-to-bottom.
-    const DirPill = (
-        <div className="flex items-center gap-2 px-3 py-1.5 rounded-full border border-outline-variant bg-surface-container-lowest">
-            <span className={`font-label-caps text-label-caps ${dir.startsWith('VI') || !dir ? 'text-secondary' : 'text-on-surface-variant'}`}>VI</span>
-            <span className="material-symbols-outlined text-base text-primary" aria-hidden="true">swap_horiz</span>
-            <span className={`jp-text font-label-caps text-label-caps ${dir.startsWith('JA') ? 'text-secondary' : 'text-on-surface-variant'}`}>JA</span>
-        </div>
-    );
-
     return (
-        <div className="h-full flex flex-col bg-background text-on-background overflow-hidden">
-            {/* ══════════ TOP BAR ══════════ */}
+        <div className="h-full flex flex-col bg-background text-on-background overflow-hidden relative">
+            {/* ══════════ TOP BAR (minimal) ══════════ */}
             <header className="shrink-0 h-14 flex items-center gap-4 px-5 border-b border-outline-variant bg-surface-container-lowest">
                 <div className="flex items-center gap-2.5 min-w-0">
                     <span className={`w-3 h-3 rounded-full shrink-0 ${master.dot} ${master.anim}`}></span>
                     <span className={`font-label-caps text-label-caps tracking-wide truncate ${master.text}`}>{master.label}</span>
+                    {active && <span className="font-label-caps text-label-caps text-on-surface-variant tabular-nums ml-1" style={{ fontFamily: 'ui-monospace, monospace' }}>{mmss}</span>}
                 </div>
 
-                <div className="mx-auto flex items-center gap-4">
-                    {DirPill}
-                    {active && (
-                        <span className="font-label-caps text-label-caps text-on-surface-variant tabular-nums" style={{ fontFamily: 'ui-monospace, monospace' }}>
-                            {mmss}
-                        </span>
-                    )}
+                <div className="mx-auto flex items-center gap-2 px-3 py-1.5 rounded-full border border-outline-variant bg-surface-container-lowest">
+                    <span className={`font-label-caps text-label-caps ${dir.startsWith('VI') || !dir ? 'text-secondary' : 'text-on-surface-variant'}`}>VI</span>
+                    <span className="material-symbols-outlined text-base text-primary" aria-hidden="true">swap_horiz</span>
+                    <span className={`jp-text font-label-caps text-label-caps ${dir.startsWith('JA') ? 'text-secondary' : 'text-on-surface-variant'}`}>JA</span>
                 </div>
 
                 <div className="flex items-center gap-1 shrink-0">
-                    <button
-                        onClick={handleToggleFast}
-                        title="Chế độ nhanh — giảm độ trễ, có thể giảm độ chính xác"
-                        className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full font-label-caps text-label-caps transition-colors ${fastMode ? 'text-on-secondary bg-secondary' : 'text-on-surface-variant hover:text-on-surface hover:bg-surface-container'}`}
-                    >
-                        <span className="material-symbols-outlined text-base" aria-hidden="true">bolt</span>
-                        <span className="hidden sm:inline">Fast</span>
+                    {/* readiness chip → opens settings */}
+                    <button onClick={() => setSettingsOpen(true)} title="Kiểm tra sẵn sàng & cài đặt"
+                        className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full font-label-caps text-label-caps border transition-colors ${preflightOk ? 'border-secondary/50 text-secondary' : 'border-outline-variant text-on-surface-variant hover:text-on-surface'}`}>
+                        <span className="material-symbols-outlined text-base" aria-hidden="true">{preflightOk ? 'check_circle' : 'checklist'}</span>
+                        <span className="hidden sm:inline">{preflightOk ? 'Sẵn sàng' : `${preflightPass}/${preflight.length}`}</span>
                     </button>
-                    <button
-                        onClick={openWall}
-                        title="Mở Tường phụ đề (màn hình khán giả) trong cửa sổ mới"
-                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-full font-label-caps text-label-caps text-on-surface-variant hover:text-secondary hover:bg-surface-container transition-colors"
-                    >
-                        <span className="material-symbols-outlined text-base" aria-hidden="true">subtitles</span>
-                        <span className="hidden sm:inline">Tường</span>
+                    <button onClick={handleToggleFast} title="Chế độ nhanh — giảm độ trễ"
+                        className={`w-9 h-9 flex items-center justify-center rounded-full transition-colors ${fastMode ? 'text-on-secondary bg-secondary' : 'text-on-surface-variant hover:text-on-surface hover:bg-surface-container'}`}>
+                        <span className="material-symbols-outlined text-[20px]" aria-hidden="true">bolt</span>
+                    </button>
+                    <button onClick={toggleFullscreen} title={isFs ? 'Thoát toàn màn hình' : 'Toàn màn hình'}
+                        className="w-9 h-9 flex items-center justify-center rounded-full text-on-surface-variant hover:text-on-surface hover:bg-surface-container transition-colors">
+                        <span className="material-symbols-outlined text-[20px]" aria-hidden="true">{isFs ? 'fullscreen_exit' : 'fullscreen'}</span>
                     </button>
                 </div>
             </header>
 
-            {/* ══════════ CENTER STAGE ══════════ */}
-            <main className="flex-1 min-h-0 relative flex flex-col bg-gradient-radial">
+            {/* ══════════ CENTER STAGE — always "the screen" ══════════ */}
+            <main className="flex-1 min-h-0 relative flex flex-col bg-gradient-radial overflow-hidden">
                 {shownError && (
-                    <div className="shrink-0 mx-4 mt-4 border border-error text-error font-label-caps text-label-caps px-4 py-2.5 rounded-DEFAULT flex items-center gap-2">
+                    <div className="shrink-0 mx-4 mt-4 border border-error text-error font-label-caps text-label-caps px-4 py-2.5 rounded-DEFAULT flex items-center gap-2 z-20">
                         <span className="material-symbols-outlined text-base" aria-hidden="true">error</span>
                         <span className="truncate">{shownError}</span>
                     </div>
                 )}
 
-                {!active ? (
-                    /* ── SETUP: pre-flight + device/model configuration (progressive disclosure) ── */
-                    <div className="flex-1 min-h-0 overflow-y-auto">
-                        <div className="max-w-4xl mx-auto w-full px-6 py-9">
-                            <div className="text-center mb-8">
-                                <h2 className="font-headline-sm text-headline-sm text-on-surface">Chuẩn bị phiên dịch</h2>
-                                <p className="mt-1.5 text-sm text-on-surface-variant">
-                                    Kiểm tra thiết bị &amp; mô hình. Khi mọi mục đạt, nhấn <span className="text-secondary font-semibold">Bắt đầu dịch</span> ở thanh dưới.
-                                </p>
-                            </div>
-
-                            {/* Pre-flight go/no-go (A3.5) */}
-                            <div className="mb-6 border border-outline-variant rounded-DEFAULT bg-surface-container-lowest p-4">
-                                <div className="flex items-center gap-2 mb-3">
-                                    <span className={`material-symbols-outlined ${preflightOk ? 'text-secondary' : 'text-primary'}`} aria-hidden="true">
-                                        {preflightOk ? 'check_circle' : 'checklist'}
-                                    </span>
-                                    <span className={`font-label-caps text-label-caps ${preflightOk ? 'text-secondary' : 'text-on-surface'}`}>
-                                        {preflightOk ? 'SẴN SÀNG — TẤT CẢ ĐÃ ĐẠT' : `KIỂM TRA TRƯỚC KHI CHẠY · ${preflight.filter((i) => i.ok).length}/${preflight.length} đạt`}
-                                    </span>
-                                </div>
-                                <div className="flex flex-wrap gap-x-5 gap-y-1.5">
-                                    {preflight.map((it) => (
-                                        <div key={it.label} className="flex items-center gap-1.5 font-label-caps text-label-caps">
-                                            <span className={`material-symbols-outlined ${it.ok ? 'text-secondary' : 'text-error'}`} style={{ fontSize: '1.05rem' }} aria-hidden="true">
-                                                {it.ok ? 'check_circle' : 'cancel'}
-                                            </span>
-                                            <span className={it.ok ? 'text-on-surface-variant' : 'text-error'}>{it.label}</span>
-                                        </div>
-                                    ))}
-                                </div>
-                                {!preflightOk && (
-                                    <label className="flex items-center gap-2 mt-3 pt-3 border-t border-outline-variant/60 font-label-caps text-label-caps text-on-surface-variant cursor-pointer">
-                                        <input type="checkbox" checked={override} onChange={(e) => setOverride(e.target.checked)} className="accent-secondary" />
-                                        Bỏ qua kiểm tra (override) — chỉ dùng khi diễn tập
-                                    </label>
-                                )}
-                            </div>
-
-                            {/* Config groups */}
-                            <div className="grid md:grid-cols-3 gap-4">
-                                {/* Source */}
-                                <div className="bg-surface-container border border-outline-variant rounded-DEFAULT p-5 transition-colors hover:border-outline">
-                                    <div className="flex items-center gap-2 mb-4 pb-3 border-b border-outline-variant">
-                                        <span className="material-symbols-outlined text-on-surface-variant" aria-hidden="true">mic_external_on</span>
-                                        <h3 className="font-label-caps text-label-caps text-on-surface">Nguồn vào</h3>
-                                    </div>
-                                    <div className="space-y-4">
-                                        <div>
-                                            <label className="font-label-caps text-label-caps text-on-surface-variant block mb-1.5">Micro</label>
-                                            <select value={inputDevice ?? ''} onChange={(e) => setInputDevice(Number(e.target.value))} disabled={active} className={SELECT_CLS}>
-                                                {inputs.length === 0 && <option value="">Chưa thấy thiết bị vào</option>}
-                                                {inputs.map((d) => <option key={d.index} value={d.index}>{d.name}</option>)}
-                                            </select>
-                                        </div>
-                                        <div>
-                                            <label className="font-label-caps text-label-caps text-on-surface-variant block mb-1.5">Model nhận dạng</label>
-                                            <select value={sttModel} onChange={(e) => setSttModel(e.target.value)} disabled={active} className={SELECT_CLS}>
-                                                {sttModels.length === 0 && <option value="">— backend offline —</option>}
-                                                {sttModels.map((m) => <option key={m} value={m}>{m}</option>)}
-                                            </select>
-                                        </div>
-                                        <div>
-                                            <div className="flex justify-between items-center mb-1.5">
-                                                <label className="font-label-caps text-label-caps text-on-surface-variant">Mức tín hiệu</label>
-                                                <span className="font-label-caps text-label-caps text-primary tabular-nums">{vuDb}dB</span>
-                                            </div>
-                                            <div className="vu-meter-bar">
-                                                <div className="vu-meter-fill" style={{ width: `${Math.round(Math.min(1, vuLevel) * 100)}%` }}></div>
-                                            </div>
-                                        </div>
-                                    </div>
-                                </div>
-
-                                {/* Core engine */}
-                                <div className="bg-surface-container border border-outline-variant rounded-DEFAULT p-5 transition-colors hover:border-outline">
-                                    <div className="flex items-center gap-2 mb-4 pb-3 border-b border-outline-variant">
-                                        <span className="material-symbols-outlined text-on-surface-variant" aria-hidden="true">bolt</span>
-                                        <h3 className="font-label-caps text-label-caps text-on-surface">Lõi dịch</h3>
-                                    </div>
-                                    <div className="space-y-4">
-                                        <div>
-                                            <label className="font-label-caps text-label-caps text-on-surface-variant block mb-1.5">Model dịch</label>
-                                            <select value={mtModel} onChange={(e) => setMtModel(e.target.value)} disabled={active} className={SELECT_CLS}>
-                                                {mtModels.length === 0 && <option value="">— backend offline —</option>}
-                                                {mtModels.map((m) => <option key={m} value={m}>{m}</option>)}
-                                            </select>
-                                        </div>
-                                        <div className={`flex items-center gap-2 rounded-DEFAULT px-3 py-2.5 border ${session.backendOnline ? 'border-secondary/50 text-secondary' : 'border-error/50 text-error'}`}>
-                                            <span className={`w-2 h-2 rounded-full ${session.backendOnline ? 'bg-secondary' : 'bg-error'}`}></span>
-                                            <span className="font-label-caps text-label-caps">{session.backendOnline ? 'Lõi dịch PROYAKU sẵn sàng' : 'BACKEND OFFLINE'}</span>
-                                        </div>
-                                        <p className="text-xs text-on-surface-variant leading-relaxed">
-                                            Hậu-kiểm &amp; hotword bật sẵn. TTS đọc tiếng bật/tắt ở trang <span className="text-on-surface">Giọng đọc</span>.
-                                        </p>
-                                    </div>
-                                </div>
-
-                                {/* Outputs */}
-                                <div className="bg-surface-container border border-outline-variant rounded-DEFAULT p-5 transition-colors hover:border-outline">
-                                    <div className="flex items-center gap-2 mb-4 pb-3 border-b border-outline-variant">
-                                        <span className="material-symbols-outlined text-on-surface-variant" aria-hidden="true">speaker</span>
-                                        <h3 className="font-label-caps text-label-caps text-on-surface">Ngõ ra</h3>
-                                    </div>
-                                    <div className="space-y-4">
-                                        <div>
-                                            <div className="flex justify-between items-center mb-1.5">
-                                                <label className="font-label-caps text-label-caps text-on-surface-variant">Loa VI</label>
-                                                <span className="font-label-caps text-label-caps text-on-surface-variant">JA → VI</span>
-                                            </div>
-                                            <select value={outVi ?? ''} onChange={(e) => setOutVi(Number(e.target.value))} disabled={active} className={SELECT_CLS}>
-                                                {outputs.length === 0 && <option value="">Chưa thấy loa</option>}
-                                                {outputs.map((d) => <option key={d.index} value={d.index}>{d.name}</option>)}
-                                            </select>
-                                            <button onClick={() => handleTestTone('vi')} className="mt-2 w-full border border-outline-variant text-on-surface-variant py-1.5 rounded-DEFAULT text-xs hover:text-primary hover:border-primary transition-colors">
-                                                {toneStatus.vi || 'Test loa VI'}
-                                            </button>
-                                        </div>
-                                        <div>
-                                            <div className="flex justify-between items-center mb-1.5">
-                                                <label className="font-label-caps text-label-caps text-on-surface-variant">Loa JA</label>
-                                                <span className="font-label-caps text-label-caps text-on-surface-variant">VI → JA</span>
-                                            </div>
-                                            <select value={outJa ?? ''} onChange={(e) => setOutJa(Number(e.target.value))} disabled={active} className={SELECT_CLS}>
-                                                {outputs.length === 0 && <option value="">Chưa thấy loa</option>}
-                                                {outputs.map((d) => <option key={d.index} value={d.index}>{d.name}</option>)}
-                                            </select>
-                                            <button onClick={() => handleTestTone('ja')} className="mt-2 w-full border border-outline-variant text-on-surface-variant py-1.5 rounded-DEFAULT text-xs hover:text-primary hover:border-primary transition-colors">
-                                                {toneStatus.ja || 'Test loa JA'}
-                                            </button>
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                ) : setupPhase ? (
-                    /* ── CONNECTING / WARMING: progress, centered ── */
-                    <div className="flex-1 min-h-0 flex flex-col items-center justify-center gap-5 px-6">
-                        <span className="material-symbols-outlined text-secondary listening-pulse" style={{ fontSize: '52px' }} aria-hidden="true">
-                            {session.status === 'warming' ? 'model_training' : 'sync'}
-                        </span>
-                        <span className={`font-headline-sm text-headline-sm ${master.text}`}>{master.label}</span>
-                        {session.status === 'warming' && session.warming && (
-                            <div className="w-full max-w-md">
-                                <div className="vu-meter-bar">
-                                    <div className="vu-meter-fill" style={{ width: `${session.warming.steps ? Math.round((session.warming.step / session.warming.steps) * 100) : 10}%` }}></div>
-                                </div>
-                                <p className="mt-2 text-center font-label-caps text-label-caps text-on-surface-variant">{session.warming.detail || 'Đang nạp mô hình…'}</p>
-                            </div>
-                        )}
-                    </div>
-                ) : (
-                    /* ── LIVE MONITOR: the bilingual result (this is the "screen in the middle") ── */
+                {active && !setupPhase ? (
+                    /* LIVE result monitor */
                     <div className="flex-1 min-h-0 relative overflow-hidden">
-                        {/* Ambient top glow — depth, matches the audience wall */}
                         <div className="absolute top-0 inset-x-0 h-1/3 bg-gradient-to-b from-surface-container/40 to-transparent pointer-events-none z-0"></div>
                         <div className="absolute inset-0 flex z-10">
                             <div className="flex-1 min-w-0">
-                                <MonitorColumn
-                                    label={<span className="font-label-caps text-label-caps tracking-widest text-secondary border border-secondary/60 rounded px-2.5 py-0.5">TIẾNG VIỆT</span>}
-                                    lines={viLive}
-                                />
+                                <MonitorColumn label={<span className="font-label-caps text-label-caps tracking-widest text-secondary border border-secondary/60 rounded px-2.5 py-0.5">TIẾNG VIỆT</span>} lines={viLive} />
                             </div>
-                            {/* Ceremonial gold divider (gradient + diamond) — same language as /stream */}
                             <div className="w-px relative flex flex-col items-center justify-center opacity-50 shrink-0" aria-hidden="true">
                                 <div className="w-full h-full bg-gradient-to-b from-transparent via-secondary to-transparent"></div>
                                 <div className="absolute w-2 h-2 rotate-45 border border-secondary bg-primary-container"></div>
                             </div>
                             <div className="flex-1 min-w-0">
-                                <MonitorColumn
-                                    jp
-                                    label={<span className="jp-text font-label-caps text-label-caps tracking-widest text-secondary border border-secondary/60 rounded px-2.5 py-0.5">日本語</span>}
-                                    lines={jaLive}
-                                />
+                                <MonitorColumn jp label={<span className="jp-text font-label-caps text-label-caps tracking-widest text-secondary border border-secondary/60 rounded px-2.5 py-0.5">日本語</span>} lines={jaLive} />
                             </div>
                         </div>
-                        {/* Subtle brand mark, top-center over the divider */}
-                        <span className="material-symbols-outlined text-secondary opacity-40 absolute top-2 left-1/2 -translate-x-1/2 z-20 pointer-events-none" style={{ fontVariationSettings: "'FILL' 1", fontSize: '18px' }} aria-hidden="true">all_inclusive</span>
-                        {/* Live but nothing spoken yet — a calm waiting state, never a blank panel. */}
                         {viLive.length === 0 && jaLive.length === 0 && (
                             <div className="absolute inset-0 flex flex-col items-center justify-center gap-2.5 pointer-events-none z-20">
                                 <span className="material-symbols-outlined text-secondary opacity-70 listening-pulse" style={{ fontSize: '40px' }} aria-hidden="true">hearing</span>
@@ -503,11 +343,49 @@ const AudioRouting: React.FC = () => {
                             </div>
                         )}
                     </div>
+                ) : setupPhase ? (
+                    /* Connecting / warming */
+                    <div className="flex-1 min-h-0 flex flex-col items-center justify-center gap-5 px-6">
+                        <span className="material-symbols-outlined text-secondary listening-pulse" style={{ fontSize: '52px' }} aria-hidden="true">
+                            {session.status === 'warming' ? 'model_training' : 'sync'}
+                        </span>
+                        <span className={`font-headline-sm text-headline-sm ${master.text}`}>{master.label}</span>
+                        {session.status === 'warming' && session.warming && (
+                            <div className="w-full max-w-md">
+                                <div className="vu-meter-bar"><div className="vu-meter-fill" style={{ width: `${session.warming.steps ? Math.round((session.warming.step / session.warming.steps) * 100) : 10}%` }}></div></div>
+                                <p className="mt-2 text-center font-label-caps text-label-caps text-on-surface-variant">{session.warming.detail || 'Đang nạp mô hình…'}</p>
+                            </div>
+                        )}
+                    </div>
+                ) : (
+                    /* STANDBY stage — clean, ceremonial; the center is still "a screen" */
+                    <div className="flex-1 min-h-0 flex flex-col items-center justify-center gap-7 px-6 text-center">
+                        <div className="flex flex-col items-center">
+                            <div className="flex items-end gap-3">
+                                <span className="font-brand text-secondary leading-none" style={{ fontSize: 'clamp(3.5rem, 11vw, 7rem)', textShadow: '0 0 40px rgba(232,184,75,0.30)' }}>20</span>
+                                <span className="jp-text text-secondary font-bold pb-2 opacity-90" style={{ fontSize: 'clamp(1.1rem, 3.5vw, 2.2rem)' }}>周年</span>
+                            </div>
+                            <div className="mt-2 flex items-center gap-3 font-label-caps text-label-caps text-on-surface-variant tracking-[0.3em]">
+                                <span className="h-px w-8 bg-outline-variant"></span>2006 – 2026<span className="h-px w-8 bg-outline-variant"></span>
+                            </div>
+                            <span className="mt-2 font-bold tracking-[0.24em] text-on-surface uppercase text-lg">ESUHAI</span>
+                        </div>
+                        <div className="flex flex-col items-center gap-2">
+                            <span className={`font-label-caps text-label-caps tracking-[0.3em] ${session.backendOnline ? 'text-secondary' : 'text-error'}`}>
+                                {session.backendOnline ? 'PROYAKU · SẴN SÀNG' : 'PROYAKU · CHỜ LÕI DỊCH'}
+                            </span>
+                            <span className="text-sm text-on-surface-variant max-w-md leading-relaxed">
+                                {canStart
+                                    ? 'Nhấn ● Bắt đầu ở thanh dưới để lên sóng — kết quả song ngữ sẽ hiện ngay tại đây.'
+                                    : 'Mở ⚙ Cài đặt để chọn mic & mô hình, rồi Bắt đầu.'}
+                            </span>
+                        </div>
+                    </div>
                 )}
 
-                {/* Trust HUD (A3.1) — slim operator telemetry strip, above the control bar. */}
+                {/* Trust HUD strip (A3.1) */}
                 {active && (
-                    <div className="shrink-0 border-t border-outline-variant/60 bg-surface-container-lowest px-5 py-2 overflow-x-auto">
+                    <div className="shrink-0 border-t border-outline-variant/60 bg-surface-container-lowest px-5 py-2 overflow-x-auto z-20">
                         <div className="flex items-center gap-x-6 gap-y-1 whitespace-nowrap font-label-caps text-label-caps" style={{ fontFamily: 'ui-monospace, monospace' }}>
                             <span className="text-on-surface-variant">HƯỚNG <span className="text-primary">{dir || '—'}</span>{session.sourceLang ? ` ${pct(session.sourceLang.prob)}` : ''}</span>
                             <span className="text-on-surface-variant">TRỄ E2E <span className={e2e == null ? 'text-on-surface-variant' : e2e < 2000 ? 'text-secondary' : 'text-error'}>{fmtMs(e2e)}</span>{session.timing ? ` · STT ${fmtMs(session.timing.stt)} MT ${fmtMs(session.timing.mt)}` : ''}</span>
@@ -518,86 +396,142 @@ const AudioRouting: React.FC = () => {
                         </div>
                     </div>
                 )}
+
+                {/* thin always-on VU line at the very bottom of the stage */}
+                <div className={`shrink-0 h-1 w-full ${noSignal ? 'bg-error/20' : 'bg-surface-container'}`}>
+                    <div className={`h-full transition-all duration-100 ${noSignal ? 'bg-error' : 'bg-gradient-to-r from-primary-fixed via-secondary to-secondary'}`} style={{ width: `${Math.round(Math.min(1, vuLevel) * 100)}%` }}></div>
+                </div>
             </main>
 
-            {/* ══════════ BOTTOM CONTROL BAR ══════════ */}
-            <footer className="shrink-0 border-t border-outline-variant bg-surface-container-lowest px-5 py-3">
-                <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-4">
-                    {/* LEFT — mic status + VU */}
-                    <div className="flex items-center gap-3 min-w-0">
-                        <div className={`flex items-center gap-2.5 px-3 py-2 rounded-DEFAULT border ${noSignal ? 'border-error' : 'border-outline-variant'} bg-surface-container`}>
-                            <span className={`material-symbols-outlined ${noSignal ? 'text-error animate-pulse' : active ? 'text-secondary' : 'text-on-surface-variant'}`} aria-hidden="true">
-                                {noSignal ? 'mic_off' : 'mic'}
-                            </span>
-                            <div className="min-w-0">
-                                <div className="font-label-caps text-label-caps tabular-nums leading-none mb-1">
-                                    {noSignal ? <span className="text-error">KHÔNG TÍN HIỆU</span> : <span className="text-on-surface-variant">{vuDb}dB</span>}
-                                </div>
-                                <div className={`vu-meter-bar w-24 md:w-32 ${noSignal ? 'ring-1 ring-error' : ''}`}>
-                                    <div className="vu-meter-fill" style={{ width: `${Math.round(Math.min(1, vuLevel) * 100)}%` }}></div>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
+            {/* ══════════ BOTTOM CONTROL CLUSTER (icon buttons) ══════════ */}
+            <footer className="shrink-0 h-24 flex items-center justify-center gap-5 px-5 border-t border-outline-variant bg-surface-container-lowest">
+                <RoundBtn icon={noSignal ? 'mic_off' : 'mic'} label={noSignal ? 'KHÔNG TÍN HIỆU' : `MIC ${vuDb}dB`}
+                    title="Nguồn thu — mở Cài đặt để đổi mic" onClick={() => setSettingsOpen(true)} tone={noSignal ? 'danger' : active ? 'active' : 'default'} />
 
-                    {/* CENTER — primary transport (START gated by pre-flight / STOP hold-to-confirm) */}
-                    <div className="flex items-center justify-center">
-                        {active ? (
-                            <button
-                                onPointerDown={startHold}
-                                onPointerUp={cancelHold}
-                                onPointerLeave={cancelHold}
-                                title="Giữ để dừng phiên"
-                                className="relative overflow-hidden select-none flex items-center gap-2.5 min-w-[15rem] justify-center font-label-caps text-label-caps py-3.5 px-8 rounded-full bg-error text-on-error"
-                            >
-                                <span className="absolute inset-y-0 left-0 bg-on-error/30" style={{ width: `${Math.round(holdPct * 100)}%` }}></span>
-                                <span className="material-symbols-outlined relative" aria-hidden="true">stop_circle</span>
-                                <span className="relative">{holdPct > 0 ? `GIỮ ĐỂ DỪNG… ${Math.round(holdPct * 100)}%` : 'DỪNG DỊCH (giữ)'}</span>
-                            </button>
-                        ) : (
-                            <button
-                                onClick={() => { if (canStart) handleStartStop(); }}
-                                disabled={!canStart}
-                                title={canStart ? 'Bắt đầu phiên dịch' : 'Chưa đạt kiểm tra trước — xem danh sách ở giữa màn hình'}
-                                className="flex items-center gap-2.5 min-w-[15rem] justify-center font-label-caps text-label-caps py-3.5 px-8 rounded-full bg-secondary text-on-secondary hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed transition-all shadow-lg shadow-secondary/20 enabled:hover:shadow-secondary/40"
-                            >
-                                <span className="material-symbols-outlined" aria-hidden="true">play_circle</span>
-                                BẮT ĐẦU DỊCH
-                            </button>
-                        )}
-                    </div>
+                {active ? (
+                    <button type="button" onPointerDown={startHold} onPointerUp={cancelHold} onPointerLeave={cancelHold} title="Giữ để dừng phiên"
+                        className="flex flex-col items-center gap-1.5 select-none">
+                        <span className="relative w-16 h-16 rounded-full overflow-hidden bg-error text-on-error flex items-center justify-center">
+                            <span className="absolute inset-x-0 bottom-0 bg-on-error/30" style={{ height: `${Math.round(holdPct * 100)}%` }}></span>
+                            <span className="material-symbols-outlined relative" style={{ fontSize: '30px' }} aria-hidden="true">stop</span>
+                        </span>
+                        <span className="text-[10px] font-label-caps text-error leading-none">{holdPct > 0 ? `GIỮ… ${Math.round(holdPct * 100)}%` : 'DỪNG (giữ)'}</span>
+                    </button>
+                ) : (
+                    <RoundBtn icon="play_arrow" label="BẮT ĐẦU" title={canStart ? 'Bắt đầu phiên dịch' : 'Chưa đạt kiểm tra — mở Cài đặt'} tone="primary" disabled={!canStart} onClick={handleStartStop} />
+                )}
 
-                    {/* RIGHT — take-to-safe (live) + wall */}
-                    <div className="flex items-center justify-end gap-1.5">
-                        {active && (
-                            <div className="flex items-center gap-1 mr-1 pr-2 border-r border-outline-variant">
-                                {([
-                                    ['live', 'play_arrow', 'Phát trực tiếp (L)'],
-                                    ['freeze', 'ac_unit', 'Giữ hình (G)'],
-                                    ['slate', 'block', 'Màn an toàn (B)'],
-                                ] as [AudienceCut, string, string][]).map(([c, icon, title]) => (
-                                    <button
-                                        key={c}
-                                        title={title}
-                                        onClick={() => session.setAudienceCut(c)}
-                                        className={`material-symbols-outlined text-xl w-9 h-9 flex items-center justify-center rounded-full transition-colors ${session.audienceCut === c ? 'text-on-secondary bg-secondary' : 'text-on-surface-variant hover:text-secondary hover:bg-surface-container'}`}
-                                    >
-                                        {icon}
-                                    </button>
-                                ))}
-                            </div>
-                        )}
-                        <button
-                            onClick={openWall}
-                            title="Mở Tường phụ đề trong cửa sổ mới"
-                            className="flex items-center gap-2 px-3 h-9 rounded-full font-label-caps text-label-caps text-on-surface-variant hover:text-secondary hover:bg-surface-container transition-colors"
-                        >
-                            <span className="material-symbols-outlined text-xl" aria-hidden="true">open_in_new</span>
-                            <span className="hidden lg:inline">Tường</span>
-                        </button>
-                    </div>
-                </div>
+                {active && (
+                    <>
+                        <RoundBtn icon="play_arrow" label="Live" title="Phát trực tiếp" tone={session.audienceCut === 'live' ? 'active' : 'default'} onClick={() => session.setAudienceCut('live')} />
+                        <RoundBtn icon="ac_unit" label="Giữ hình" title="Đóng băng dòng cuối (freeze)" tone={session.audienceCut === 'freeze' ? 'active' : 'default'} onClick={() => session.setAudienceCut('freeze')} />
+                        <RoundBtn icon="block" label="An toàn" title="Màn an toàn (slate)" tone={session.audienceCut === 'slate' ? 'active' : 'default'} onClick={() => session.setAudienceCut('slate')} />
+                    </>
+                )}
+
+                <div className="w-px h-12 bg-outline-variant mx-1"></div>
+                <RoundBtn icon="settings" label="Cài đặt" title="Cấu hình thiết bị & mô hình (pre-event)" onClick={() => setSettingsOpen(true)} />
+                <RoundBtn icon="open_in_new" label="Tường" title="Mở Tường phụ đề" onClick={openWall} />
             </footer>
+
+            {/* ══════════ SETTINGS DRAWER (pre-event config) ══════════ */}
+            {settingsOpen && (
+                <>
+                    <div className="absolute inset-0 bg-background/60 z-30" onClick={() => setSettingsOpen(false)}></div>
+                    <aside className="absolute top-0 right-0 h-full w-full max-w-[400px] bg-surface-container-lowest border-l border-outline-variant z-40 flex flex-col shadow-2xl">
+                        <div className="shrink-0 h-14 flex items-center gap-2 px-5 border-b border-outline-variant">
+                            <span className="material-symbols-outlined text-secondary" aria-hidden="true">settings</span>
+                            <span className="font-semibold text-on-surface">Cài đặt phiên (Pre-event)</span>
+                            <button onClick={() => setSettingsOpen(false)} title="Đóng" className="ml-auto w-9 h-9 flex items-center justify-center rounded-full text-on-surface-variant hover:text-on-surface hover:bg-surface-container">
+                                <span className="material-symbols-outlined" aria-hidden="true">close</span>
+                            </button>
+                        </div>
+
+                        <div className="flex-1 overflow-y-auto p-5 space-y-6">
+                            {/* Pre-flight readiness */}
+                            <section>
+                                <div className="flex items-center gap-2 mb-2.5">
+                                    <span className={`material-symbols-outlined ${preflightOk ? 'text-secondary' : 'text-primary'}`} aria-hidden="true">{preflightOk ? 'check_circle' : 'checklist'}</span>
+                                    <span className={`font-label-caps text-label-caps ${preflightOk ? 'text-secondary' : 'text-on-surface'}`}>{preflightOk ? 'SẴN SÀNG — TẤT CẢ ĐÃ ĐẠT' : `KIỂM TRA · ${preflightPass}/${preflight.length} đạt`}</span>
+                                </div>
+                                <div className="space-y-1.5">
+                                    {preflight.map((it) => (
+                                        <div key={it.label} className="flex items-center gap-2 font-label-caps text-label-caps">
+                                            <span className={`material-symbols-outlined ${it.ok ? 'text-secondary' : 'text-error'}`} style={{ fontSize: '1.05rem' }} aria-hidden="true">{it.ok ? 'check_circle' : 'cancel'}</span>
+                                            <span className={it.ok ? 'text-on-surface-variant' : 'text-error'}>{it.label}</span>
+                                        </div>
+                                    ))}
+                                </div>
+                                {!preflightOk && (
+                                    <label className="flex items-center gap-2 mt-3 font-label-caps text-label-caps text-on-surface-variant cursor-pointer">
+                                        <input type="checkbox" checked={override} onChange={(e) => setOverride(e.target.checked)} className="accent-secondary" />
+                                        Bỏ qua kiểm tra (override) — chỉ khi diễn tập
+                                    </label>
+                                )}
+                            </section>
+
+                            <div className="h-px bg-outline-variant"></div>
+
+                            {/* Source */}
+                            <section className="space-y-3">
+                                <div className="flex items-center gap-2"><span className="material-symbols-outlined text-on-surface-variant" aria-hidden="true">mic_external_on</span><h3 className="font-label-caps text-label-caps text-on-surface">Nguồn vào</h3></div>
+                                <div>
+                                    <label className="font-label-caps text-label-caps text-on-surface-variant block mb-1.5">Micro</label>
+                                    <select value={inputDevice ?? ''} onChange={(e) => setInputDevice(Number(e.target.value))} disabled={active} className={SELECT_CLS}>
+                                        {inputs.length === 0 && <option value="">Chưa thấy thiết bị vào</option>}
+                                        {inputs.map((d) => <option key={d.index} value={d.index}>{d.name}</option>)}
+                                    </select>
+                                </div>
+                                <div>
+                                    <label className="font-label-caps text-label-caps text-on-surface-variant block mb-1.5">Model nhận dạng (ASR)</label>
+                                    <select value={sttModel} onChange={(e) => setSttModel(e.target.value)} disabled={active} className={SELECT_CLS}>
+                                        {sttModels.length === 0 && <option value="">— backend offline —</option>}
+                                        {sttModels.map((m) => <option key={m} value={m}>{m}</option>)}
+                                    </select>
+                                </div>
+                            </section>
+
+                            {/* Engine */}
+                            <section className="space-y-3">
+                                <div className="flex items-center gap-2"><span className="material-symbols-outlined text-on-surface-variant" aria-hidden="true">bolt</span><h3 className="font-label-caps text-label-caps text-on-surface">Lõi dịch</h3></div>
+                                <div>
+                                    <label className="font-label-caps text-label-caps text-on-surface-variant block mb-1.5">Model dịch (MT)</label>
+                                    <select value={mtModel} onChange={(e) => setMtModel(e.target.value)} disabled={active} className={SELECT_CLS}>
+                                        {mtModels.length === 0 && <option value="">— backend offline —</option>}
+                                        {mtModels.map((m) => <option key={m} value={m}>{m}</option>)}
+                                    </select>
+                                </div>
+                                <label className="flex items-center justify-between gap-2 cursor-pointer py-1">
+                                    <span className="font-label-caps text-label-caps text-on-surface-variant">Chế độ nhanh (Fast)</span>
+                                    <button onClick={handleToggleFast} className={`font-label-caps text-label-caps px-2.5 py-1 rounded-full ${fastMode ? 'bg-secondary text-on-secondary' : 'border border-outline-variant text-on-surface-variant'}`}>{fastMode ? 'ON' : 'OFF'}</button>
+                                </label>
+                                <p className="text-xs text-on-surface-variant leading-relaxed">TTS đọc tiếng bật/tắt ở trang <span className="text-on-surface">Giọng đọc</span>. Hậu-kiểm &amp; hotword luôn bật.</p>
+                            </section>
+
+                            {/* Outputs */}
+                            <section className="space-y-3">
+                                <div className="flex items-center gap-2"><span className="material-symbols-outlined text-on-surface-variant" aria-hidden="true">speaker</span><h3 className="font-label-caps text-label-caps text-on-surface">Ngõ ra</h3></div>
+                                <div>
+                                    <div className="flex justify-between items-center mb-1.5"><label className="font-label-caps text-label-caps text-on-surface-variant">Loa VI</label><span className="font-label-caps text-label-caps text-on-surface-variant">JA → VI</span></div>
+                                    <select value={outVi ?? ''} onChange={(e) => setOutVi(Number(e.target.value))} disabled={active} className={SELECT_CLS}>
+                                        {outputs.length === 0 && <option value="">Chưa thấy loa</option>}
+                                        {outputs.map((d) => <option key={d.index} value={d.index}>{d.name}</option>)}
+                                    </select>
+                                    <button onClick={() => handleTestTone('vi')} className="mt-2 w-full border border-outline-variant text-on-surface-variant py-1.5 rounded-DEFAULT text-xs hover:text-primary hover:border-primary transition-colors">{toneStatus.vi || 'Test loa VI'}</button>
+                                </div>
+                                <div>
+                                    <div className="flex justify-between items-center mb-1.5"><label className="font-label-caps text-label-caps text-on-surface-variant">Loa JA</label><span className="font-label-caps text-label-caps text-on-surface-variant">VI → JA</span></div>
+                                    <select value={outJa ?? ''} onChange={(e) => setOutJa(Number(e.target.value))} disabled={active} className={SELECT_CLS}>
+                                        {outputs.length === 0 && <option value="">Chưa thấy loa</option>}
+                                        {outputs.map((d) => <option key={d.index} value={d.index}>{d.name}</option>)}
+                                    </select>
+                                    <button onClick={() => handleTestTone('ja')} className="mt-2 w-full border border-outline-variant text-on-surface-variant py-1.5 rounded-DEFAULT text-xs hover:text-primary hover:border-primary transition-colors">{toneStatus.ja || 'Test loa JA'}</button>
+                                </div>
+                            </section>
+                        </div>
+                    </aside>
+                </>
+            )}
         </div>
     );
 };

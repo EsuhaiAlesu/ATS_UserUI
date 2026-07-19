@@ -3,36 +3,32 @@ import { NavLink, Outlet, useLocation } from 'react-router-dom';
 import { useLiveSession, isSessionActive } from '../lib/LiveSessionContext';
 import type { LiveStatus } from '../lib/LiveSessionContext';
 
-// The ONE navigation spine (IA Phase 1 — docs 19/22). Grouped by the event lifecycle,
-// with a pinned SAFETY block (status + Emergency Stop) always visible from every operator page.
-// Reads existing context only; does NOT own any session state.
+// The ONE navigation spine — a compact ICON rail (Zoom/Teams app-rail style). Icon + tiny label,
+// grouped by the event lifecycle, with a pinned SAFETY block (status + Emergency Stop) always
+// visible. Narrow so the content area stays wide-open. Reads context only; owns no session state.
 
 interface NavItem { to: string; label: string; icon: string; external?: boolean }
-const NAV: { group: string; items: NavItem[] }[] = [
-    { group: 'Nhà', items: [{ to: '/prep', label: 'Bảng chỉ huy', icon: 'dashboard' }] },
-    {
-        group: 'Chuẩn bị', items: [
-            { to: '/script', label: 'Kịch bản', icon: 'theater_comedy' },
-            { to: '/glossary', label: 'Từ điển & Tên riêng', icon: 'menu_book' },
-            { to: '/voices', label: 'Giọng đọc', icon: 'record_voice_over' },
-        ],
-    },
-    {
-        group: 'Vận hành', items: [
-            { to: '/audio', label: 'Bàn điều khiển', icon: 'tune' },
-            { to: '/stream', label: 'Tường phụ đề', icon: 'subtitles', external: true },
-            { to: '/reveal', label: 'Reveal', icon: 'auto_awesome', external: true },
-        ],
-    },
+const NAV: NavItem[][] = [
+    [{ to: '/prep', label: 'Chỉ huy', icon: 'dashboard' }],
+    [
+        { to: '/script', label: 'Kịch bản', icon: 'theater_comedy' },
+        { to: '/glossary', label: 'Từ điển', icon: 'menu_book' },
+        { to: '/voices', label: 'Giọng', icon: 'record_voice_over' },
+    ],
+    [
+        { to: '/audio', label: 'Điều khiển', icon: 'tune' },
+        { to: '/stream', label: 'Tường', icon: 'subtitles', external: true },
+        { to: '/reveal', label: 'Reveal', icon: 'auto_awesome', external: true },
+    ],
 ];
 
 function master(backendOnline: boolean, status: LiveStatus): { text: string; cls: string; dot: string } {
     if (!backendOnline) return { text: 'OFFLINE', cls: 'text-error', dot: 'bg-error' };
     switch (status) {
-        case 'listening': return { text: 'ĐANG LIVE', cls: 'text-secondary', dot: 'bg-secondary listening-pulse' };
-        case 'ready': return { text: 'SẴN SÀNG', cls: 'text-secondary', dot: 'bg-secondary' };
-        case 'warming': return { text: 'ĐANG WARM', cls: 'text-primary', dot: 'bg-primary listening-pulse' };
-        case 'connecting': return { text: 'ĐANG NỐI', cls: 'text-primary', dot: 'bg-primary listening-pulse' };
+        case 'listening': return { text: 'LIVE', cls: 'text-secondary', dot: 'bg-secondary listening-pulse' };
+        case 'ready': return { text: 'SẴN', cls: 'text-secondary', dot: 'bg-secondary' };
+        case 'warming': return { text: 'WARM', cls: 'text-primary', dot: 'bg-primary listening-pulse' };
+        case 'connecting': return { text: 'NỐI', cls: 'text-primary', dot: 'bg-primary listening-pulse' };
         case 'reconnecting': return { text: 'NỐI LẠI', cls: 'text-error', dot: 'bg-error listening-pulse' };
         case 'error': return { text: 'LỖI', cls: 'text-error', dot: 'bg-error' };
         default: return { text: 'CHỜ', cls: 'text-on-surface-variant', dot: 'bg-on-surface-variant' };
@@ -52,49 +48,49 @@ const OperatorLayout: React.FC = () => {
     };
 
     const itemClass = (isActive: boolean) =>
-        `flex items-center gap-3 px-3 py-2 rounded-DEFAULT font-medium text-sm transition-colors ${isActive
+        `relative flex flex-col items-center justify-center gap-1 w-full py-2.5 rounded-lg transition-colors ${isActive
             ? 'bg-secondary text-on-secondary'
             : 'text-on-surface-variant hover:bg-surface-container hover:text-on-surface'}`;
 
     return (
         <div className="h-screen flex overflow-hidden bg-background text-on-background">
-            <aside className="hidden md:flex flex-col w-60 shrink-0 bg-surface-container-lowest border-r border-outline-variant">
-                <div className="px-5 h-16 flex items-center border-b border-outline-variant shrink-0">
-                    <span className="font-bold text-lg text-secondary tracking-tight">PROYAKU</span>
-                    <span className="ml-2 font-label-caps text-label-caps text-on-surface-variant">訳</span>
+            <aside className="hidden md:flex flex-col w-[84px] shrink-0 bg-surface-container-lowest border-r border-outline-variant">
+                <div className="h-14 flex items-center justify-center border-b border-outline-variant shrink-0">
+                    <span className="font-bold text-lg text-secondary tracking-tight">P</span>
+                    <span className="font-label-caps text-on-surface-variant text-sm">訳</span>
                 </div>
 
-                <nav className="flex-1 overflow-y-auto py-3">
-                    {NAV.map((g) => (
-                        <div key={g.group} className="px-3 mb-3">
-                            <div className="px-3 py-1.5 font-label-caps text-label-caps text-on-surface-variant">{g.group}</div>
-                            {g.items.map((it) => (
-                                <NavLink key={it.to} to={it.to} onClick={(e) => guardLeave(e, it.to)} className={({ isActive }) => itemClass(isActive)}>
-                                    <span className="material-symbols-outlined text-xl">{it.icon}</span>
-                                    <span className="truncate">{it.label}</span>
-                                    {it.external && <span className="material-symbols-outlined text-sm ml-auto opacity-70">open_in_new</span>}
+                <nav className="flex-1 overflow-y-auto py-2 px-2 flex flex-col gap-1">
+                    {NAV.map((group, gi) => (
+                        <React.Fragment key={gi}>
+                            {gi > 0 && <div className="h-px bg-outline-variant/50 mx-2 my-1.5"></div>}
+                            {group.map((it) => (
+                                <NavLink key={it.to} to={it.to} title={it.label} onClick={(e) => guardLeave(e, it.to)} className={({ isActive }) => itemClass(isActive)}>
+                                    <span className="material-symbols-outlined text-[22px]">{it.icon}</span>
+                                    <span className="text-[10px] leading-none font-medium tracking-tight">{it.label}</span>
+                                    {it.external && <span className="material-symbols-outlined absolute top-1 right-1 text-[11px] opacity-60">open_in_new</span>}
                                 </NavLink>
                             ))}
-                        </div>
+                        </React.Fragment>
                     ))}
                 </nav>
 
-                <div className="border-t border-outline-variant p-3">
-                    <div className="px-1 pb-1.5 font-label-caps text-label-caps text-on-surface-variant">An toàn</div>
-                    <div className="flex items-center gap-2 px-1 pb-2.5 text-sm">
-                        <span className={`w-2 h-2 rounded-full ${m.dot}`}></span>
-                        <span className={m.cls}>{m.text}</span>
+                <div className="border-t border-outline-variant p-2 flex flex-col items-center gap-2 shrink-0">
+                    <div className="flex flex-col items-center gap-1 py-1" title={`Trạng thái: ${m.text}`}>
+                        <span className={`w-2.5 h-2.5 rounded-full ${m.dot}`}></span>
+                        <span className={`font-label-caps text-[9px] leading-none ${m.cls}`}>{m.text}</span>
                     </div>
                     <button
                         onClick={() => session.stop()}
-                        title="Dừng phiên ngay lập tức"
-                        className="w-full flex items-center justify-center gap-2 py-2.5 rounded-DEFAULT border border-error text-error font-label-caps text-label-caps hover:bg-error hover:text-on-error transition-colors">
-                        <span className="material-symbols-outlined text-lg">pan_tool</span> Dừng khẩn cấp
+                        title="Dừng phiên ngay lập tức (khẩn cấp)"
+                        className="w-full flex flex-col items-center gap-1 py-2 rounded-lg border border-error text-error hover:bg-error hover:text-on-error transition-colors">
+                        <span className="material-symbols-outlined text-[20px]">pan_tool</span>
+                        <span className="font-label-caps text-[9px] leading-none">DỪNG</span>
                     </button>
                 </div>
             </aside>
 
-            <div className="flex-1 min-w-0 overflow-y-auto">
+            <div className="flex-1 min-w-0 overflow-hidden flex flex-col">
                 <Outlet />
             </div>
         </div>
