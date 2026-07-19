@@ -7,6 +7,7 @@ import { loadTtsPrefs, saveTtsPrefs } from '../lib/ttsPrefs';
 import {
     loadSettings, saveSettings, exportLocalData, clearLocalData, DEFAULT_EVENT_NAME,
 } from '../lib/settings';
+import { toast } from '../lib/toast';
 
 // Central Settings page (Giai đoạn 1) — consolidates the scattered per-feature config into one
 // professional place: Kết nối · Sự kiện · Hiển thị · Giọng đọc · Tài khoản · Dữ liệu · Giới thiệu.
@@ -47,7 +48,6 @@ const Settings: React.FC = () => {
     const [rehearsalDate, setRehearsalDate] = useState(initial.rehearsalDate ?? '2026-08-07');
     const [galaDate, setGalaDate] = useState(initial.galaDate ?? '2026-08-08');
     const [venue, setVenue] = useState(initial.venue ?? '');
-    const [eventSaved, setEventSaved] = useState(false);
 
     // Display (caption size — the previously keyboard-only /stream zoom)
     const [capScale, setCapScale] = useState(() => {
@@ -78,8 +78,7 @@ const Settings: React.FC = () => {
 
     const saveEvent = () => {
         saveSettings({ eventName: eventName.trim(), rehearsalDate, galaDate, venue: venue.trim() });
-        setEventSaved(true);
-        setTimeout(() => setEventSaved(false), 2500);
+        toast.success('Đã lưu thông tin sự kiện');
     };
 
     const changeCap = (v: number) => {
@@ -102,6 +101,7 @@ const Settings: React.FC = () => {
         a.download = `proyaku-caidat-${new Date().toISOString().slice(0, 10)}.json`;
         a.click();
         URL.revokeObjectURL(url);
+        toast.success('Đã xuất cấu hình');
     };
 
     const doClear = () => {
@@ -153,7 +153,6 @@ const Settings: React.FC = () => {
                             <button onClick={saveEvent} className={`${BTN} bg-secondary text-on-secondary hover:opacity-80`}>
                                 <span className="material-symbols-outlined text-[18px]" aria-hidden="true">save</span>Lưu sự kiện
                             </button>
-                            {eventSaved && <span className="text-sm text-secondary">✓ Đã lưu</span>}
                         </div>
                     </Section>
 

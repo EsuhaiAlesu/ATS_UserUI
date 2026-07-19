@@ -5,6 +5,7 @@ import {
 import type { TtsVoice } from '../lib/api';
 import { loadTtsPrefs, saveTtsPrefs, type VoicePick } from '../lib/ttsPrefs';
 import PageHeader from '../components/PageHeader';
+import { toast } from '../lib/toast';
 
 // ---------------------------------------------------------------- TTS voice lane (per language)
 
@@ -143,7 +144,6 @@ const VoiceLane: React.FC<{
 
 const PronunciationClinic: React.FC = () => {
     const [script, setScript] = useState('');
-    const [scriptStatus, setScriptStatus] = useState('');
     const [seconds, setSeconds] = useState(20);
     const [recording, setRecording] = useState(false);
     const [heard, setHeard] = useState('');
@@ -157,10 +157,8 @@ const PronunciationClinic: React.FC = () => {
     }, []);
 
     const handleSaveScript = async () => {
-        setScriptStatus('Đang lưu…');
-        try { await saveVoiceScript(script); setScriptStatus('✓ Đã lưu'); }
-        catch (e) { setScriptStatus('Lỗi: ' + String(e)); }
-        setTimeout(() => setScriptStatus(''), 2500);
+        try { await saveVoiceScript(script); toast.success('Đã lưu kịch bản đọc'); }
+        catch (e) { toast.error('Lỗi: ' + String(e)); }
     };
 
     const handleRecord = async () => {
@@ -199,7 +197,6 @@ const PronunciationClinic: React.FC = () => {
             <div>
                 <div className="flex items-center justify-between mb-1">
                     <label className="font-label-caps text-label-caps text-on-surface-variant">Kịch bản đọc (giàu tên riêng &amp; thuật ngữ)</label>
-                    <span className="font-label-caps text-label-caps text-on-surface-variant">{scriptStatus}</span>
                 </div>
                 <textarea
                     value={script}

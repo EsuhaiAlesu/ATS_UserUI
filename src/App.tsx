@@ -10,6 +10,7 @@ import PrepDesk from './pages/PrepDesk'
 import Settings from './pages/Settings'
 import OperatorLayout from './components/OperatorLayout'
 import SplashScreen from './components/SplashScreen'
+import Toaster from './components/Toaster'
 import { LiveSessionProvider } from './lib/LiveSessionContext'
 
 const App: React.FC = () => {
@@ -22,6 +23,7 @@ const App: React.FC = () => {
 
   return (
     <LiveSessionProvider>
+      <Toaster />
       <div className="bg-background min-h-screen">
         {splashState !== 'done' && <SplashScreen onStateChange={setSplashState} />}
         {splashState !== 'animating' && (

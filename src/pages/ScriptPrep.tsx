@@ -3,6 +3,8 @@ import { getScript, saveScript, pretranslate } from '../lib/api';
 import type { ScriptEntry } from '../lib/api';
 import PageHeader from '../components/PageHeader';
 import EmptyState from '../components/EmptyState';
+import { SkeletonRows } from '../components/Skeleton';
+import { toast } from '../lib/toast';
 
 const BTN_PRI = 'inline-flex items-center gap-1.5 bg-secondary text-on-secondary px-4 py-2 rounded-full font-label-caps text-label-caps hover:opacity-80 transition-opacity disabled:opacity-40';
 const BTN_OUT = 'inline-flex items-center gap-1.5 border border-outline-variant text-on-surface-variant px-3.5 py-2 rounded-full text-sm hover:text-primary hover:border-primary transition-colors disabled:opacity-40';
@@ -91,16 +93,15 @@ const ScriptPrep: React.FC = () => {
     };
 
     const save = async () => {
-        setSaving(true); setStatus('Đang lưu…'); setError(null);
+        setSaving(true); setError(null);
         try {
             const clean = rows.filter((r) => r.src.trim() || r.dst.trim());
-            const res = await saveScript(clean);
+            await saveScript(clean);
             const approved = clean.filter((r) => r.status === 'approved').length;
-            setStatus(`✓ Đã lưu ${clean.length} dòng (${approved} đã duyệt, ${res.bytes} bytes).`);
+            toast.success(`Đã lưu ${clean.length} dòng · ${approved} đã duyệt`);
             setDirty(false);
         } catch (e) {
-            setError('Lưu thất bại: ' + String(e));
-            setStatus('');
+            toast.error('Lưu thất bại: ' + String(e));
         } finally {
             setSaving(false);
         }
@@ -146,7 +147,7 @@ const ScriptPrep: React.FC = () => {
                     </div>
 
                     {loading ? (
-                        <div className="py-16 text-center text-on-surface-variant font-label-caps text-label-caps">Đang tải…</div>
+                        <SkeletonRows rows={5} />
                     ) : rows.length === 0 ? (
                         <EmptyState icon="theater_comedy" title="Chưa có dòng kịch bản"
                             hint="Dán kịch bản song ngữ ở ô trên rồi bấm Nhập, hoặc thêm từng dòng. Dòng đã duyệt sẽ được tái dùng nguyên văn khi lễ diễn ra.">

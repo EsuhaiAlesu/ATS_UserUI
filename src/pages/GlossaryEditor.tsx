@@ -3,6 +3,8 @@ import { getGlossary, saveGlossary } from '../lib/api';
 import type { GlossaryEntry } from '../lib/api';
 import PageHeader from '../components/PageHeader';
 import EmptyState from '../components/EmptyState';
+import { SkeletonRows } from '../components/Skeleton';
+import { toast } from '../lib/toast';
 
 const BTN_PRI = 'inline-flex items-center gap-1.5 bg-secondary text-on-secondary px-4 py-2 rounded-full font-label-caps text-label-caps hover:opacity-80 transition-opacity disabled:opacity-40';
 const BTN_OUT = 'inline-flex items-center gap-1.5 border border-outline-variant text-on-surface-variant px-3.5 py-2 rounded-full text-sm hover:text-primary hover:border-primary transition-colors disabled:opacity-40';
@@ -32,12 +34,11 @@ const GlossaryEditor: React.FC = () => {
     const [rows, setRows] = useState<GlossaryEntry[]>([]);
     const [loading, setLoading] = useState(true);
     const [saving, setSaving] = useState(false);
-    const [status, setStatus] = useState('');
     const [error, setError] = useState<string | null>(null);
     const [dirty, setDirty] = useState(false);
 
     const load = () => {
-        setLoading(true); setError(null); setStatus('');
+        setLoading(true); setError(null);
         getGlossary()
             .then((r) => { setRows(r); setDirty(false); })
             .catch((e) => setError('Không tải được glossary (backend chạy chưa?): ' + String(e)))
@@ -59,19 +60,18 @@ const GlossaryEditor: React.FC = () => {
             return [...add, ...prev];
         });
         setDirty(true);
-        setStatus('Đã nạp danh sách khởi đầu (chưa lưu) — kiểm tra rồi bấm Lưu.');
+        toast.info('Đã nạp mẫu — kiểm tra rồi bấm Lưu.');
     };
 
     const save = async () => {
-        setSaving(true); setStatus('Đang lưu…'); setError(null);
+        setSaving(true); setError(null);
         try {
             const clean = rows.filter((r) => r.vi.trim() || r.ja.trim());
-            const r = await saveGlossary(clean);
-            setStatus(`✓ Đã lưu ${clean.length} term (${r.bytes} bytes). Hiệu lực phiên kế.`);
+            await saveGlossary(clean);
+            toast.success(`Đã lưu ${clean.length} thuật ngữ`);
             setDirty(false);
         } catch (e) {
-            setError('Lưu thất bại: ' + String(e));
-            setStatus('');
+            toast.error('Lưu thất bại: ' + String(e));
         } finally {
             setSaving(false);
         }
@@ -99,11 +99,10 @@ const GlossaryEditor: React.FC = () => {
                     <div className="flex flex-wrap items-center gap-2">
                         <button onClick={addRow} className={BTN_OUT}><span className="material-symbols-outlined text-[18px]" aria-hidden="true">add</span>Thêm dòng</button>
                         <button onClick={seedCritical} className={BTN_OUT}><span className="material-symbols-outlined text-[18px]" aria-hidden="true">star</span>Nạp mẫu trọng yếu</button>
-                        {status && <span className="ml-auto font-label-caps text-label-caps text-secondary">{status}</span>}
                     </div>
 
                     {loading ? (
-                        <div className="py-16 text-center text-on-surface-variant font-label-caps text-label-caps">Đang tải…</div>
+                        <SkeletonRows rows={6} />
                     ) : rows.length === 0 ? (
                         <EmptyState icon="menu_book" title="Chưa có thuật ngữ nào"
                             hint="Từ điển bảo vệ tên riêng & thuật ngữ để máy nghe và dịch đúng. Nạp danh sách trọng yếu cho lễ, hoặc thêm thủ công.">

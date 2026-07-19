@@ -309,6 +309,22 @@
     100% { opacity: 0; transform: scale(1.05); letter-spacing: 0.3em; }
 }
 
+/* Toast entrance + skeleton shimmer (global polish, Gói #2). */
+.toast-in { animation: toastIn 0.28s cubic-bezier(0.16, 1, 0.3, 1); }
+@keyframes toastIn {
+    from { opacity: 0; transform: translateX(16px) scale(0.98); }
+    to { opacity: 1; transform: none; }
+}
+.skeleton {
+    background: linear-gradient(90deg, var(--color-surface-container) 25%, var(--color-surface-container-high) 37%, var(--color-surface-container) 63%);
+    background-size: 400% 100%;
+    animation: shimmer 1.4s ease-in-out infinite;
+}
+@keyframes shimmer {
+    0% { background-position: 100% 0; }
+    100% { background-position: -100% 0; }
+}
+
 /* A2.4 / accessibility: honour the OS "Reduce Motion" setting — disable the decorative and
    in-reading-path animations, and show each element in its final (settled) state. */
 @media (prefers-reduced-motion: reduce) {
@@ -317,6 +333,8 @@
     .listening-pulse,
     .connecting-line,
     .animate-splash-content,
+    .toast-in,
+    .skeleton,
     .reveal-text {
         animation: none !important;
     }
