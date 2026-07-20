@@ -399,6 +399,11 @@
     .glass-high { background: var(--color-surface-container-high) !important; }
 }
 
+/* Collapsible tool rail: width morph + label fade — dependency-free, 60fps (only width/opacity/transform).
+   Scoped to .rail-aside so the head bar (also .shell-rail) is untouched. */
+.rail-aside { transition: width 240ms var(--lux-ease); }
+.rail-aside .rail-labels { transition: opacity 160ms linear, transform 200ms var(--lux-ease); }
+
 /* Glass panels (hero + large cards): translucent, top rim highlight. */
 .glass { background: var(--glass-fill); }
 .glass-high { background: var(--glass-fill-high); }
@@ -483,6 +488,7 @@
     .btn-lux:hover::after {
         animation: none !important;
     }
+    .rail-aside, .rail-aside .rail-labels { transition: none !important; }
     .fade-current,
     .fade-older,
     .fade-oldest {

@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { useLiveSession, isSessionActive } from '../lib/LiveSessionContext';
 import type { LiveStatus } from '../lib/LiveSessionContext';
@@ -9,35 +9,35 @@ import EventSwitcher from './EventSwitcher';
 // Settings gear on the right, pro-app style) plus a CONTEXTUAL left SIDEBAR whose tools swap with
 // the active menu. Reads session context only; owns no session state.
 
-interface Tool { label: string; icon: string; to?: string; hash?: string; external?: boolean; soon?: boolean }
+interface Tool { label: string; icon: string; desc: string; to?: string; hash?: string; external?: boolean; soon?: boolean }
 interface Menu { key: string; label: string; gear?: boolean; match: string[]; tools: Tool[] }
 
 const MENUS: Menu[] = [
     { key: 'prep', label: 'Chuẩn bị', match: ['/prep', '/script', '/glossary', '/voices', '/schedule', '/speakers', '/documents'], tools: [
-        { label: 'Tổng quan', icon: 'dashboard', to: '/prep' },
-        { label: 'Đặt lịch', icon: 'event', to: '/schedule' },
-        { label: 'Tài liệu', icon: 'folder_open', to: '/documents' },
-        { label: 'Kịch bản', icon: 'description', to: '/script' },
-        { label: 'Từ điển', icon: 'menu_book', to: '/glossary' },
-        { label: 'Giọng đọc', icon: 'record_voice_over', to: '/voices' },
-        { label: 'Bộ nhớ', icon: 'psychology', to: '/speakers' },
+        { label: 'Tổng quan', icon: 'dashboard', desc: 'Bảng sẵn sàng GO/NO-GO và đếm ngược.', to: '/prep' },
+        { label: 'Đặt lịch', icon: 'calendar_month', desc: 'Lịch hội nghị: ngày, người đặt, diễn giả.', to: '/schedule' },
+        { label: 'Tài liệu', icon: 'folder_open', desc: 'Thư viện tài liệu nguồn cho sự kiện.', to: '/documents' },
+        { label: 'Kịch bản', icon: 'description', desc: 'Câu kịch bản song ngữ Việt–Nhật đã duyệt.', to: '/script' },
+        { label: 'Từ điển', icon: 'menu_book', desc: 'Thuật ngữ và danh từ riêng cần giữ đúng.', to: '/glossary' },
+        { label: 'Giọng đọc', icon: 'record_voice_over', desc: 'Giọng đọc và luyện phát âm từng ngôn ngữ.', to: '/voices' },
+        { label: 'Bộ nhớ', icon: 'psychology', desc: 'Hồ sơ diễn giả: tên, biệt danh, giọng.', to: '/speakers' },
     ] },
     { key: 'ops', label: 'Dịch hội nghị', match: ['/audio'], tools: [
-        { label: 'Điều khiển', icon: 'tune', to: '/audio' },
-        { label: 'Phụ đề', icon: 'subtitles', to: '/stream', external: true },
-        { label: 'Reveal', icon: 'auto_awesome', to: '/reveal', external: true },
+        { label: 'Điều khiển', icon: 'tune', desc: 'Bàn điều khiển dịch trực tiếp hội nghị.', to: '/audio' },
+        { label: 'Phụ đề', icon: 'subtitles', desc: 'Màn chiếu phụ đề cho khán giả (tab mới).', to: '/stream', external: true },
+        { label: 'Reveal', icon: 'auto_awesome', desc: 'Màn chiếu khoảnh khắc công bố (tab mới).', to: '/reveal', external: true },
     ] },
     { key: 'report', label: 'Báo cáo', match: ['/report'], tools: [
-        { label: 'Tình trạng', icon: 'monitor_heart', to: '/report', hash: 'status' },
-        { label: 'Nhật ký', icon: 'history', to: '/report', hash: 'log' },
+        { label: 'Tình trạng', icon: 'monitor_heart', desc: 'Tình trạng hệ thống theo thời gian thực.', to: '/report', hash: 'status' },
+        { label: 'Nhật ký', icon: 'history', desc: 'Nhật ký hoạt động các phiên làm việc.', to: '/report', hash: 'log' },
     ] },
     { key: 'settings', label: 'Cài đặt', gear: true, match: ['/settings'], tools: [
-        { label: 'Kết nối', icon: 'lan', to: '/settings', hash: 'kn' },
-        { label: 'Sự kiện', icon: 'event', to: '/settings', hash: 'sk' },
-        { label: 'Phụ đề', icon: 'format_size', to: '/settings', hash: 'pd' },
-        { label: 'Giọng đọc', icon: 'record_voice_over', to: '/settings', hash: 'gd' },
-        { label: 'Tài khoản', icon: 'account_circle', to: '/settings', hash: 'tk' },
-        { label: 'Dữ liệu', icon: 'database', to: '/settings', hash: 'dl' },
+        { label: 'Kết nối', icon: 'lan', desc: 'Kết nối tới máy chủ xử lý.', to: '/settings', hash: 'kn' },
+        { label: 'Sự kiện', icon: 'event', desc: 'Thông tin và cấu hình sự kiện.', to: '/settings', hash: 'sk' },
+        { label: 'Phụ đề', icon: 'format_size', desc: 'Cỡ chữ và hiển thị phụ đề.', to: '/settings', hash: 'pd' },
+        { label: 'Giọng đọc', icon: 'record_voice_over', desc: 'Giọng đọc mặc định theo ngôn ngữ.', to: '/settings', hash: 'gd' },
+        { label: 'Tài khoản', icon: 'account_circle', desc: 'Tài khoản và thông tin đăng nhập.', to: '/settings', hash: 'tk' },
+        { label: 'Dữ liệu', icon: 'database', desc: 'Xuất và xóa dữ liệu ứng dụng.', to: '/settings', hash: 'dl' },
     ] },
 ];
 const GEAR = MENUS.find((mm) => mm.gear) as Menu;
@@ -73,6 +73,15 @@ const OperatorLayout: React.FC = () => {
 
     // On landing with a hash in the URL (e.g. cross-page nav to /settings#dl), scroll after render.
     useEffect(() => { if (loc.hash) scrollToHash(loc.hash.slice(1)); }, [loc.pathname, loc.hash]);
+
+    // Sidebar rail: expanded (icon + tên + mô tả) ↔ thu gọn (chỉ icon). Persist per operator.
+    // Lazy read so the correct width paints on first render (no flash). Default = expanded.
+    const [collapsed, setCollapsed] = useState(() => {
+        try { return localStorage.getItem('proyaku_rail_collapsed') === '1'; } catch { return false; }
+    });
+    useEffect(() => {
+        try { localStorage.setItem('proyaku_rail_collapsed', collapsed ? '1' : '0'); } catch { /* ignore quota/private-mode */ }
+    }, [collapsed]);
 
     // Confirm before leaving a live/warming session or with unsaved edits. Emergency Stop is never guarded.
     const confirmLeave = (): boolean => {
@@ -137,26 +146,47 @@ const OperatorLayout: React.FC = () => {
 
             {/* ══════════ BODY: contextual sidebar + content ══════════ */}
             <div className="flex-1 min-h-0 flex overflow-hidden">
-                <aside className="hidden md:flex flex-col w-56 shrink-0 border-r border-outline-variant shell-rail">
-                    <div className="px-4 pt-4 pb-2 font-label-caps text-label-caps text-on-surface-variant/60">{cur.label}</div>
-                    <nav className="flex-1 overflow-y-auto px-2 pb-3 space-y-0.5">
+                <aside className={`hidden md:flex flex-col shrink-0 border-r border-outline-variant shell-rail rail-aside overflow-hidden ${collapsed ? 'w-16' : 'w-[248px]'}`}>
+                    {collapsed
+                        ? <div className="mx-auto my-3 h-px w-6 bg-outline-variant" aria-hidden="true"></div>
+                        : <div className="px-4 pt-4 pb-2 font-label-caps text-label-caps text-on-surface-variant/60 truncate">{cur.label}</div>}
+                    <nav id="proyaku-rail-nav" aria-label={`Công cụ ${cur.label}`} className="flex-1 overflow-y-auto px-2 pt-1.5 pb-3 space-y-0.5">
                         {cur.tools.map((t) => {
                             const on = toolActive(t);
                             return (
-                                <button key={t.label} onClick={() => openTool(t)} disabled={t.soon} title={t.soon ? 'Sắp có' : t.label}
-                                    className={`group relative w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-left transition-colors ${t.soon
+                                <button key={t.label} onClick={() => openTool(t)} disabled={t.soon}
+                                    aria-current={on ? 'page' : undefined}
+                                    aria-label={t.label + (t.external ? ' (mở tab mới)' : '')}
+                                    title={collapsed ? `${t.label} — ${t.desc}` : t.label}
+                                    className={`group relative w-full flex items-center px-3 py-2 rounded-lg text-left transition-colors ${collapsed ? 'gap-0' : 'gap-3'} ${t.soon
                                         ? 'text-on-surface-variant/35 cursor-not-allowed'
                                         : on ? 'bg-secondary/15 text-secondary'
                                             : 'text-on-surface-variant hover:text-on-surface hover:bg-surface-container'}`}>
                                     {on && <span className="absolute left-0 top-1.5 bottom-1.5 w-[3px] rounded-full bg-secondary" aria-hidden="true"></span>}
-                                    <span className="material-symbols-outlined text-[20px] shrink-0" aria-hidden="true">{t.icon}</span>
-                                    <span className="text-sm font-medium flex-1 min-w-0">{t.label}</span>
-                                    {t.external && <span className="material-symbols-outlined text-[15px] opacity-50 shrink-0" aria-hidden="true">open_in_new</span>}
-                                    {t.soon && <span className="font-label-caps text-[9px] px-1.5 py-0.5 rounded-full border border-outline-variant text-on-surface-variant/50 shrink-0">sắp có</span>}
+                                    <span className="material-symbols-outlined shrink-0" aria-hidden="true"
+                                        style={{ fontSize: collapsed ? '24px' : '20px', fontVariationSettings: on ? "'FILL' 1, 'wght' 500" : "'FILL' 0, 'wght' 400" }}>{t.icon}</span>
+                                    <span className={`rail-labels min-w-0 flex flex-col ${collapsed ? 'w-0 opacity-0 -translate-x-1 overflow-hidden' : 'flex-1 opacity-100 translate-x-0'}`} aria-hidden="true">
+                                        <span className="flex items-center gap-1.5 min-w-0">
+                                            <span className="text-sm font-medium leading-snug truncate min-w-0">{t.label}</span>
+                                            {t.external && <span className="material-symbols-outlined text-[15px] opacity-50 shrink-0">open_in_new</span>}
+                                            {t.soon && <span className="font-label-caps text-[9px] px-1.5 py-0.5 rounded-full border border-outline-variant text-on-surface-variant/50 shrink-0">sắp có</span>}
+                                        </span>
+                                        <span className="text-xs text-on-surface-variant/90 leading-snug truncate">{t.desc}</span>
+                                    </span>
                                 </button>
                             );
                         })}
                     </nav>
+                    <div className="shrink-0 border-t border-outline-variant p-2">
+                        <button onClick={() => setCollapsed((v) => !v)}
+                            aria-label={collapsed ? 'Mở rộng thanh công cụ' : 'Thu gọn thanh công cụ'}
+                            aria-expanded={!collapsed} aria-controls="proyaku-rail-nav"
+                            title={collapsed ? 'Mở rộng thanh công cụ' : 'Thu gọn thanh công cụ'}
+                            className={`w-full flex items-center rounded-lg px-3 py-2 text-on-surface-variant hover:text-on-surface hover:bg-surface-container transition-colors ${collapsed ? 'gap-0' : 'gap-3'}`}>
+                            <span className="material-symbols-outlined shrink-0" aria-hidden="true" style={{ fontSize: '22px' }}>{collapsed ? 'left_panel_open' : 'left_panel_close'}</span>
+                            <span className={`rail-labels font-label-caps text-label-caps whitespace-nowrap ${collapsed ? 'w-0 opacity-0 overflow-hidden' : 'opacity-100'}`}>Thu gọn</span>
+                        </button>
+                    </div>
                 </aside>
 
                 <div className="flex-1 min-w-0 overflow-hidden flex flex-col">
