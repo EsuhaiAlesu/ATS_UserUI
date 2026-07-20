@@ -12,13 +12,13 @@ interface Tool { label: string; icon: string; to?: string; hash?: string; extern
 interface Menu { key: string; label: string; gear?: boolean; match: string[]; tools: Tool[] }
 
 const MENUS: Menu[] = [
-    { key: 'prep', label: 'Chuẩn bị', match: ['/prep', '/script', '/glossary', '/voices', '/schedule'], tools: [
+    { key: 'prep', label: 'Chuẩn bị', match: ['/prep', '/script', '/glossary', '/voices', '/schedule', '/speakers'], tools: [
         { label: 'Tổng quan', icon: 'dashboard', to: '/prep' },
         { label: 'Đặt lịch', icon: 'event', to: '/schedule' },
         { label: 'Kịch bản', icon: 'description', to: '/script' },
         { label: 'Từ điển', icon: 'menu_book', to: '/glossary' },
         { label: 'Giọng đọc', icon: 'record_voice_over', to: '/voices' },
-        { label: 'Bộ nhớ', icon: 'psychology', soon: true },
+        { label: 'Bộ nhớ', icon: 'psychology', to: '/speakers' },
     ] },
     { key: 'ops', label: 'Dịch hội nghị', match: ['/audio'], tools: [
         { label: 'Điều khiển', icon: 'tune', to: '/audio' },

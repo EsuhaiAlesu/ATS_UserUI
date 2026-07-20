@@ -10,6 +10,7 @@ import PrepDesk from './pages/PrepDesk'
 import Settings from './pages/Settings'
 import IncidentReport from './pages/IncidentReport'
 import SchedulePlanner from './pages/SchedulePlanner'
+import SpeakerMemory from './pages/SpeakerMemory'
 import OperatorLayout from './components/OperatorLayout'
 import SplashScreen from './components/SplashScreen'
 import Toaster from './components/Toaster'
@@ -43,6 +44,7 @@ const App: React.FC = () => {
               <Route path="/settings" element={<Settings />} />
               <Route path="/report" element={<IncidentReport />} />
               <Route path="/schedule" element={<SchedulePlanner />} />
+              <Route path="/speakers" element={<SpeakerMemory />} />
             </Route>
 
             {/* Audience / ceremonial surfaces are full-screen — no operator chrome. */}
