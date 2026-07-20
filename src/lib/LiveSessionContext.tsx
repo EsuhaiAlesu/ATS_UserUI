@@ -417,7 +417,9 @@ export const LiveSessionProvider: React.FC<{ children: React.ReactNode }> = ({ c
             ...hotPatchRef.current,
             ...(patch.tts ? { tts: { ...hotPatchRef.current.tts, ...patch.tts } } : {}),
             ...(patch.direction ? { direction: patch.direction } : {}),
-            ...(patch.speaker ? { speaker: { ...hotPatchRef.current.speaker, ...patch.speaker } } : {}),
+            // speaker is an atomic identity (who is speaking + their voice) — REPLACE, don't deep‑merge,
+            // else a prior speaker's voice would bleed onto a later voiceless speaker on reconnect re‑apply.
+            ...(patch.speaker ? { speaker: patch.speaker } : {}),
         };
         const id = `c${cmdSeqRef.current++}`;
         const fire = () => sendRaw({ cmd: 'set', id, patch });

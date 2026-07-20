@@ -8,6 +8,7 @@ import { isSessionActive, useLiveSession } from '../lib/LiveSessionContext';
 import { useMeter } from '../lib/useMeter';
 import { buildTtsConfig, loadTtsPrefs, saveTtsPrefs } from '../lib/ttsPrefs';
 import { getSchedules } from '../lib/schedule';
+import { getSpeakers, findSpeakerByName } from '../lib/speakers';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Operator console as a clean video-meeting cockpit (Zoom/Teams pattern):
@@ -113,11 +114,20 @@ const AudioRouting: React.FC = () => {
     const [ttsHasVoice] = useState(() => { const p = loadTtsPrefs(); return !!(p.vi || p.ja); }); // whether a voice was picked at Chuẩn bị · Giọng đọc
     const [speaker, setSpeaker] = useState(() => { try { return String(JSON.parse(localStorage.getItem('proyaku_speaker') || '{}').name || ''); } catch { return ''; } });
     const [panel, setPanel] = useState<null | 'speed' | 'speaker'>(null);
-    const scheduledSpeakers = useMemo(() => {
+    // Người nói roster for the dispatch popover: the reusable Bộ nhớ library (spec 1.7) FIRST, then any
+    // speakers from today's/last scheduled conference not already in the library (dedupe by name).
+    // Frozen at mount (like the rest of the console) — set the library up pre‑event.
+    const roster = useMemo(() => {
+        const lib = getSpeakers().filter((p) => p.name.trim()).map((p) => ({ id: p.id, name: p.name, role: p.role, lang: p.lang }));
         const now = new Date();
         const iso = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
         const list = getSchedules();
-        return (list.find((c) => c.date >= iso) ?? list[list.length - 1])?.speakers ?? [];
+        const sched = (list.find((c) => c.date >= iso) ?? list[list.length - 1])?.speakers ?? [];
+        const seen = new Set(lib.map((p) => p.name.trim().toLowerCase()));
+        const extra = sched
+            .filter((s) => s.name.trim() && !seen.has(s.name.trim().toLowerCase()))
+            .map((s) => ({ id: s.id, name: s.name, role: s.role, lang: s.lang }));
+        return [...lib, ...extra];
     }, []);
 
     useEffect(() => {
@@ -213,7 +223,13 @@ const AudioRouting: React.FC = () => {
         setSpeaker(name);
         try { const cur = JSON.parse(localStorage.getItem('proyaku_speaker') || '{}'); localStorage.setItem('proyaku_speaker', JSON.stringify({ ...cur, name })); } catch { /* ignore */ }
     };
-    const dispatchSpeaker = (name: string) => { saveSpeakerLocal(name); session.sendCommand({ speaker: { name } }); };
+    // Dispatch a speaker to the live session. If they have a pre‑assigned voice in Bộ nhớ (spec 1.7)
+    // and TTS is on, carry the voice id too (best‑effort — the backend applies it if supported).
+    const dispatchSpeaker = (name: string) => {
+        saveSpeakerLocal(name);
+        const prof = findSpeakerByName(name);
+        session.sendCommand({ speaker: { name, ...(ttsOn && prof?.voice ? { voice: prof.voice.id } : {}) } });
+    };
 
     // --- A3.4: NO-SIGNAL alarm ---
     const [noSignal, setNoSignal] = useState(false);
@@ -520,9 +536,9 @@ const AudioRouting: React.FC = () => {
                                             className="text-label-md text-on-surface-variant hover:text-error">Xoá</button>
                                     )}
                                 </div>
-                                {scheduledSpeakers.length > 0 ? (
+                                {roster.length > 0 ? (
                                     <div className="flex flex-col gap-1.5 max-h-52 overflow-y-auto">
-                                        {scheduledSpeakers.map((s) => (
+                                        {roster.map((s) => (
                                             <button key={s.id} onClick={() => { dispatchSpeaker(s.name); setPanel(null); }}
                                                 className={`flex items-center gap-3 px-3 py-2 rounded-lg border text-left transition-colors ${speaker === s.name ? 'border-secondary bg-secondary/12' : 'border-outline-variant hover:bg-surface-container'}`}>
                                                 <span className="material-symbols-outlined text-xl text-on-surface-variant shrink-0" aria-hidden="true">person</span>
@@ -535,7 +551,7 @@ const AudioRouting: React.FC = () => {
                                         ))}
                                     </div>
                                 ) : (
-                                    <p className="text-body-sm text-on-surface-variant">Chưa có người nói nào trong lịch. Nhập tay bên dưới hoặc thêm ở <span className="text-secondary">Chuẩn bị · Đặt lịch</span>.</p>
+                                    <p className="text-body-sm text-on-surface-variant">Chưa có người nói nào. Nhập tay bên dưới, hoặc thêm ở <span className="text-secondary">Chuẩn bị · Bộ nhớ</span> / <span className="text-secondary">Đặt lịch</span>.</p>
                                 )}
                                 <div className="flex items-center gap-2 pt-1 border-t border-outline-variant">
                                     <input value={speaker} onChange={(e) => saveSpeakerLocal(e.target.value)}
