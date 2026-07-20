@@ -2,8 +2,10 @@ import React, { useEffect, useRef, useState } from 'react';
 import PageHeader from '../components/PageHeader';
 import EmptyState from '../components/EmptyState';
 import { toast } from '../lib/toast';
-import { getSchedules, upsertConference, removeConference, newConference, newSpeaker } from '../lib/schedule';
+import { getSchedules, upsertConference, newConference, newSpeaker } from '../lib/schedule';
 import type { Conference, Speaker } from '../lib/schedule';
+import { useActiveEvent } from '../lib/ActiveEventContext';
+import { removeEvent } from '../lib/events';
 
 // Đặt lịch hội nghị (Chuẩn bị · spec 1.2) — list of scheduled conferences + a slide-over form to
 // create/edit one (date/time window · booker · topic · pre-settable expected speakers). Offline
@@ -130,6 +132,7 @@ const FormDrawer: React.FC<{
 );
 
 const SchedulePlanner: React.FC = () => {
+    const { refresh } = useActiveEvent();
     const [list, setList] = useState<Conference[]>(() => getSchedules());
     const [editing, setEditing] = useState<Conference | null>(null);
     const [isNew, setIsNew] = useState(false);
@@ -160,12 +163,15 @@ const SchedulePlanner: React.FC = () => {
         if (!editing) return;
         if (!editing.title.trim() || !editing.date) { toast.error('Cần ít nhất Chủ đề và Ngày'); return; }
         setList(upsertConference({ ...editing, title: editing.title.trim() }));
+        refresh();   // propagate the new/edited event to the EventSwitcher + all prep surfaces
         toast.success(isNew ? 'Đã đặt lịch' : 'Đã lưu thay đổi');
         closeDrawer();
     };
     const del = (c: Conference) => {
         if (window.confirm(`Xóa lịch "${c.title || '(chưa đặt tên)'}"? Không thể hoàn tác.`)) {
-            setList(removeConference(c.id));
+            removeEvent(c.id);          // deletes + reconciles the active/activation pointers
+            setList(getSchedules());
+            refresh();
             toast.success('Đã xóa lịch');
         }
     };

@@ -5,6 +5,7 @@ import { API_BASE, getHealth, getGlossary, getScript, getAudioDevices, getAudioO
 import type { GlossaryEntry, ScriptEntry } from '../lib/api';
 import { loadTtsPrefs } from '../lib/ttsPrefs';
 import { getScriptLocal } from '../lib/script';
+import { useActiveEvent } from '../lib/ActiveEventContext';
 import {
     getPrep, signAttest, clearAttest, markReachedReady, setDebrief, addIncident, removeIncident,
     signedBeforeRehearsal, daysUntil,
@@ -195,6 +196,7 @@ const SignalDrawer: React.FC<{
 
 const PrepDesk: React.FC = () => {
     const session = useLiveSession();
+    const { eventId } = useActiveEvent();
     const [data, setData] = useState<Fetched>(INITIAL);
     const [tick, setTick] = useState(0);
     const [prep, setPrepState] = useState(getPrep());
@@ -275,7 +277,7 @@ const PrepDesk: React.FC = () => {
         const sTotal = s ? s.length : 0;
         const sApproved = s ? s.filter((r) => r.status === 'approved').length : 0;
         // The script tool is now local‑first; approved lines only reach the matcher after "Đồng bộ BE".
-        const localApproved = getScriptLocal().filter((r) => r.status === 'approved' && r.dst.trim()).length;
+        const localApproved = getScriptLocal(eventId).filter((r) => r.status === 'approved' && r.dst.trim()).length;
 
         const host = window.location.hostname;
         const loopback = (API_BASE === '' || /(127\.0\.0\.1|localhost)/.test(API_BASE)) && /^(127\.0\.0\.1|localhost)$/.test(host);
@@ -403,7 +405,7 @@ const PrepDesk: React.FC = () => {
             },
         ];
         return list;
-    }, [data, prep, session.backendOnline, session.status, session.timing, session.speech, session.level, session.audienceCut]);
+    }, [data, prep, eventId, session.backendOnline, session.status, session.timing, session.speech, session.level, session.audienceCut]);
 
     const preSignals = signals.filter((s) => s.phase === 'pre');
     const blockers = preSignals.filter((s) => s.weight === 'blocker');

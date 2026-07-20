@@ -43,11 +43,26 @@ export function eventName(): string {
 }
 
 // All Proyaku localStorage keys — used by the Data section to export / clear everything at once.
-export const LOCAL_KEYS = ['proyaku_settings', 'proyaku_tts', 'proyaku_prep', 'proyaku_capscale', 'proyaku_speaker', 'proyaku_schedule', 'proyaku_speakers', 'proyaku_script', 'proyaku_script_sync'];
+// Static keys + a versioned migration flag + the event pointers; the PREFIXES cover the dynamic
+// per‑event keys (proyaku_script:<id>, proyaku_docs:<id>, …) so backup/clear never miss them.
+export const LOCAL_KEYS = ['proyaku_settings', 'proyaku_tts', 'proyaku_prep', 'proyaku_capscale', 'proyaku_speaker', 'proyaku_schedule', 'proyaku_speakers', 'proyaku_script', 'proyaku_script_sync', 'proyaku_active_event', 'proyaku_activation', 'proyaku_migrated_events'];
+const LOCAL_PREFIXES = ['proyaku_script:', 'proyaku_script_sync:', 'proyaku_glossary:', 'proyaku_glossary_sync:', 'proyaku_docs:'];
+
+// Every proyaku key currently present: the static list + anything matching a per‑event prefix.
+function allLocalKeys(): string[] {
+    const keys = new Set(LOCAL_KEYS);
+    try {
+        for (let i = 0; i < localStorage.length; i++) {
+            const k = localStorage.key(i);
+            if (k && LOCAL_PREFIXES.some((p) => k.startsWith(p))) keys.add(k);
+        }
+    } catch { /* ignore */ }
+    return [...keys];
+}
 
 export function exportLocalData(): string {
     const out: Record<string, unknown> = {};
-    for (const k of LOCAL_KEYS) {
+    for (const k of allLocalKeys()) {
         try {
             const v = localStorage.getItem(k);
             if (v != null) { try { out[k] = JSON.parse(v); } catch { out[k] = v; } }
@@ -57,7 +72,7 @@ export function exportLocalData(): string {
 }
 
 export function clearLocalData(): void {
-    for (const k of LOCAL_KEYS) {
+    for (const k of allLocalKeys()) {
         try { localStorage.removeItem(k); } catch { /* ignore */ }
     }
 }

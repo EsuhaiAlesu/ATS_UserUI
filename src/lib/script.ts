@@ -10,8 +10,10 @@ import { uid } from './schedule';
 import { getScript, saveScript } from './api';
 import type { ScriptEntry } from './api';
 
-const KEY = 'proyaku_script';
-const SYNC_KEY = 'proyaku_script_sync';
+// Event‑scoped keys: each Sự kiện (Conference id) holds its own script + sync meta. The JSON pushed
+// to the matcher (data/script.json) is UNCHANGED — only the local storage key is namespaced.
+const sk = (eventId: string): string => `proyaku_script:${eventId || '_default'}`;
+const syk = (eventId: string): string => `proyaku_script_sync:${eventId || '_default'}`;
 
 const ALLOWED_LANGS = new Set(['vi', 'ja', 'en', 'th', 'ko', 'zh']);
 const str = (v: unknown, d = ''): string => (typeof v === 'string' ? v : d);
@@ -28,50 +30,52 @@ function normEntry(x: unknown): ScriptEntry {
     return e;
 }
 
-function read(): ScriptEntry[] {
+function read(eventId: string): ScriptEntry[] {
     try {
-        const s = localStorage.getItem(KEY);
+        const s = localStorage.getItem(sk(eventId));
         if (s) { const p: unknown = JSON.parse(s); if (Array.isArray(p)) return p.map(normEntry); }
     } catch { /* corrupt/absent → empty */ }
     return [];
 }
 
 /**
- * Persist the whole list + stamp updatedAt (drives the "chưa đồng bộ" indicator). No‑ops when the
- * serialized content is unchanged, so an idempotent flush (unmount / pagehide / post‑sync) never
- * fabricates a dirty state.
+ * Persist the whole list for an event + stamp updatedAt (drives the "chưa đồng bộ" indicator).
+ * No‑ops when the serialized content is unchanged, so an idempotent flush (unmount / pagehide /
+ * post‑sync) never fabricates a dirty state.
  */
-export function writeScriptLocal(list: ScriptEntry[]): void {
+export function writeScriptLocal(eventId: string, list: ScriptEntry[]): void {
     try {
         const next = JSON.stringify(list);
-        if (localStorage.getItem(KEY) === next) return;   // unchanged → don't advance updatedAt
-        localStorage.setItem(KEY, next);
-        writeSync({ ...readSync(), updatedAt: new Date().toISOString() });
+        // Absent key ≡ empty list, so merely visiting a new event (flush of []) never fabricates a key
+        // or a dirty state; only a genuine change persists + stamps updatedAt.
+        if ((localStorage.getItem(sk(eventId)) ?? '[]') === next) return;
+        localStorage.setItem(sk(eventId), next);
+        writeSync(eventId, { ...readSync(eventId), updatedAt: new Date().toISOString() });
     } catch { /* ignore quota/private-mode */ }
 }
 
 /** Record that local now equals the backend (after a replace‑pull): content is synced, not dirty. */
-export function markPulledLocal(list: ScriptEntry[]): void {
+export function markPulledLocal(eventId: string, list: ScriptEntry[]): void {
     try {
-        localStorage.setItem(KEY, JSON.stringify(list));
+        localStorage.setItem(sk(eventId), JSON.stringify(list));
         const t = new Date().toISOString();
-        writeSync({ updatedAt: t, syncedAt: t });   // equal timestamps → getSyncState().dirty === false
+        writeSync(eventId, { updatedAt: t, syncedAt: t });   // equal timestamps → getSyncState().dirty === false
     } catch { /* ignore quota/private-mode */ }
 }
 
-export const getScriptLocal = (): ScriptEntry[] => read();
+export const getScriptLocal = (eventId: string): ScriptEntry[] => read(eventId);
 
 export const newScriptEntry = (srcLang = 'vi', dstLang = 'ja'): ScriptEntry =>
     ({ id: uid(), src_lang: srcLang, src: '', dst_lang: dstLang, dst: '', status: 'draft' });
 
-// ---------------------------------------------------------------- sync bookkeeping
+// ---------------------------------------------------------------- sync bookkeeping (per event)
 interface SyncMeta { updatedAt?: string; syncedAt?: string }
-function readSync(): SyncMeta { try { const s = localStorage.getItem(SYNC_KEY); if (s) return JSON.parse(s) as SyncMeta; } catch { /* */ } return {}; }
-function writeSync(m: SyncMeta): void { try { localStorage.setItem(SYNC_KEY, JSON.stringify(m)); } catch { /* */ } }
+function readSync(eventId: string): SyncMeta { try { const s = localStorage.getItem(syk(eventId)); if (s) return JSON.parse(s) as SyncMeta; } catch { /* */ } return {}; }
+function writeSync(eventId: string, m: SyncMeta): void { try { localStorage.setItem(syk(eventId), JSON.stringify(m)); } catch { /* */ } }
 
 export interface SyncState { updatedAt?: string; syncedAt?: string; dirty: boolean }
-export function getSyncState(): SyncState {
-    const m = readSync();
+export function getSyncState(eventId: string): SyncState {
+    const m = readSync(eventId);
     const dirty = !m.syncedAt || (!!m.updatedAt && m.updatedAt > m.syncedAt);
     return { ...m, dirty };
 }
@@ -104,11 +108,11 @@ export function toCanonical(rows: ScriptEntry[]): ScriptEntry[] {
         });
 }
 
-/** Push the local script to data/script.json for the live matcher. Returns the pushed line count. */
-export async function pushToBackend(rows: ScriptEntry[]): Promise<number> {
+/** Push this event's script to data/script.json for the live matcher. Returns the pushed line count. */
+export async function pushToBackend(eventId: string, rows: ScriptEntry[]): Promise<number> {
     const canonical = toCanonical(rows);
     await saveScript(canonical);
-    writeSync({ ...readSync(), syncedAt: new Date().toISOString() });
+    writeSync(eventId, { ...readSync(eventId), syncedAt: new Date().toISOString() });
     return canonical.length;
 }
 

@@ -11,10 +11,12 @@ import Settings from './pages/Settings'
 import IncidentReport from './pages/IncidentReport'
 import SchedulePlanner from './pages/SchedulePlanner'
 import SpeakerMemory from './pages/SpeakerMemory'
+import DocumentsLibrary from './pages/DocumentsLibrary'
 import OperatorLayout from './components/OperatorLayout'
 import SplashScreen from './components/SplashScreen'
 import Toaster from './components/Toaster'
 import { LiveSessionProvider } from './lib/LiveSessionContext'
+import { ActiveEventProvider } from './lib/ActiveEventContext'
 
 const App: React.FC = () => {
   // The ESUHAI intro splash only plays on the home page ("/"), then redirects into the
@@ -26,6 +28,7 @@ const App: React.FC = () => {
 
   return (
     <LiveSessionProvider>
+      <ActiveEventProvider>
       <Toaster />
       <div className="bg-background min-h-screen">
         {splashState !== 'done' && <SplashScreen onStateChange={setSplashState} />}
@@ -45,6 +48,7 @@ const App: React.FC = () => {
               <Route path="/report" element={<IncidentReport />} />
               <Route path="/schedule" element={<SchedulePlanner />} />
               <Route path="/speakers" element={<SpeakerMemory />} />
+              <Route path="/documents" element={<DocumentsLibrary />} />
             </Route>
 
             {/* Audience / ceremonial surfaces are full-screen — no operator chrome. */}
@@ -55,6 +59,7 @@ const App: React.FC = () => {
           </Routes>
         )}
       </div>
+      </ActiveEventProvider>
     </LiveSessionProvider>
   )
 }

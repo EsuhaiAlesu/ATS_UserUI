@@ -3,6 +3,7 @@ import { Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { useLiveSession, isSessionActive } from '../lib/LiveSessionContext';
 import type { LiveStatus } from '../lib/LiveSessionContext';
 import { hasUnsaved } from '../lib/guards';
+import EventSwitcher from './EventSwitcher';
 
 // Navigation spine: a full-width HEAD BAR (logo · 3 primary menus · status + Emergency Stop ·
 // Settings gear on the right, pro-app style) plus a CONTEXTUAL left SIDEBAR whose tools swap with
@@ -12,9 +13,10 @@ interface Tool { label: string; icon: string; to?: string; hash?: string; extern
 interface Menu { key: string; label: string; gear?: boolean; match: string[]; tools: Tool[] }
 
 const MENUS: Menu[] = [
-    { key: 'prep', label: 'Chuẩn bị', match: ['/prep', '/script', '/glossary', '/voices', '/schedule', '/speakers'], tools: [
+    { key: 'prep', label: 'Chuẩn bị', match: ['/prep', '/script', '/glossary', '/voices', '/schedule', '/speakers', '/documents'], tools: [
         { label: 'Tổng quan', icon: 'dashboard', to: '/prep' },
         { label: 'Đặt lịch', icon: 'event', to: '/schedule' },
+        { label: 'Tài liệu', icon: 'folder_open', to: '/documents' },
         { label: 'Kịch bản', icon: 'description', to: '/script' },
         { label: 'Từ điển', icon: 'menu_book', to: '/glossary' },
         { label: 'Giọng đọc', icon: 'record_voice_over', to: '/voices' },
@@ -114,6 +116,8 @@ const OperatorLayout: React.FC = () => {
                         <button key={mm.key} onClick={() => goMenu(mm)} className={tabCls(mm.key === cur.key)}>{mm.label}</button>
                     ))}
                 </nav>
+                <div className="w-px h-6 bg-outline-variant mx-1 hidden lg:block"></div>
+                <div className="hidden lg:block"><EventSwitcher /></div>
                 <div className="flex-1"></div>
                 <div className="flex items-center gap-1.5 mr-1" title={`Trạng thái: ${m.text}`}>
                     <span className={`w-2.5 h-2.5 rounded-full ${m.dot}`}></span>

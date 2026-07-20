@@ -3,6 +3,7 @@ import PageHeader from '../components/PageHeader';
 import EmptyState from '../components/EmptyState';
 import { toast } from '../lib/toast';
 import { useLiveSession } from '../lib/LiveSessionContext';
+import { useActiveEvent } from '../lib/ActiveEventContext';
 import { pretranslate, ingestPdf } from '../lib/api';
 import type { ScriptEntry } from '../lib/api';
 import {
@@ -10,6 +11,7 @@ import {
 } from '../lib/script';
 import { readImportFile, parseText } from '../lib/scriptImport';
 import type { Delim } from '../lib/scriptImport';
+import { upsertDoc, newSourceDoc } from '../lib/docs';
 
 // Kịch bản & Bản dịch duyệt sẵn (Chuẩn bị · spec 1.3). LOCAL‑FIRST (lib/script.ts) so it works fully
 // OFFLINE; the backend is only a SYNC channel (push data/script.json for the Cascade Matcher) plus
@@ -20,7 +22,11 @@ const DIRS: { v: string; l: string }[] = [
     { v: 'vi-ja', l: 'VI → JA (MC nói tiếng Việt)' }, { v: 'ja-vi', l: 'JA → VI (khách Nhật nói)' },
 ];
 const DELIMS: { v: Delim; l: string }[] = [
-    { v: 'auto', l: 'Tự nhận' }, { v: 'tab', l: 'Tab' }, { v: 'pipe', l: 'Dấu |' }, { v: 'arrow', l: '=> / -> / ::' }, { v: 'none', l: 'Chỉ câu nguồn' },
+    { v: 'auto', l: 'Tự nhận (khuyến nghị)' },
+    { v: 'none', l: '1 cột — chỉ lời gốc' },
+    { v: 'tab', l: '2 cột — ngăn bằng Tab' },
+    { v: 'pipe', l: '2 cột — ngăn bằng |' },
+    { v: 'arrow', l: '2 cột — ngăn bằng => hoặc ->' },
 ];
 const INPUT = 'w-full bg-surface text-on-surface border border-outline-variant rounded-lg px-3 py-2 text-[15px] focus:border-secondary focus:outline-none';
 const TA = 'w-full bg-surface text-on-surface border border-outline-variant rounded-lg py-2.5 px-3 text-base leading-relaxed resize-y focus:border-secondary focus:outline-none';
@@ -131,9 +137,9 @@ const LineCard: React.FC<{
 
 // ── Import drawer (dropzone + paste + preview) ──
 const ImportDrawer: React.FC<{
-    shown: boolean; srcLang: string; dstLang: string; backendOnline: boolean;
+    shown: boolean; eventId: string; srcLang: string; dstLang: string; backendOnline: boolean;
     onCommit: (entries: ScriptEntry[]) => void; onClose: () => void;
-}> = ({ shown, srcLang, dstLang, backendOnline, onCommit, onClose }) => {
+}> = ({ shown, eventId, srcLang, dstLang, backendOnline, onCommit, onClose }) => {
     const [text, setText] = useState('');
     const [md, setMd] = useState(false);
     const [delim, setDelim] = useState<Delim>('auto');
@@ -150,15 +156,18 @@ const ImportDrawer: React.FC<{
         setErr(null); setBusy(true); setFileName(file.name);
         try {
             const r = await readImportFile(file);
+            let text = r.text;
             if (r.kind === 'pdf') {
                 if (!backendOnline) throw new Error('Đọc PDF cần backend — bật kết nối, hoặc dùng .docx/.md/.txt.');
-                const ing = await ingestPdf(file);
-                setText(ing.text ?? ''); setMd(false);
-                if (!ing.text?.trim()) setErr('Không trích được văn bản từ PDF.');
+                text = (await ingestPdf(file)).text ?? '';
+                setText(text); setMd(false);
+                if (!text.trim()) setErr('Không trích được văn bản từ PDF.');
             } else {
-                setText(r.text); setMd(r.md);
-                if (!r.text.trim()) setErr('Không tìm thấy văn bản trong tệp.');
+                setText(text); setMd(r.md);
+                if (!text.trim()) setErr('Không tìm thấy văn bản trong tệp.');
             }
+            // Archive the imported file as a source document of this event (provenance).
+            if (text.trim()) upsertDoc(eventId, newSourceDoc(file.name, r.kind, file.size, text, r.md));
         } catch (e) { setErr(e instanceof Error ? e.message : String(e)); setText(''); }
         finally { setBusy(false); }
     };
@@ -195,23 +204,43 @@ const ImportDrawer: React.FC<{
                         <span className="h-px flex-1 bg-outline-variant"></span>
                     </div>
                     <textarea value={text} onChange={(e) => { setText(e.target.value); setMd(false); setFileName(''); }} rows={4}
-                        placeholder={`Dán kịch bản (mỗi dòng một câu; song ngữ ngăn bằng Tab, | hoặc =>)…`} className={`${TA} font-normal`} />
+                        placeholder={'Dán kịch bản, mỗi dòng một câu.\nNếu có sẵn bản dịch: đặt cùng dòng, ngăn bằng | (vd: Kính chào quý vị | ご来賓の皆様)'} className={`${TA} font-normal`} />
                     {err && <div className="border border-error text-error text-[13px] px-3 py-2 rounded-lg flex items-center gap-2"><span className="material-symbols-outlined text-base" aria-hidden="true">error</span>{err}</div>}
-                    <div className="flex items-center gap-2">
-                        <label className="text-[13px] text-on-surface-variant">Tách song ngữ</label>
-                        <select value={delim} onChange={(e) => setDelim(e.target.value as Delim)} className={`${INPUT} w-auto`}>
-                            {DELIMS.map((d) => <option key={d.v} value={d.v}>{d.l}</option>)}
-                        </select>
+                    {/* Bilingual splitting — explained in plain language */}
+                    <div className="rounded-xl border border-outline-variant bg-surface-container/40 p-3.5 space-y-2.5">
+                        <div className="flex items-center gap-2">
+                            <span className="material-symbols-outlined text-[20px] text-sky-400 shrink-0" aria-hidden="true">view_column</span>
+                            <label className="text-[15px] text-on-surface font-medium flex-1">Mỗi dòng tài liệu có gì?</label>
+                            <select value={delim} onChange={(e) => setDelim(e.target.value as Delim)} className={`${INPUT} w-auto`}>
+                                {DELIMS.map((d) => <option key={d.v} value={d.v}>{d.l}</option>)}
+                            </select>
+                        </div>
+                        <p className="text-[13px] text-on-surface-variant/90 leading-relaxed">
+                            Tài liệu <span className="text-on-surface font-medium">đã có sẵn bản dịch</span> bên cạnh lời gốc (ngăn bằng Tab, dấu <span className="text-on-surface">|</span> hoặc <span className="text-on-surface">=&gt;</span>) → máy tự tách thành 2 cột <span className="text-sky-400 font-medium">Nguồn</span> · <span className="text-secondary font-medium">Bản dịch</span>. Nếu <span className="text-on-surface font-medium">chỉ có lời gốc</span> → mỗi dòng thành một câu để dịch &amp; duyệt sau.
+                        </p>
+                        <div className="flex items-center gap-2 text-[12px] text-on-surface-variant/70 bg-surface-container-lowest rounded-lg px-2.5 py-1.5">
+                            <span className="font-label-caps text-[10px] shrink-0">VÍ DỤ 2 CỘT</span>
+                            <span className="text-on-surface truncate">Kính chào quý vị</span>
+                            <span className="text-sky-400 shrink-0">|</span>
+                            <span className="text-on-surface jp-text truncate">ご来賓の皆様</span>
+                        </div>
                     </div>
                     {parsed && (
                         <div className="border border-outline-variant rounded-xl overflow-hidden">
-                            <div className="flex items-center gap-2 px-3 py-2 bg-surface-container-lowest text-[12px] text-on-surface-variant border-b border-outline-variant">
-                                <span className="material-symbols-outlined text-[16px] text-secondary" aria-hidden="true">preview</span>
-                                {parsed.total} dòng · {parsed.paired} cặp song ngữ · tách: {delimLabel}
+                            <div className="flex items-center gap-2 px-3 py-2.5 bg-surface-container-lowest text-[13px] text-on-surface border-b border-outline-variant">
+                                <span className="material-symbols-outlined text-[18px] text-secondary" aria-hidden="true">preview</span>
+                                {parsed.delim === 'none'
+                                    ? <span>Xem trước — <span className="text-secondary font-medium">{parsed.total} câu</span>, mỗi dòng là lời gốc (chưa có bản dịch)</span>
+                                    : <span>Đã tách <span className="text-sky-400 font-medium">2 cột</span> (ngăn bằng {delimLabel}) — <span className="text-secondary font-medium">{parsed.paired}/{parsed.total}</span> dòng có bản dịch</span>}
                             </div>
-                            <div className="max-h-64 overflow-y-auto divide-y divide-outline-variant/50">
+                            {parsed.delim !== 'none' && (
+                                <div className="grid grid-cols-2 gap-2 px-3 py-1.5 bg-surface-container-lowest/60 border-b border-outline-variant/50 font-label-caps text-[10px]">
+                                    <span className="text-sky-400">Nguồn</span><span className="text-secondary">Bản dịch</span>
+                                </div>
+                            )}
+                            <div className="max-h-60 overflow-y-auto divide-y divide-outline-variant/50">
                                 {parsed.entries.slice(0, 30).map((e, i) => (
-                                    <div key={i} className="grid grid-cols-2 gap-2 px-3 py-1.5 text-[12px]">
+                                    <div key={i} className="grid grid-cols-2 gap-2 px-3 py-1.5 text-[13px]">
                                         <span className={`text-on-surface truncate ${e.src_lang === 'ja' ? 'jp-text' : ''}`}>{e.src || '—'}</span>
                                         <span className={`text-on-surface-variant truncate ${e.dst_lang === 'ja' ? 'jp-text' : ''}`}>{e.dst || '—'}</span>
                                     </div>
@@ -230,16 +259,18 @@ const ImportDrawer: React.FC<{
     );
 };
 
-const ScriptPrep: React.FC = () => {
+// The editor is keyed by eventId in the outer component, so switching events remounts it with a
+// fresh state for that event's script — the unmounting instance flushes its rows to its own event.
+const ScriptEditor: React.FC<{ eventId: string; onActivated: () => void }> = ({ eventId, onActivated }) => {
     const session = useLiveSession();
-    const [rows, setRows] = useState<ScriptEntry[]>(() => getScriptLocal());
+    const [rows, setRows] = useState<ScriptEntry[]>(() => getScriptLocal(eventId));
     const [dir, setDir] = useState('vi-ja');
     const [query, setQuery] = useState('');
     const [filter, setFilter] = useState<'all' | 'untranslated' | 'draft' | 'approved'>('all');
     const [busyId, setBusyId] = useState<string | null>(null);
     const [bulk, setBulk] = useState(false);
     const [syncing, setSyncing] = useState(false);
-    const [beDirty, setBeDirty] = useState(() => getSyncState().dirty);
+    const [beDirty, setBeDirty] = useState(() => getSyncState(eventId).dirty);
     const [importOpen, setImportOpen] = useState(false);
     const [importShown, setImportShown] = useState(false);
     const closeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -252,17 +283,17 @@ const ScriptPrep: React.FC = () => {
     // spuriously mark the script "chưa đồng bộ" on mount.
     useEffect(() => {
         if (!mounted.current) { mounted.current = true; return; }
-        const t = setTimeout(() => writeScriptLocal(rowsRef.current), 400);
+        const t = setTimeout(() => writeScriptLocal(eventId, rowsRef.current), 400);
         return () => clearTimeout(t);
-    }, [rows]);
+    }, [rows, eventId]);
     // Flush the last edits if the tab is hidden/closed within the debounce window.
     useEffect(() => {
-        const flush = () => writeScriptLocal(rowsRef.current);
+        const flush = () => writeScriptLocal(eventId, rowsRef.current);
         const onHide = () => { if (document.visibilityState === 'hidden') flush(); };
         window.addEventListener('pagehide', flush);
         document.addEventListener('visibilitychange', onHide);
         return () => { window.removeEventListener('pagehide', flush); document.removeEventListener('visibilitychange', onHide); flush(); };
-    }, []);
+    }, [eventId]);
     useEffect(() => () => { if (closeTimer.current) clearTimeout(closeTimer.current); }, []);
 
     const mutate = (updater: (prev: ScriptEntry[]) => ScriptEntry[]) => { setRows(updater); setBeDirty(true); };
@@ -328,7 +359,7 @@ const ScriptPrep: React.FC = () => {
         if (!session.backendOnline) { toast.error('Cần backend để đồng bộ cho matcher'); return; }
         setSyncing(true);
         const snap = rows;
-        try { const n = await pushToBackend(snap); setBeDirty(rowsRef.current !== snap); toast.success(`Đã đồng bộ ${n} dòng lên backend (matcher dùng lúc live)`); }
+        try { const n = await pushToBackend(eventId, snap); setBeDirty(rowsRef.current !== snap); onActivated(); toast.success(`Đã đồng bộ ${n} dòng — sự kiện này đang chạy cho matcher`); }
         catch (e) { toast.error('Đồng bộ lỗi: ' + (e instanceof Error ? e.message : String(e))); }
         finally { setSyncing(false); }
     };
@@ -338,7 +369,7 @@ const ScriptPrep: React.FC = () => {
         setSyncing(true);
         try {
             const be = await pullFromBackend();
-            markPulledLocal(be);          // persist + mark synced BEFORE setRows so the trailing autosave is a no‑op
+            markPulledLocal(eventId, be);   // persist + mark synced BEFORE setRows so the trailing autosave is a no‑op
             setRows(be); setBeDirty(false);
             toast.success(`Đã tải ${be.length} dòng từ backend`);
         } catch (e) { toast.error(e instanceof Error ? e.message : String(e)); }
@@ -364,7 +395,7 @@ const ScriptPrep: React.FC = () => {
 
     return (
         <div className="h-full flex flex-col bg-background text-on-background overflow-hidden relative">
-            <PageHeader icon="theater_comedy" title="Kịch bản & Bản dịch duyệt sẵn" subtitle="Lưu tại máy · đồng bộ backend cho matcher">
+            <PageHeader icon="description" title="Kịch bản & Bản dịch duyệt sẵn" subtitle="Lưu tại máy · đồng bộ backend cho matcher">
                 <span className={`hidden md:inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full font-label-caps text-label-caps ${beDirty ? 'text-secondary border border-secondary/40' : 'text-on-surface-variant border border-outline-variant'}`}>
                     <span className="material-symbols-outlined text-[15px]" aria-hidden="true">{beDirty ? 'cloud_off' : 'cloud_done'}</span>{beDirty ? 'Chưa đồng bộ' : 'Đã đồng bộ'}
                 </span>
@@ -380,7 +411,6 @@ const ScriptPrep: React.FC = () => {
                 <main className="max-w-5xl mx-auto px-6 py-6 space-y-4">
                     {/* Readiness / % tiếp thu — hero */}
                     <div className="relative overflow-hidden bg-gradient-to-br from-surface-container-high to-surface-container border border-outline-variant rounded-2xl p-5 md:p-6">
-                        <span className="material-symbols-outlined absolute -right-4 -top-4 text-secondary/[0.06] pointer-events-none select-none" style={{ fontSize: '150px' }} aria-hidden="true">theater_comedy</span>
                         <div className="relative flex flex-col sm:flex-row items-center gap-5">
                             <Ring pct={rd.approvedPct} />
                             <div className="flex-1 min-w-0 w-full">
@@ -436,7 +466,7 @@ const ScriptPrep: React.FC = () => {
 
                     {/* List */}
                     {rows.length === 0 ? (
-                        <EmptyState icon="theater_comedy" title="Chưa có dòng kịch bản"
+                        <EmptyState icon="description" title="Chưa có dòng kịch bản"
                             hint="Nhập tệp .docx/.md/.txt hoặc dán kịch bản song ngữ. Dòng đã duyệt sẽ được tái dùng nguyên văn khi lễ diễn ra.">
                             <button onClick={openImport} className="flex items-center gap-1.5 bg-secondary text-on-secondary px-4 py-2 rounded-full font-label-caps text-label-caps hover:opacity-80"><span className="material-symbols-outlined text-[18px]" aria-hidden="true">upload_file</span>Nhập tệp</button>
                             <button onClick={addRow} className="flex items-center gap-1.5 border border-outline-variant text-on-surface-variant px-4 py-2 rounded-full font-label-caps text-label-caps hover:border-secondary hover:text-secondary transition-colors"><span className="material-symbols-outlined text-[18px]" aria-hidden="true">add</span>Thêm dòng</button>
@@ -457,11 +487,18 @@ const ScriptPrep: React.FC = () => {
             </div>
 
             {importOpen && (
-                <ImportDrawer shown={importShown} srcLang={srcLang} dstLang={dstLang} backendOnline={session.backendOnline}
+                <ImportDrawer shown={importShown} eventId={eventId} srcLang={srcLang} dstLang={dstLang} backendOnline={session.backendOnline}
                     onCommit={commitImport} onClose={closeImport} />
             )}
         </div>
     );
+};
+
+// The script is scoped to the selected Sự kiện. Keying the editor by eventId gives each event its
+// own fresh editor state, and the unmounting instance flushes its rows to its own event's key.
+const ScriptPrep: React.FC = () => {
+    const { eventId, activate } = useActiveEvent();
+    return <ScriptEditor key={eventId} eventId={eventId} onActivated={() => activate(eventId)} />;
 };
 
 export default ScriptPrep;
