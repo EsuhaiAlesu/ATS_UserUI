@@ -340,6 +340,129 @@
 .drawer-fade-in { animation: drawerFadeIn 0.3s ease; }
 @keyframes drawerFadeIn { from { opacity: 0; } to { opacity: 1; } }
 
+/* ============================================================================
+   PREMIUM VISUAL LAYER — "KIM SẮC v2": ambient depth + frosted glass + gold glow.
+   Additive over the base tokens (navy+gold unchanged). GPU-friendly (only
+   transform/opacity/filter animate); fallbacks where backdrop-filter is absent;
+   fully disabled under prefers-reduced-motion. */
+:root {
+    --glass-fill: linear-gradient(155deg, rgba(28,38,64,.72), rgba(15,21,38,.62));
+    --glass-fill-high: linear-gradient(155deg, rgba(38,50,78,.82), rgba(20,27,46,.72));
+    --glass-blur: saturate(140%) blur(14px);
+    --glass-border: rgba(167,178,202,.16);
+    --glass-hi: rgba(255,255,255,.07);
+    --gold-line: rgba(244,208,106,.66);
+    --gold-aura: rgba(232,184,75,.34);
+    --lux-ease: cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+/* Ambient "aurora" stage: navy ground + gold/cool light pools; a slow drifting glow
+   (::before) sits BEHIND all direct children. */
+.app-aurora {
+    position: relative;
+    isolation: isolate;
+    background-color: var(--color-background);
+    background-image:
+        radial-gradient(40% 44% at 15% 8%, rgba(244,208,106,0.15) 0%, transparent 68%),
+        radial-gradient(36% 42% at 92% 14%, rgba(52,132,132,0.12) 0%, transparent 70%),
+        radial-gradient(58% 62% at 60% 102%, rgba(74,57,16,0.20) 0%, transparent 72%);
+}
+.app-aurora > * { position: relative; z-index: 1; }
+.app-aurora::before {
+    content: '';
+    position: absolute;
+    inset: -15%;
+    z-index: 0;
+    pointer-events: none;
+    background:
+        radial-gradient(32% 36% at 22% 16%, rgba(244,208,106,0.16) 0%, transparent 66%),
+        radial-gradient(30% 34% at 82% 28%, rgba(52,132,132,0.13) 0%, transparent 68%);
+    will-change: transform;
+    animation: auroraDrift 46s ease-in-out infinite alternate;
+}
+@keyframes auroraDrift {
+    0%   { transform: translate3d(-1.5%, -1%, 0) scale(1.04); }
+    50%  { transform: translate3d(1.5%, 1.2%, 0) scale(1.08); }
+    100% { transform: translate3d(-0.5%, 2%, 0) scale(1.05); }
+}
+
+/* Frosted glass shell (head bar / sidebar / page toolbar). */
+.shell-rail {
+    background: linear-gradient(180deg, rgba(11,16,32,0.72), rgba(8,12,24,0.64));
+    backdrop-filter: saturate(140%) blur(16px);
+    -webkit-backdrop-filter: saturate(140%) blur(16px);
+    border-color: var(--glass-border) !important;
+}
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+    .shell-rail { background: var(--color-surface-container-lowest); }
+    .glass { background: var(--color-surface-container) !important; }
+    .glass-high { background: var(--color-surface-container-high) !important; }
+}
+
+/* Glass panels (hero + large cards): translucent, top rim highlight. */
+.glass { background: var(--glass-fill); }
+.glass-high { background: var(--glass-fill-high); }
+.glass, .glass-high {
+    position: relative;
+    backdrop-filter: var(--glass-blur);
+    -webkit-backdrop-filter: var(--glass-blur);
+    border: 1px solid var(--glass-border);
+    box-shadow: 0 1px 0 0 var(--glass-hi) inset, 0 12px 32px -14px rgba(0,0,0,0.6);
+}
+.glass::after, .glass-high::after {
+    content: ''; position: absolute; inset: 0; border-radius: inherit; pointer-events: none;
+    background: linear-gradient(180deg, rgba(255,255,255,0.07), transparent 24%);
+    -webkit-mask: linear-gradient(#000, transparent 42%);
+    mask: linear-gradient(#000, transparent 42%);
+}
+
+/* Refined card: layered depth + inner highlight + gold hover glow + specular sweep. */
+.card-lux {
+    position: relative;
+    overflow: hidden;
+    box-shadow: 0 1px 0 0 var(--glass-hi) inset, 0 12px 30px -16px rgba(0,0,0,0.6);
+    transition: transform 0.3s var(--lux-ease), box-shadow 0.3s var(--lux-ease), border-color 0.3s var(--lux-ease);
+}
+.card-lux:hover {
+    transform: translateY(-3px);
+    border-color: var(--gold-line);
+    box-shadow: 0 1px 0 0 rgba(255,255,255,0.12) inset, 0 22px 48px -18px rgba(0,0,0,0.7), 0 0 0 1px rgba(244,208,106,0.18), 0 12px 40px -12px var(--gold-aura);
+}
+.card-lux::after {
+    content: ''; position: absolute; inset: 0; pointer-events: none; transform: translateX(-130%);
+    background: linear-gradient(115deg, transparent 42%, rgba(255,255,255,0.06) 50%, transparent 58%);
+}
+.card-lux:hover::after { animation: luxSheen 0.8s var(--lux-ease); }
+@keyframes luxSheen { to { transform: translateX(130%); } }
+
+/* Gold primary button: gloss + glow + sheen sweep. */
+.btn-lux {
+    position: relative; overflow: hidden;
+    box-shadow: 0 1px 0 rgba(255,255,255,0.38) inset, 0 6px 18px -6px rgba(232,184,75,0.58);
+    transition: transform 0.2s var(--lux-ease), box-shadow 0.2s var(--lux-ease), opacity 0.2s;
+}
+.btn-lux:hover { box-shadow: 0 1px 0 rgba(255,255,255,0.5) inset, 0 12px 28px -8px rgba(232,184,75,0.75); }
+.btn-lux:active { transform: scale(0.98); }
+.btn-lux::after {
+    content: ''; position: absolute; inset: 0; pointer-events: none; transform: translateX(-120%);
+    background: linear-gradient(105deg, transparent 40%, rgba(255,255,255,0.35) 50%, transparent 60%);
+}
+.btn-lux:hover::after { animation: luxSheen 0.7s var(--lux-ease); }
+
+/* Input focus glow (keeps the keyboard :focus-visible gold outline for a11y). */
+.field-lux:focus { box-shadow: 0 0 0 3px rgba(244,208,106,0.20); border-color: var(--gold-line) !important; }
+
+/* Hero spotlight: a slow conic light behind hero content. */
+.hero-lux { position: relative; overflow: hidden; }
+.hero-lux > * { position: relative; z-index: 1; }
+.hero-lux::before {
+    content: ''; position: absolute; inset: -40%; z-index: 0; pointer-events: none;
+    background: conic-gradient(from 0deg at 32% 22%, rgba(244,208,106,0.17), transparent 30%, rgba(52,132,132,0.11) 60%, transparent 86%);
+    filter: blur(26px); will-change: transform;
+    animation: heroSweep 30s linear infinite;
+}
+@keyframes heroSweep { to { transform: rotate(360deg); } }
+
 /* A2.4 / accessibility: honour the OS "Reduce Motion" setting — disable the decorative and
    in-reading-path animations, and show each element in its final (settled) state. */
 @media (prefers-reduced-motion: reduce) {
@@ -353,7 +476,11 @@
     .card-in,
     .drawer-slide-in,
     .drawer-fade-in,
-    .reveal-text {
+    .reveal-text,
+    .app-aurora::before,
+    .hero-lux::before,
+    .card-lux:hover::after,
+    .btn-lux:hover::after {
         animation: none !important;
     }
     .fade-current,

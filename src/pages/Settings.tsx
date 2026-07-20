@@ -14,11 +14,11 @@ import { toast } from '../lib/toast';
 // Session-contextual device/model pickers stay in the /audio drawer on purpose (chosen per session).
 
 const APP_VERSION = '1.0 · 2026-07';
-const INPUT = 'w-full bg-surface text-on-surface border border-outline-variant rounded-DEFAULT py-2 px-3 text-sm focus:ring-0 focus:border-secondary';
+const INPUT = 'w-full bg-surface text-on-surface border border-outline-variant rounded-DEFAULT py-2 px-3 text-sm focus:ring-0 focus:border-secondary field-lux transition-shadow';
 const BTN = 'inline-flex items-center gap-2 px-4 py-2 rounded-full font-label-caps text-label-caps transition-colors';
 
 const Section: React.FC<{ id?: string; icon: string; title: string; desc?: string; children: React.ReactNode }> = ({ id, icon, title, desc, children }) => (
-    <section id={id} className="scroll-mt-4 bg-surface-container border border-outline-variant rounded-xl p-5">
+    <section id={id} className="card-lux scroll-mt-4 bg-surface-container border border-outline-variant rounded-xl p-5">
         <div className="flex items-center gap-2.5">
             <span className="material-symbols-outlined text-secondary" aria-hidden="true">{icon}</span>
             <h2 className="font-headline-sm text-headline-sm text-on-surface">{title}</h2>
@@ -112,7 +112,7 @@ const Settings: React.FC = () => {
     };
 
     return (
-        <div className="h-full flex flex-col bg-background text-on-background overflow-hidden">
+        <div className="h-full flex flex-col text-on-background overflow-hidden">
             <PageHeader icon="settings" title="Cài đặt" subtitle="Cấu hình chung của Proyaku" />
 
             <div className="flex-1 overflow-y-auto">
@@ -132,7 +132,7 @@ const Settings: React.FC = () => {
                             <button onClick={testConnection} className={`${BTN} border border-outline-variant text-on-surface-variant hover:text-primary hover:border-primary`}>
                                 <span className="material-symbols-outlined text-[18px]" aria-hidden="true">wifi_tethering</span>Test kết nối
                             </button>
-                            <button onClick={saveConnection} className={`${BTN} bg-secondary text-on-secondary hover:opacity-80`}>
+                            <button onClick={saveConnection} className={`${BTN} btn-lux bg-secondary text-on-secondary hover:opacity-80`}>
                                 <span className="material-symbols-outlined text-[18px]" aria-hidden="true">save</span>Lưu &amp; tải lại
                             </button>
                             {testStatus && <span className={`text-sm ${testStatus.startsWith('✓') ? 'text-secondary' : testStatus.startsWith('✗') ? 'text-error' : 'text-on-surface-variant'}`}>{testStatus}</span>}
@@ -150,7 +150,7 @@ const Settings: React.FC = () => {
                         </div>
                         <Field label="Địa điểm"><input value={venue} onChange={(e) => setVenue(e.target.value)} placeholder="Hội trường…" className={INPUT} /></Field>
                         <div className="flex items-center gap-3">
-                            <button onClick={saveEvent} className={`${BTN} bg-secondary text-on-secondary hover:opacity-80`}>
+                            <button onClick={saveEvent} className={`${BTN} btn-lux bg-secondary text-on-secondary hover:opacity-80`}>
                                 <span className="material-symbols-outlined text-[18px]" aria-hidden="true">save</span>Lưu sự kiện
                             </button>
                         </div>

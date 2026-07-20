@@ -25,7 +25,7 @@ const fmtBytes = (n: number) => (n >= 1024 * 1024 ? `${(n / 1024 / 1024).toFixed
 const DocCard: React.FC<{ d: SourceDoc; onView: () => void; onToScript: () => void; onDownload: () => void; onDelete: () => void }> = ({ d, onView, onToScript, onDownload, onDelete }) => {
     const k = KIND[d.kind];
     return (
-        <div className="group bg-surface-container bg-gradient-to-b from-surface-container to-surface border-2 border-outline-variant rounded-2xl p-4 flex gap-4 transition-all duration-200 ease-out hover:border-outline hover:-translate-y-0.5 hover:shadow-lg motion-reduce:transition-none motion-reduce:hover:translate-y-0">
+        <div className="card-lux group bg-surface-container bg-gradient-to-b from-surface-container to-surface border-2 border-outline-variant rounded-2xl p-4 flex gap-4">
             <div className={`shrink-0 w-12 h-12 rounded-xl flex items-center justify-center ${k.tone}`}>
                 <span className="material-symbols-outlined" aria-hidden="true">{k.icon}</span>
             </div>
@@ -101,10 +101,10 @@ const DocumentsLibraryInner: React.FC<{ eventId: string }> = ({ eventId }) => {
     const accept = useMemo(() => `.md,.markdown,.txt,.csv,.srt,.docx,.docm,.dotx,.dotm${session.backendOnline ? ',.pdf' : ''}`, [session.backendOnline]);
 
     return (
-        <div className="h-full flex flex-col bg-background text-on-background overflow-hidden relative">
+        <div className="h-full flex flex-col text-on-background overflow-hidden relative">
             <PageHeader icon="folder_open" title="Tài liệu nguồn" subtitle={event ? `Sự kiện: ${event.title || '(chưa đặt tên)'}` : 'Kho tài liệu theo sự kiện (lưu tại máy)'}>
                 <input ref={fileInput} type="file" accept={accept} className="hidden" onChange={(e) => handleFile(e.target.files?.[0])} />
-                <button onClick={() => fileInput.current?.click()} className="flex items-center gap-1.5 bg-secondary text-on-secondary px-4 py-2 rounded-full font-label-caps text-label-caps hover:opacity-80"><span className="material-symbols-outlined text-[18px]" aria-hidden="true">upload_file</span>Nhập tài liệu</button>
+                <button onClick={() => fileInput.current?.click()} className="btn-lux flex items-center gap-1.5 bg-secondary text-on-secondary px-4 py-2 rounded-full font-label-caps text-label-caps hover:opacity-80"><span className="material-symbols-outlined text-[18px]" aria-hidden="true">upload_file</span>Nhập tài liệu</button>
             </PageHeader>
             <div className="flex-1 overflow-y-auto">
                 <main className="max-w-[1000px] mx-auto px-6 md:px-10 py-8 space-y-4">

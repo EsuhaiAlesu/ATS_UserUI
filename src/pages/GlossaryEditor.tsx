@@ -7,7 +7,7 @@ import { SkeletonRows } from '../components/Skeleton';
 import { toast } from '../lib/toast';
 import { useSaveHotkey, useUnsavedGuard } from '../lib/guards';
 
-const BTN_PRI = 'inline-flex items-center gap-1.5 bg-secondary text-on-secondary px-4 py-2 rounded-full font-label-caps text-label-caps hover:opacity-80 transition-opacity disabled:opacity-40';
+const BTN_PRI = 'btn-lux inline-flex items-center gap-1.5 bg-secondary text-on-secondary px-4 py-2 rounded-full font-label-caps text-label-caps hover:opacity-80 transition-opacity disabled:opacity-40';
 const BTN_OUT = 'inline-flex items-center gap-1.5 border border-outline-variant text-on-surface-variant px-3.5 py-2 rounded-full text-sm hover:text-primary hover:border-primary transition-colors disabled:opacity-40';
 
 // Match a term against the search box (VI · JA · reading · note · misheard variants).
@@ -90,14 +90,14 @@ const GlossaryEditor: React.FC = () => {
     useUnsavedGuard(dirty);
     const filtered = rows.map((r, i) => ({ r, i })).filter(({ r }) => matchTerm(r, query));
 
-    const inputCls = 'w-full bg-transparent text-on-surface border-b border-outline-variant/60 py-1.5 px-1 text-sm focus:border-secondary focus:outline-none placeholder:text-on-surface-variant/50';
+    const inputCls = 'field-lux transition-shadow w-full bg-transparent text-on-surface border-b border-outline-variant/60 py-1.5 px-1 text-sm focus:border-secondary focus:outline-none placeholder:text-on-surface-variant/50';
 
     return (
-        <div className="h-full flex flex-col bg-background text-on-background overflow-hidden">
+        <div className="h-full flex flex-col text-on-background overflow-hidden">
             <PageHeader icon="menu_book" title="Từ điển & Tên riêng">
                 <span className="hidden md:inline font-label-caps text-label-caps text-on-surface-variant">{rows.length} thuật ngữ{dirty ? ' · chưa lưu' : ''}</span>
                 <button onClick={load} disabled={loading} className="border border-outline-variant text-on-surface-variant px-3 py-1.5 text-sm rounded-full hover:text-primary hover:border-primary disabled:opacity-40">Tải lại</button>
-                <button onClick={save} disabled={saving || !dirty} title="Lưu (Ctrl+S)" className="inline-flex items-center gap-1.5 bg-secondary text-on-secondary px-4 py-1.5 text-sm font-label-caps text-label-caps rounded-full hover:opacity-80 disabled:opacity-40"><span className="material-symbols-outlined text-[18px]" aria-hidden="true">save</span>{saving ? 'Đang lưu…' : 'Lưu'}</button>
+                <button onClick={save} disabled={saving || !dirty} title="Lưu (Ctrl+S)" className="btn-lux inline-flex items-center gap-1.5 bg-secondary text-on-secondary px-4 py-1.5 text-sm font-label-caps text-label-caps rounded-full hover:opacity-80 disabled:opacity-40"><span className="material-symbols-outlined text-[18px]" aria-hidden="true">save</span>{saving ? 'Đang lưu…' : 'Lưu'}</button>
             </PageHeader>
 
             <div className="flex-1 overflow-y-auto">

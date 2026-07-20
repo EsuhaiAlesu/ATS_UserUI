@@ -22,14 +22,14 @@ const LANGS: { v: string; l: string }[] = [
 ];
 const GENDERS: { v: Gender; l: string }[] = [{ v: '', l: '— giới tính —' }, { v: 'male', l: 'Nam' }, { v: 'female', l: 'Nữ' }];
 const ENGINES = ['voicevox', 'vieneu', 'gpt-sovits'];
-const INPUT = 'w-full bg-surface text-on-surface border border-outline-variant rounded-lg px-3 py-2 text-sm focus:border-secondary focus:outline-none';
+const INPUT = 'w-full bg-surface text-on-surface border border-outline-variant rounded-lg px-3 py-2 text-sm focus:border-secondary focus:outline-none field-lux transition-shadow';
 const initials = (name: string) => name.trim().split(/\s+/).slice(-2).map((w) => w[0]?.toUpperCase() ?? '').join('') || '?';
 const genderLabel = (g?: Gender) => (g === 'male' ? 'Nam' : g === 'female' ? 'Nữ' : '');
 const voiceLabel = (v?: VoicePick) => (v ? (v.label || String(v.id)) : '');
 
 // ── One speaker profile card ──
 const SpeakerCard: React.FC<{ p: SpeakerProfile; onEdit: () => void; onDelete: () => void }> = ({ p, onEdit, onDelete }) => (
-    <div className="group bg-surface-container bg-gradient-to-b from-surface-container to-surface border-2 border-outline-variant rounded-2xl p-4 flex gap-4 transition-all duration-200 ease-out hover:border-outline hover:-translate-y-0.5 hover:shadow-lg motion-reduce:transition-none motion-reduce:hover:translate-y-0">
+    <div className="group card-lux bg-surface-container bg-gradient-to-b from-surface-container to-surface border-2 border-outline-variant rounded-2xl p-4 flex gap-4">
         <div className="shrink-0 w-12 h-12 rounded-full bg-secondary/15 text-secondary text-base font-bold flex items-center justify-center">{initials(p.name)}</div>
         <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2 flex-wrap">
@@ -187,7 +187,7 @@ const FormDrawer: React.FC<{
             </div>
             <div className="shrink-0 flex items-center justify-end gap-2 px-5 h-16 border-t border-outline-variant">
                 <button onClick={onClose} className="px-4 py-2 rounded-lg text-on-surface-variant hover:text-on-surface hover:bg-surface-container transition-colors text-sm">Hủy</button>
-                <button onClick={onSave} className="flex items-center gap-1.5 bg-secondary text-on-secondary px-5 py-2 rounded-lg font-label-caps text-label-caps hover:opacity-80"><span className="material-symbols-outlined text-[18px]" aria-hidden="true">save</span>Lưu hồ sơ</button>
+                <button onClick={onSave} className="btn-lux flex items-center gap-1.5 bg-secondary text-on-secondary px-5 py-2 rounded-lg font-label-caps text-label-caps hover:opacity-80"><span className="material-symbols-outlined text-[18px]" aria-hidden="true">save</span>Lưu hồ sơ</button>
             </div>
         </aside>
     </>
@@ -261,28 +261,28 @@ const SpeakerMemory: React.FC = () => {
     }, [list, query]);
 
     return (
-        <div className="h-full flex flex-col bg-background text-on-background overflow-hidden relative">
+        <div className="h-full flex flex-col text-on-background overflow-hidden relative">
             <PageHeader icon="psychology" title="Bộ nhớ người nói" subtitle="Thư viện hồ sơ · tên · giọng · sửa tên (lưu tại máy)">
                 <button onClick={syncGlossary} disabled={syncing || !session.backendOnline}
                     title={session.backendOnline ? 'Nạp tên + luật nghe‑nhầm vào Từ điển (hiệu lực phiên kế)' : 'Cần backend để ghi Từ điển'}
                     className="flex items-center gap-1.5 border border-outline-variant text-on-surface-variant px-3 py-2 rounded-full font-label-caps text-label-caps hover:border-secondary hover:text-secondary transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:border-outline-variant disabled:hover:text-on-surface-variant">
                     <span className="material-symbols-outlined text-[18px]" aria-hidden="true">{syncing ? 'progress_activity' : 'sync'}</span>Đồng bộ Từ điển
                 </button>
-                <button onClick={openNew} className="flex items-center gap-1.5 bg-secondary text-on-secondary px-4 py-2 rounded-full font-label-caps text-label-caps hover:opacity-80"><span className="material-symbols-outlined text-[18px]" aria-hidden="true">add</span>Thêm người nói</button>
+                <button onClick={openNew} className="btn-lux flex items-center gap-1.5 bg-secondary text-on-secondary px-4 py-2 rounded-full font-label-caps text-label-caps hover:opacity-80"><span className="material-symbols-outlined text-[18px]" aria-hidden="true">add</span>Thêm người nói</button>
             </PageHeader>
             <div className="flex-1 overflow-y-auto">
                 <main className="max-w-[1000px] mx-auto px-6 md:px-10 py-8">
                     {list.length === 0 ? (
                         <EmptyState icon="psychology" title="Chưa có hồ sơ người nói"
                             hint="Tạo thư viện dùng lại giữa các hội nghị: tên chuẩn, cách đọc, biến thể nghe‑nhầm, và giọng đọc gán sẵn.">
-                            <button onClick={openNew} className="flex items-center gap-1.5 bg-secondary text-on-secondary px-4 py-2 rounded-full font-label-caps text-label-caps hover:opacity-80"><span className="material-symbols-outlined text-[18px]" aria-hidden="true">add</span>Thêm người nói</button>
+                            <button onClick={openNew} className="btn-lux flex items-center gap-1.5 bg-secondary text-on-secondary px-4 py-2 rounded-full font-label-caps text-label-caps hover:opacity-80"><span className="material-symbols-outlined text-[18px]" aria-hidden="true">add</span>Thêm người nói</button>
                         </EmptyState>
                     ) : (
                         <>
                             <div className="relative mb-4">
                                 <span className="material-symbols-outlined text-[20px] text-on-surface-variant absolute left-3 top-1/2 -translate-y-1/2" aria-hidden="true">search</span>
                                 <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Tìm theo tên · chức danh · đơn vị · biến thể…"
-                                    className="w-full bg-surface text-on-surface border border-outline-variant rounded-lg pl-10 pr-3 py-2 text-sm focus:border-secondary focus:outline-none" />
+                                    className="w-full bg-surface text-on-surface border border-outline-variant rounded-lg pl-10 pr-3 py-2 text-sm focus:border-secondary focus:outline-none field-lux transition-shadow" />
                             </div>
                             {filtered.length === 0 ? (
                                 <p className="text-sm text-on-surface-variant text-center py-10">Không có hồ sơ khớp “{query}”.</p>

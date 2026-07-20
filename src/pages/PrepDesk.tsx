@@ -103,9 +103,9 @@ const SignalCard: React.FC<{ s: Signal; attest?: Attest; onOpen: () => void; ind
     return (
         <button type="button" onClick={onOpen} aria-pressed={active}
             style={active ? { animationDelay: delay, boxShadow: '0 12px 28px -10px rgba(244,208,106,0.28), 0 4px 12px -6px rgba(0,0,0,0.5)' } : { animationDelay: delay }}
-            className={`card-in group text-left w-full h-[108px] rounded-2xl p-4 flex gap-3.5 border-2 transition-all duration-200 ease-out will-change-transform motion-reduce:transition-none motion-reduce:hover:translate-y-0 ${active
-                ? 'bg-surface-container-high bg-gradient-to-b from-surface-container-high to-surface-container border-secondary -translate-y-1'
-                : 'bg-surface-container bg-gradient-to-b from-surface-container to-surface border-outline-variant hover:border-outline hover:-translate-y-0.5 hover:shadow-lg hover:brightness-110'}`}>
+            className={`card-lux card-in group text-left w-full h-[108px] rounded-2xl p-4 flex gap-3.5 border-2 will-change-transform ${active
+                ? 'bg-surface-container-high bg-gradient-to-b from-surface-container-high to-surface-container border-secondary -translate-y-1 hover:!-translate-y-1'
+                : 'bg-surface-container bg-gradient-to-b from-surface-container to-surface border-outline-variant hover:brightness-110'}`}>
             <span className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 self-start transition-colors ${iconBg}`}>
                 <span className={`material-symbols-outlined ${st.cls}`} style={{ fontSize: '22px' }} aria-hidden="true">{st.icon}</span>
             </span>
@@ -180,8 +180,8 @@ const SignalDrawer: React.FC<{
                                         <label className="font-label-caps text-[11px] tracking-[0.1em] text-on-surface-variant block">Ký xác nhận (người chịu trách nhiệm)</label>
                                         <div className="flex gap-2">
                                             <input value={signValue} onChange={(e) => onSignChange(e.target.value)} placeholder="Tên người ký"
-                                                className="flex-1 bg-surface text-on-surface border border-outline-variant rounded-lg px-3.5 py-2.5 text-base focus:border-secondary focus:outline-none" />
-                                            <button onClick={onSign} disabled={!signValue.trim()} className="bg-secondary text-on-secondary px-4 py-2 rounded-lg font-label-caps text-label-caps hover:opacity-80 disabled:opacity-40">Ký</button>
+                                                className="field-lux transition-shadow flex-1 bg-surface text-on-surface border border-outline-variant rounded-lg px-3.5 py-2.5 text-base focus:border-secondary focus:outline-none" />
+                                            <button onClick={onSign} disabled={!signValue.trim()} className="btn-lux bg-secondary text-on-secondary px-4 py-2 rounded-lg font-label-caps text-label-caps hover:opacity-80 disabled:opacity-40">Ký</button>
                                         </div>
                                     </div>
                                 )}
@@ -447,7 +447,7 @@ const PrepDesk: React.FC = () => {
             : { wrap: 'bg-error/10 border-error/30', text: 'text-error' };
 
     return (
-        <div className="h-full flex flex-col bg-background text-on-background overflow-hidden relative">
+        <div className="h-full flex flex-col text-on-background overflow-hidden relative">
             <PageHeader
                 icon="dashboard"
                 title="Bảng chỉ huy"
@@ -519,7 +519,7 @@ const PrepDesk: React.FC = () => {
                     {selPhase === 'in' && (
                         <div className="grid sm:grid-cols-3 gap-3">
                             <Link to="/audio" className="flex items-center justify-center gap-2 bg-primary text-on-primary rounded-xl px-4 py-3.5 font-label-caps text-label-caps hover:opacity-90"><span className="material-symbols-outlined text-[20px]" aria-hidden="true">tune</span>Điều khiển</Link>
-                            <Link to="/stream" className="flex items-center justify-center gap-2 bg-secondary text-on-secondary rounded-xl px-4 py-3.5 font-label-caps text-label-caps hover:opacity-90"><span className="material-symbols-outlined text-[20px]" aria-hidden="true">subtitles</span>Tường phụ đề</Link>
+                            <Link to="/stream" className="btn-lux flex items-center justify-center gap-2 bg-secondary text-on-secondary rounded-xl px-4 py-3.5 font-label-caps text-label-caps hover:opacity-90"><span className="material-symbols-outlined text-[20px]" aria-hidden="true">subtitles</span>Tường phụ đề</Link>
                             <Link to="/reveal" className="flex items-center justify-center gap-2 border border-outline-variant text-on-surface-variant rounded-xl px-4 py-3.5 font-label-caps text-label-caps hover:border-primary"><span className="material-symbols-outlined text-[20px]" aria-hidden="true">auto_awesome</span>Reveal</Link>
                         </div>
                     )}
@@ -536,7 +536,7 @@ const PrepDesk: React.FC = () => {
                         <div className="space-y-4">
                             <div className="flex flex-wrap items-center gap-3">
                                 <button onClick={exportKb} disabled={!data.glossary || !data.script}
-                                    className="flex items-center gap-2 bg-secondary text-on-secondary px-4 py-2 rounded-full font-label-caps text-label-caps hover:opacity-80 disabled:opacity-40"><span className="material-symbols-outlined text-[18px]" aria-hidden="true">download</span>Xuất gói tri thức</button>
+                                    className="btn-lux flex items-center gap-2 bg-secondary text-on-secondary px-4 py-2 rounded-full font-label-caps text-label-caps hover:opacity-80 disabled:opacity-40"><span className="material-symbols-outlined text-[18px]" aria-hidden="true">download</span>Xuất gói tri thức</button>
                                 <Link to="/glossary" className="flex items-center gap-1.5 border border-outline-variant text-on-surface-variant px-3 py-2 text-base rounded-full hover:border-primary"><span className="material-symbols-outlined text-[18px]" aria-hidden="true">menu_book</span>Từ điển</Link>
                                 <Link to="/script" className="flex items-center gap-1.5 border border-outline-variant text-on-surface-variant px-3 py-2 text-base rounded-full hover:border-primary"><span className="material-symbols-outlined text-[18px]" aria-hidden="true">theater_comedy</span>Kịch bản</Link>
                             </div>
@@ -544,7 +544,7 @@ const PrepDesk: React.FC = () => {
                                 <div className="font-label-caps text-label-caps text-on-surface-variant mb-2">Ghi sự cố (nền cho lần sau)</div>
                                 <div className="flex gap-2">
                                     <input value={incident} onChange={(e) => setIncident(e.target.value)} placeholder="vd: 'Kaizen' nghe thành 'kaisen'…"
-                                        className="flex-1 bg-surface text-on-surface border border-outline-variant rounded-DEFAULT px-3 py-2 text-base" />
+                                        className="field-lux transition-shadow flex-1 bg-surface text-on-surface border border-outline-variant rounded-DEFAULT px-3 py-2 text-base" />
                                     <button onClick={() => { setPrepState(addIncident(incident)); setIncident(''); }} disabled={!incident.trim()}
                                         className="border border-outline-variant text-on-surface-variant px-3 py-2 text-base rounded-DEFAULT hover:border-primary disabled:opacity-40">Ghi</button>
                                 </div>

@@ -107,10 +107,10 @@ const OperatorLayout: React.FC = () => {
         `px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${on ? 'bg-secondary/15 text-secondary' : 'text-on-surface-variant hover:text-on-surface hover:bg-surface-container'}`;
 
     return (
-        <div className="h-screen flex flex-col overflow-hidden bg-background text-on-background">
+        <div className="h-screen flex flex-col overflow-hidden text-on-background app-aurora">
             {/* ══════════ HEAD BAR ══════════ */}
-            <header className="shrink-0 h-14 flex items-center gap-2 px-4 border-b border-outline-variant bg-surface-container-lowest">
-                <span className="font-bold text-lg tracking-[0.22em] text-on-surface select-none shrink-0 pr-1">PROYAKU</span>
+            <header className="shrink-0 h-14 flex items-center gap-2 px-4 border-b border-outline-variant shell-rail">
+                <span className="font-bold text-lg tracking-[0.22em] text-on-surface select-none shrink-0 pr-1" style={{ textShadow: '0 0 18px rgba(244,208,106,0.20)' }}>PROYAKU</span>
                 <nav className="flex items-center gap-1">
                     {MENUS.filter((mm) => !mm.gear).map((mm) => (
                         <button key={mm.key} onClick={() => goMenu(mm)} className={tabCls(mm.key === cur.key)}>{mm.label}</button>
@@ -137,7 +137,7 @@ const OperatorLayout: React.FC = () => {
 
             {/* ══════════ BODY: contextual sidebar + content ══════════ */}
             <div className="flex-1 min-h-0 flex overflow-hidden">
-                <aside className="hidden md:flex flex-col w-56 shrink-0 border-r border-outline-variant bg-surface-container-lowest">
+                <aside className="hidden md:flex flex-col w-56 shrink-0 border-r border-outline-variant shell-rail">
                     <div className="px-4 pt-4 pb-2 font-label-caps text-label-caps text-on-surface-variant/60">{cur.label}</div>
                     <nav className="flex-1 overflow-y-auto px-2 pb-3 space-y-0.5">
                         {cur.tools.map((t) => {

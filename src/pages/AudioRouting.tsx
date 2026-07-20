@@ -21,7 +21,7 @@ import { getSpeakers, findSpeakerByName } from '../lib/speakers';
 // ─────────────────────────────────────────────────────────────────────────────
 
 const SELECT_CLS =
-    'w-full bg-surface text-on-surface border border-outline-variant rounded-DEFAULT py-2 px-3 ' +
+    'field-lux transition-shadow w-full bg-surface text-on-surface border border-outline-variant rounded-DEFAULT py-2 px-3 ' +
     'focus:ring-0 focus:border-secondary appearance-none cursor-pointer disabled:opacity-50 text-sm';
 
 const langLines = (lines: LiveLine[], lang: string) =>
@@ -324,7 +324,7 @@ const AudioRouting: React.FC = () => {
     const openWall = () => window.open('/stream', 'proyaku-wall');
 
     return (
-        <div className="h-full flex flex-col bg-background text-on-background overflow-hidden relative">
+        <div className="h-full flex flex-col text-on-background overflow-hidden relative">
             {/* ══════════ TOP BAR (minimal) ══════════ */}
             <header className="shrink-0 h-14 flex items-center gap-4 px-5 border-b border-outline-variant bg-surface-container-lowest">
                 <div className="flex items-center gap-2.5 min-w-0">
@@ -557,7 +557,7 @@ const AudioRouting: React.FC = () => {
                                     <input value={speaker} onChange={(e) => saveSpeakerLocal(e.target.value)}
                                         onBlur={(e) => session.sendCommand({ speaker: { name: e.target.value } })}
                                         placeholder="Nhập tên người nói…"
-                                        className="flex-1 min-w-0 bg-surface-container border border-outline-variant rounded-lg px-3 py-2 text-body-md text-on-surface placeholder:text-on-surface-variant focus:outline-none focus:border-secondary" />
+                                        className="field-lux transition-shadow flex-1 min-w-0 bg-surface-container border border-outline-variant rounded-lg px-3 py-2 text-body-md text-on-surface placeholder:text-on-surface-variant focus:outline-none focus:border-secondary" />
                                 </div>
                             </div>
                         )}

@@ -47,7 +47,7 @@ const IncidentReport: React.FC = () => {
     const add = () => { const t = text.trim(); if (t) { setPrep(addIncident(t)); setText(''); } };
 
     return (
-        <div className="h-full flex flex-col bg-background text-on-background overflow-hidden">
+        <div className="h-full flex flex-col text-on-background overflow-hidden">
             <PageHeader icon="report" title="Báo cáo sự cố" subtitle={openCount > 0 ? `${openCount} mục cần chú ý · hướng khắc phục bên dưới` : 'Hệ thống ổn · nhật ký để rút kinh nghiệm'} />
             <div className="flex-1 overflow-y-auto">
                 <main className="max-w-[1100px] mx-auto px-6 md:px-10 py-8 space-y-8">
@@ -58,7 +58,7 @@ const IncidentReport: React.FC = () => {
                             {checks.map((c, i) => {
                                 const lv = LV[c.level];
                                 return (
-                                    <div key={i} className={`rounded-2xl border-2 p-4 bg-surface-container ${lv.border}`}>
+                                    <div key={i} className={`card-lux rounded-2xl border-2 p-4 bg-surface-container ${lv.border}`}>
                                         <div className="flex items-center gap-2">
                                             <span className={`material-symbols-outlined text-[20px] ${lv.text}`} aria-hidden="true">{lv.icon}</span>
                                             <span className="font-semibold text-on-surface text-[15px] flex-1 min-w-0">{c.label}</span>
@@ -84,8 +84,8 @@ const IncidentReport: React.FC = () => {
                         <div className="flex gap-2">
                             <input value={text} onChange={(e) => setText(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') add(); }}
                                 placeholder="vd: 'Kaizen' nghe thành 'kaisen'; loa JA rè phút 12…"
-                                className="flex-1 bg-surface text-on-surface border border-outline-variant rounded-lg px-3.5 py-2.5 text-base focus:border-secondary focus:outline-none" />
-                            <button onClick={add} disabled={!text.trim()} className="bg-secondary text-on-secondary px-5 rounded-lg font-label-caps text-label-caps hover:opacity-80 disabled:opacity-40">Ghi</button>
+                                className="field-lux transition-shadow flex-1 bg-surface text-on-surface border border-outline-variant rounded-lg px-3.5 py-2.5 text-base focus:border-secondary focus:outline-none" />
+                            <button onClick={add} disabled={!text.trim()} className="btn-lux bg-secondary text-on-secondary px-5 rounded-lg font-label-caps text-label-caps hover:opacity-80 disabled:opacity-40">Ghi</button>
                         </div>
                         <ul className="mt-3 space-y-2">
                             {prep.incidents.length === 0 && <li className="text-[13px] text-on-surface-variant/60 italic">Chưa ghi sự cố nào.</li>}

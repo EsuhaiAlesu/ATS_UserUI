@@ -81,7 +81,7 @@ const VoiceLane: React.FC<{
     }, [engine, voiceId, sample]);
 
     return (
-        <div className="border border-outline-variant rounded-xl p-4 bg-surface">
+        <div className="card-lux border border-outline-variant rounded-xl p-4 bg-surface">
             <div className="flex items-center justify-between mb-3">
                 <span className="font-label-caps text-label-caps text-on-surface">{title}</span>
                 <span className="font-label-caps text-label-caps text-on-surface-variant">{lang === 'vi' ? 'JA → VI' : 'VI → JA'}</span>
@@ -92,7 +92,7 @@ const VoiceLane: React.FC<{
                     <select
                         value={engine}
                         onChange={(e) => setEngine(e.target.value)}
-                        className="w-full bg-surface text-on-surface border-b border-outline-variant py-1 px-0 text-sm focus:border-secondary appearance-none cursor-pointer"
+                        className="field-lux transition-shadow w-full bg-surface text-on-surface border-b border-outline-variant py-1 px-0 text-sm focus:border-secondary appearance-none cursor-pointer"
                     >
                         {ENGINES[lang].map((en) => <option key={en} value={en}>{en}</option>)}
                     </select>
@@ -103,7 +103,7 @@ const VoiceLane: React.FC<{
                         value={voiceId}
                         onChange={(e) => setVoiceId(e.target.value)}
                         disabled={loading || voices.length === 0}
-                        className="w-full bg-surface text-on-surface border-b border-outline-variant py-1 px-0 text-sm focus:border-secondary appearance-none cursor-pointer disabled:opacity-50"
+                        className="field-lux transition-shadow w-full bg-surface text-on-surface border-b border-outline-variant py-1 px-0 text-sm focus:border-secondary appearance-none cursor-pointer disabled:opacity-50"
                     >
                         {loading && <option value="">Đang tải…</option>}
                         {!loading && voices.length === 0 && <option value="">— không có giọng / backend offline —</option>}
@@ -122,7 +122,7 @@ const VoiceLane: React.FC<{
                     <input
                         value={sample}
                         onChange={(e) => setSample(e.target.value)}
-                        className="w-full bg-surface text-on-surface border-b border-outline-variant py-1 px-0 text-sm focus:border-secondary"
+                        className="field-lux transition-shadow w-full bg-surface text-on-surface border-b border-outline-variant py-1 px-0 text-sm focus:border-secondary"
                     />
                 </div>
                 <div className="flex items-center gap-3">
@@ -203,7 +203,7 @@ const PronunciationClinic: React.FC = () => {
                     onChange={(e) => setScript(e.target.value)}
                     rows={5}
                     placeholder="VD: Xin chào, tôi đến từ Esuhai. Tổng Giám Đốc Lê Long Sơn. Kaizen Yoshida School. 御社…"
-                    className="w-full bg-surface text-on-surface border border-outline-variant rounded-DEFAULT p-2 text-sm focus:border-secondary"
+                    className="field-lux transition-shadow w-full bg-surface text-on-surface border border-outline-variant rounded-DEFAULT p-2 text-sm focus:border-secondary"
                 />
                 <button onClick={handleSaveScript} className="mt-2 border border-outline-variant text-on-surface-variant px-4 py-2 text-sm hover:text-primary hover:border-primary transition-colors">
                     Lưu kịch bản
@@ -216,13 +216,13 @@ const PronunciationClinic: React.FC = () => {
                     <input
                         type="number" min={3} max={120} value={seconds}
                         onChange={(e) => setSeconds(Math.max(3, Math.min(120, Number(e.target.value) || 20)))}
-                        className="w-24 bg-surface text-on-surface border-b border-outline-variant py-1 px-0 text-sm focus:border-secondary"
+                        className="field-lux transition-shadow w-24 bg-surface text-on-surface border-b border-outline-variant py-1 px-0 text-sm focus:border-secondary"
                     />
                 </div>
                 <button
                     onClick={handleRecord}
                     disabled={recording}
-                    className={`px-5 py-2 text-sm font-label-caps text-label-caps rounded-DEFAULT ${recording ? 'bg-error text-on-error' : 'bg-secondary text-on-secondary hover:opacity-80'}`}
+                    className={`btn-lux px-5 py-2 text-sm font-label-caps text-label-caps rounded-DEFAULT ${recording ? 'bg-error text-on-error' : 'bg-secondary text-on-secondary hover:opacity-80'}`}
                 >
                     {recording ? '● Đang thu…' : '● Thu âm (trên máy backend)'}
                 </button>
@@ -241,7 +241,7 @@ const PronunciationClinic: React.FC = () => {
                         <div>
                             <label className="font-label-caps text-label-caps text-on-surface-variant block mb-1">Máy nghe được</label>
                             <textarea value={heard} onChange={(e) => setHeard(e.target.value)} rows={3}
-                                className="w-full bg-surface text-on-surface border border-outline-variant rounded-DEFAULT p-2 text-sm focus:border-secondary" />
+                                className="field-lux transition-shadow w-full bg-surface text-on-surface border border-outline-variant rounded-DEFAULT p-2 text-sm focus:border-secondary" />
                         </div>
                     )}
                     <button
@@ -281,13 +281,13 @@ const VoiceStudio: React.FC = () => {
     useEffect(() => { saveTtsPrefs(prefs); }, [prefs]);
 
     return (
-        <div className="h-full flex flex-col bg-background text-on-background overflow-hidden">
+        <div className="h-full flex flex-col text-on-background overflow-hidden">
             <PageHeader icon="record_voice_over" title="Giọng đọc & Phát âm" subtitle="Chọn giọng máy đọc · luyện phát âm tên riêng" />
 
             <div className="flex-1 overflow-y-auto">
             <main className="max-w-4xl mx-auto px-container-padding py-10 space-y-10">
                 {/* Card 1 — TTS voice selection */}
-                <section className="bg-surface-container border border-outline-variant rounded-xl p-6">
+                <section className="card-lux bg-surface-container border border-outline-variant rounded-xl p-6">
                     <div className="flex items-start justify-between gap-4 mb-4 pb-3 border-b border-outline-variant">
                         <div>
                             <h2 className="font-headline-sm text-headline-sm text-on-surface">1 · Chọn giọng đọc (TTS)</h2>
@@ -321,7 +321,7 @@ const VoiceStudio: React.FC = () => {
                 </section>
 
                 {/* Card 2 — Pronunciation Clinic */}
-                <section className="bg-surface-container border border-outline-variant rounded-xl p-6">
+                <section className="card-lux bg-surface-container border border-outline-variant rounded-xl p-6">
                     <div className="mb-4 pb-3 border-b border-outline-variant">
                         <h2 className="font-headline-sm text-headline-sm text-on-surface">2 · Phòng luyện phát âm (Pronunciation Clinic)</h2>
                         <p className="font-label-caps text-label-caps text-on-surface-variant mt-1">Đọc to tên riêng &amp; thuật ngữ → máy học nghe đúng (thêm luật misheard→correct vào glossary).</p>

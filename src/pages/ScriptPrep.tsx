@@ -28,8 +28,8 @@ const DELIMS: { v: Delim; l: string }[] = [
     { v: 'pipe', l: '2 cột — ngăn bằng |' },
     { v: 'arrow', l: '2 cột — ngăn bằng => hoặc ->' },
 ];
-const INPUT = 'w-full bg-surface text-on-surface border border-outline-variant rounded-lg px-3 py-2 text-[15px] focus:border-secondary focus:outline-none';
-const TA = 'w-full bg-surface text-on-surface border border-outline-variant rounded-lg py-2.5 px-3 text-base leading-relaxed resize-y focus:border-secondary focus:outline-none';
+const INPUT = 'field-lux w-full bg-surface text-on-surface border border-outline-variant rounded-lg px-3 py-2 text-[15px] focus:border-secondary focus:outline-none transition-shadow';
+const TA = 'field-lux w-full bg-surface text-on-surface border border-outline-variant rounded-lg py-2.5 px-3 text-base leading-relaxed resize-y focus:border-secondary focus:outline-none transition-shadow';
 const LONG = 70;   // rough per‑line length past which a subtitle reads long (hint only, not a limit)
 
 // Accent palette (used sparingly on the navy ground): gold = quality/approved, sky = progress/translated.
@@ -112,7 +112,7 @@ const LineCard: React.FC<{
         );
     };
     return (
-        <div className={`rounded-xl border p-3.5 transition-colors ${approved ? 'border-l-4 border-secondary/70 bg-secondary/[0.06]' : untranslated ? 'border-l-4 border-amber-400/50 bg-surface-container' : 'border-outline-variant bg-surface-container'}`}>
+        <div className={`rounded-xl border p-3.5 card-lux ${approved ? 'border-l-4 border-secondary/70 bg-secondary/[0.06]' : untranslated ? 'border-l-4 border-amber-400/50 bg-surface-container' : 'border-outline-variant bg-surface-container'}`}>
             <div className="flex items-center gap-2 mb-2.5">
                 <span className="w-7 h-7 rounded-full bg-surface-container-high text-on-surface-variant text-[12px] font-bold flex items-center justify-center shrink-0 tabular-nums">{n}</span>
                 <button onClick={onToggle} title="Nháp ⇄ Đã duyệt"
@@ -394,7 +394,7 @@ const ScriptEditor: React.FC<{ eventId: string; onActivated: () => void }> = ({ 
     ];
 
     return (
-        <div className="h-full flex flex-col bg-background text-on-background overflow-hidden relative">
+        <div className="h-full flex flex-col text-on-background overflow-hidden relative">
             <PageHeader icon="description" title="Kịch bản & Bản dịch duyệt sẵn" subtitle="Lưu tại máy · đồng bộ backend cho matcher">
                 <span className={`hidden md:inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full font-label-caps text-label-caps ${beDirty ? 'text-secondary border border-secondary/40' : 'text-on-surface-variant border border-outline-variant'}`}>
                     <span className="material-symbols-outlined text-[15px]" aria-hidden="true">{beDirty ? 'cloud_off' : 'cloud_done'}</span>{beDirty ? 'Chưa đồng bộ' : 'Đã đồng bộ'}
@@ -404,13 +404,13 @@ const ScriptEditor: React.FC<{ eventId: string; onActivated: () => void }> = ({ 
                     className="flex items-center gap-1.5 border border-outline-variant text-on-surface-variant px-3 py-2 rounded-full font-label-caps text-label-caps hover:border-secondary hover:text-secondary transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:border-outline-variant disabled:hover:text-on-surface-variant">
                     <span className="material-symbols-outlined text-[18px]" aria-hidden="true">{syncing ? 'progress_activity' : 'sync'}</span>Đồng bộ BE
                 </button>
-                <button onClick={openImport} className="flex items-center gap-1.5 bg-secondary text-on-secondary px-4 py-2 rounded-full font-label-caps text-label-caps hover:opacity-80"><span className="material-symbols-outlined text-[18px]" aria-hidden="true">upload_file</span>Nhập tệp</button>
+                <button onClick={openImport} className="btn-lux flex items-center gap-1.5 bg-secondary text-on-secondary px-4 py-2 rounded-full font-label-caps text-label-caps hover:opacity-80"><span className="material-symbols-outlined text-[18px]" aria-hidden="true">upload_file</span>Nhập tệp</button>
             </PageHeader>
 
             <div className="flex-1 overflow-y-auto">
                 <main className="max-w-5xl mx-auto px-6 py-6 space-y-4">
                     {/* Readiness / % tiếp thu — hero */}
-                    <div className="relative overflow-hidden bg-gradient-to-br from-surface-container-high to-surface-container border border-outline-variant rounded-2xl p-5 md:p-6">
+                    <div className="relative overflow-hidden glass-high hero-lux rounded-2xl p-5 md:p-6">
                         <div className="relative flex flex-col sm:flex-row items-center gap-5">
                             <Ring pct={rd.approvedPct} />
                             <div className="flex-1 min-w-0 w-full">
@@ -468,7 +468,7 @@ const ScriptEditor: React.FC<{ eventId: string; onActivated: () => void }> = ({ 
                     {rows.length === 0 ? (
                         <EmptyState icon="description" title="Chưa có dòng kịch bản"
                             hint="Nhập tệp .docx/.md/.txt hoặc dán kịch bản song ngữ. Dòng đã duyệt sẽ được tái dùng nguyên văn khi lễ diễn ra.">
-                            <button onClick={openImport} className="flex items-center gap-1.5 bg-secondary text-on-secondary px-4 py-2 rounded-full font-label-caps text-label-caps hover:opacity-80"><span className="material-symbols-outlined text-[18px]" aria-hidden="true">upload_file</span>Nhập tệp</button>
+                            <button onClick={openImport} className="btn-lux flex items-center gap-1.5 bg-secondary text-on-secondary px-4 py-2 rounded-full font-label-caps text-label-caps hover:opacity-80"><span className="material-symbols-outlined text-[18px]" aria-hidden="true">upload_file</span>Nhập tệp</button>
                             <button onClick={addRow} className="flex items-center gap-1.5 border border-outline-variant text-on-surface-variant px-4 py-2 rounded-full font-label-caps text-label-caps hover:border-secondary hover:text-secondary transition-colors"><span className="material-symbols-outlined text-[18px]" aria-hidden="true">add</span>Thêm dòng</button>
                         </EmptyState>
                     ) : filtered.length === 0 ? (

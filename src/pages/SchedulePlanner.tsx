@@ -15,7 +15,7 @@ const LANGS: { v: string; l: string }[] = [
     { v: '', l: '— ngôn ngữ —' }, { v: 'vi', l: 'Tiếng Việt' }, { v: 'ja', l: '日本語' },
     { v: 'en', l: 'English' }, { v: 'th', l: 'ไทย' }, { v: 'ko', l: '한국어' }, { v: 'zh', l: '中文' },
 ];
-const INPUT = 'w-full bg-surface text-on-surface border border-outline-variant rounded-lg px-3 py-2 text-sm focus:border-secondary focus:outline-none';
+const INPUT = 'w-full bg-surface text-on-surface border border-outline-variant rounded-lg px-3 py-2 text-sm focus:border-secondary focus:outline-none field-lux transition-shadow';
 const WD = ['CN', 'T2', 'T3', 'T4', 'T5', 'T6', 'T7'];
 const todayISO = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
 const parse = (iso: string) => { const d = new Date(iso + 'T00:00:00'); return isNaN(d.getTime()) ? null : d; };
@@ -25,7 +25,7 @@ const initials = (name: string) => name.trim().split(/\s+/).slice(-2).map((w) =>
 const ConferenceCard: React.FC<{ c: Conference; upcoming: boolean; onEdit: () => void; onDelete: () => void }> = ({ c, upcoming, onEdit, onDelete }) => {
     const d = parse(c.date);
     return (
-        <div className="group bg-surface-container bg-gradient-to-b from-surface-container to-surface border-2 border-outline-variant rounded-2xl p-4 flex gap-4 transition-all duration-200 ease-out hover:border-outline hover:-translate-y-0.5 hover:shadow-lg motion-reduce:transition-none motion-reduce:hover:translate-y-0">
+        <div className="card-lux group bg-surface-container bg-gradient-to-b from-surface-container to-surface border-2 border-outline-variant rounded-2xl p-4 flex gap-4">
             <div className="shrink-0 w-16 rounded-xl bg-surface-container-high flex flex-col items-center justify-center py-2">
                 <span className="text-2xl font-bold text-secondary tabular-nums leading-none">{d ? String(d.getDate()).padStart(2, '0') : '—'}</span>
                 <span className="text-[11px] text-on-surface-variant mt-1 tabular-nums">{d ? `Th${d.getMonth() + 1}·${d.getFullYear()}` : ''}</span>
@@ -125,7 +125,7 @@ const FormDrawer: React.FC<{
             </div>
             <div className="shrink-0 flex items-center justify-end gap-2 px-5 h-16 border-t border-outline-variant">
                 <button onClick={onClose} className="px-4 py-2 rounded-lg text-on-surface-variant hover:text-on-surface hover:bg-surface-container transition-colors text-sm">Hủy</button>
-                <button onClick={onSave} className="flex items-center gap-1.5 bg-secondary text-on-secondary px-5 py-2 rounded-lg font-label-caps text-label-caps hover:opacity-80"><span className="material-symbols-outlined text-[18px]" aria-hidden="true">save</span>Lưu lịch</button>
+                <button onClick={onSave} className="btn-lux flex items-center gap-1.5 bg-secondary text-on-secondary px-5 py-2 rounded-lg font-label-caps text-label-caps hover:opacity-80"><span className="material-symbols-outlined text-[18px]" aria-hidden="true">save</span>Lưu lịch</button>
             </div>
         </aside>
     </>
@@ -180,16 +180,16 @@ const SchedulePlanner: React.FC = () => {
     const upcomingId = list.find((c) => c.date >= today)?.id;
 
     return (
-        <div className="h-full flex flex-col bg-background text-on-background overflow-hidden relative">
+        <div className="h-full flex flex-col text-on-background overflow-hidden relative">
             <PageHeader icon="event" title="Đặt lịch hội nghị" subtitle="Lịch · người book · chủ đề · người phát biểu (lưu tại máy)">
-                <button onClick={openNew} className="flex items-center gap-1.5 bg-secondary text-on-secondary px-4 py-2 rounded-full font-label-caps text-label-caps hover:opacity-80"><span className="material-symbols-outlined text-[18px]" aria-hidden="true">add</span>Đặt lịch mới</button>
+                <button onClick={openNew} className="btn-lux flex items-center gap-1.5 bg-secondary text-on-secondary px-4 py-2 rounded-full font-label-caps text-label-caps hover:opacity-80"><span className="material-symbols-outlined text-[18px]" aria-hidden="true">add</span>Đặt lịch mới</button>
             </PageHeader>
             <div className="flex-1 overflow-y-auto">
                 <main className="max-w-[1000px] mx-auto px-6 md:px-10 py-8">
                     {list.length === 0 ? (
                         <EmptyState icon="event_available" title="Chưa có lịch hội nghị nào"
                             hint="Đặt lịch để chuẩn bị trước: ngày giờ, người book, chủ đề, và danh sách người phát biểu dự kiến.">
-                            <button onClick={openNew} className="flex items-center gap-1.5 bg-secondary text-on-secondary px-4 py-2 rounded-full font-label-caps text-label-caps hover:opacity-80"><span className="material-symbols-outlined text-[18px]" aria-hidden="true">add</span>Đặt lịch mới</button>
+                            <button onClick={openNew} className="btn-lux flex items-center gap-1.5 bg-secondary text-on-secondary px-4 py-2 rounded-full font-label-caps text-label-caps hover:opacity-80"><span className="material-symbols-outlined text-[18px]" aria-hidden="true">add</span>Đặt lịch mới</button>
                         </EmptyState>
                     ) : (
                         <div className="space-y-3">
