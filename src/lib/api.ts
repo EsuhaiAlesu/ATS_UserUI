@@ -305,6 +305,22 @@ export async function getScript(): Promise<ScriptEntry[]> {
 export const saveScript = (entries: ScriptEntry[]) =>
     saveFile(SCRIPT_PATH, JSON.stringify(entries, null, 2));
 
+// ---------------------------------------------------------------- Document ingest (.pdf → text)
+// The backend extracts raw text from an uploaded PDF (script tool spec 1.3); the FE does the
+// bilingual line‑splitting itself so paste/.docx/.pdf all behave identically. UNIMPLEMENTED on the
+// backend yet — see docs/ux-roadmap/28; the 404 branch lets the UI degrade cleanly until it exists.
+export interface IngestResult { text?: string; pages?: number; error?: string }
+
+export async function ingestPdf(file: File): Promise<IngestResult> {
+    const fd = new FormData();
+    fd.append('file', file);
+    const res = await fetch(apiUrl('/ingest'), { method: 'POST', body: fd });
+    if (res.status === 404) throw new Error('Backend chưa có chức năng đọc PDF (endpoint /api/ingest).');
+    const ct = res.headers.get('content-type') ?? '';
+    if (!res.ok || !ct.includes('json')) throw new Error(`Đọc PDF lỗi (HTTP ${res.status}).`);
+    return res.json() as Promise<IngestResult>;
+}
+
 // Minimal shape of POST /api/run's response (API.md §4 / RunResult).
 interface RunResult {
     nodes?: Record<string, { status?: string; error?: string | null; output?: unknown }>;

@@ -4,6 +4,7 @@ import { useLiveSession } from '../lib/LiveSessionContext';
 import { API_BASE, getHealth, getGlossary, getScript, getAudioDevices, getAudioOutputs } from '../lib/api';
 import type { GlossaryEntry, ScriptEntry } from '../lib/api';
 import { loadTtsPrefs } from '../lib/ttsPrefs';
+import { getScriptLocal } from '../lib/script';
 import {
     getPrep, signAttest, clearAttest, markReachedReady, setDebrief, addIncident, removeIncident,
     signedBeforeRehearsal, daysUntil,
@@ -273,6 +274,8 @@ const PrepDesk: React.FC = () => {
         const s = data.script;
         const sTotal = s ? s.length : 0;
         const sApproved = s ? s.filter((r) => r.status === 'approved').length : 0;
+        // The script tool is now local‑first; approved lines only reach the matcher after "Đồng bộ BE".
+        const localApproved = getScriptLocal().filter((r) => r.status === 'approved' && r.dst.trim()).length;
 
         const host = window.location.hostname;
         const loopback = (API_BASE === '' || /(127\.0\.0\.1|localhost)/.test(API_BASE)) && /^(127\.0\.0\.1|localhost)$/.test(host);
@@ -303,8 +306,10 @@ const PrepDesk: React.FC = () => {
             },
             {
                 id: 'script-approved', label: 'Kịch bản song ngữ có dòng ĐÃ DUYỆT', phase: 'pre', weight: 'important', kind: 'measured',
-                state: data.scriptErr ? 'unknown' : (sApproved >= 1 ? 'ok' : 'fail'),
-                detail: data.scriptErr ? 'chưa đọc được data/script.json' : `${sApproved}/${sTotal} dòng đã duyệt`,
+                state: sApproved >= 1 ? 'ok' : (data.scriptErr && localApproved === 0 ? 'unknown' : 'fail'),
+                detail: sApproved >= 1 ? `${sApproved}/${sTotal} dòng đã duyệt (trên matcher)`
+                    : localApproved >= 1 ? `Cục bộ ${localApproved} dòng đã duyệt — CHƯA đồng bộ lên matcher (mở /script → Đồng bộ BE)`
+                        : data.scriptErr ? 'chưa đọc được data/script.json (backend?)' : '0 dòng đã duyệt',
                 to: '/script', toLabel: 'Duyệt kịch bản',
             },
             {
