@@ -142,10 +142,12 @@ const OperatorLayout: React.FC = () => {
                     <span className="material-symbols-outlined text-[20px]" aria-hidden="true">pan_tool</span>
                     <span className="text-[11px] font-semibold tracking-[0.06em] leading-none">DỪNG</span>
                 </button>
-                {/* Sự kiện — tách riêng bên phải; dropdown mở canh phải, nổi lên trên */}
-                <div className="w-px h-7 bg-outline-variant mx-2 hidden lg:block"></div>
-                <div className="hidden lg:block"><EventSwitcher /></div>
             </header>
+
+            {/* ══════════ DÒNG SỰ KIỆN — tên hội nghị đang chọn, canh giữa, chữ to · bold · CAM ══════════ */}
+            <div className="relative !z-10 shrink-0 flex items-center justify-center px-4 py-2 border-b border-outline-variant shell-rail font-jakarta">
+                <EventSwitcher />
+            </div>
 
             {/* ══════════ BODY: contextual sidebar + content ══════════ */}
             <div className="flex-1 min-h-0 flex overflow-hidden">
