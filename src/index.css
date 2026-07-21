@@ -290,64 +290,6 @@
     background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)' opacity='0.02'/%3E%3C/svg%3E");
 }
 
-/* ============================================================
-   MÀN PHỤ ĐỀ — nền "MẠCH KIM" (hi-tech ceremonial).
-   Thuần CSS/SVG (không thêm thư viện). Mạch vàng + aurora trôi nhẹ
-   ở NỬA TRÊN; nửa dưới-giữa (nơi phụ đề chạy) giữ navy sâu & sạch để
-   chữ luôn tương phản cao trên màn LED 10 m. Chỉ opacity/transform
-   động; tắt hoàn toàn khi prefers-reduced-motion. Đặt trên 1 lớp
-   con absolute inset-0 z-0, nội dung phụ đề nằm z-10+ ở trên. */
-.hitech-wall {
-    background-color: #080c18;
-    background-image:
-        /* spotlight vàng ấm từ đỉnh (nghi lễ) */
-        radial-gradient(120% 78% at 50% -12%, rgba(232, 184, 75, 0.13), transparent 55%),
-        /* chiều sâu lạnh hai bên trên */
-        radial-gradient(85% 65% at 6% -4%, rgba(34, 96, 128, 0.18), transparent 60%),
-        radial-gradient(85% 65% at 94% -4%, rgba(86, 66, 150, 0.14), transparent 60%),
-        /* nền navy, tối dần xuống đáy nơi chữ chạy */
-        linear-gradient(180deg, #0c1122 0%, #0a0e1c 52%, #06090f 100%);
-}
-/* Lớp chi tiết hi-tech: lưới blueprint + mạch vàng, MASK mờ dần xuống
-   đáy để không lọt vào vùng phụ đề. */
-.hitech-wall::before {
-    content: '';
-    position: absolute;
-    inset: 0;
-    background-image:
-        /* mạch vàng thưa */
-        url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='340' height='340' viewBox='0 0 340 340'%3E%3Cg fill='none' stroke='%23e8b84b' stroke-width='1'%3E%3Cpath d='M0 48 H128 L162 82 H340'/%3E%3Cpath d='M64 0 V104 L98 138 V340'/%3E%3Cpath d='M340 232 H206 L172 198'/%3E%3Cpath d='M0 286 H92'/%3E%3C/g%3E%3Cg fill='%23f4d06a'%3E%3Ccircle cx='162' cy='82' r='3'/%3E%3Ccircle cx='98' cy='138' r='3'/%3E%3Ccircle cx='128' cy='48' r='2'/%3E%3Ccircle cx='206' cy='232' r='2.5'/%3E%3C/g%3E%3C/svg%3E"),
-        /* lưới blueprint rất mờ */
-        linear-gradient(rgba(122, 140, 180, 0.06) 1px, transparent 1px),
-        linear-gradient(90deg, rgba(122, 140, 180, 0.06) 1px, transparent 1px);
-    background-size: 440px 440px, 52px 52px, 52px 52px;
-    opacity: 0.16;
-    /* chi tiết chỉ ở DẢI TRÊN; tan hết trước vùng phụ đề (giữ ~58% dưới sạch) */
-    -webkit-mask-image: linear-gradient(180deg, #000 0%, #000 12%, transparent 42%);
-    mask-image: linear-gradient(180deg, #000 0%, #000 12%, transparent 42%);
-    pointer-events: none;
-}
-/* Aurora vàng + teal trôi chậm ở nửa trên. */
-.hitech-wall::after {
-    content: '';
-    position: absolute;
-    inset: -20% -20% 30% -20%;
-    background-image:
-        radial-gradient(38% 46% at 30% 30%, rgba(232, 184, 75, 0.16), transparent 70%),
-        radial-gradient(42% 50% at 72% 22%, rgba(46, 120, 150, 0.16), transparent 72%);
-    filter: blur(6px);
-    animation: wallDrift 34s ease-in-out infinite alternate;
-    pointer-events: none;
-}
-@keyframes wallDrift {
-    0%   { transform: translate3d(-2.5%, -1.5%, 0) scale(1);    opacity: 0.85; }
-    50%  { transform: translate3d(2%, 1.5%, 0) scale(1.06);     opacity: 1; }
-    100% { transform: translate3d(3%, -1%, 0) scale(1.02);      opacity: 0.9; }
-}
-@media (prefers-reduced-motion: reduce) {
-    .hitech-wall::after { animation: none; }
-}
-
 /* Ceremonial "LÊN SÓNG" moment — elegant minimal (gold line draws out, PROYAKU glows & dissolves).
    Rendered only when the wall is cut to LIVE; skipped entirely under reduced-motion (guarded in JS). */
 .ignite { animation: igniteFade 1.7s ease-out forwards; }

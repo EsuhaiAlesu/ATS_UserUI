@@ -17,7 +17,7 @@ import type { SpeakerProfile, Gender } from '../lib/speakers';
 // Đặt lịch: navy + gold, card list + Raycast‑style slide‑over drawer.
 
 const LANGS: { v: string; l: string }[] = [
-    { v: '', l: '— ngôn ngữ —' }, { v: 'vi', l: 'Vietnamese' }, { v: 'ja', l: '日本語' },
+    { v: '', l: '— ngôn ngữ —' }, { v: 'vi', l: 'Tiếng Việt' }, { v: 'ja', l: '日本語' },
     { v: 'en', l: 'English' }, { v: 'th', l: 'ไทย' }, { v: 'ko', l: '한국어' }, { v: 'zh', l: '中文' },
 ];
 const GENDERS: { v: Gender; l: string }[] = [{ v: '', l: '— giới tính —' }, { v: 'male', l: 'Nam' }, { v: 'female', l: 'Nữ' }];

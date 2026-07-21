@@ -18,7 +18,7 @@ import { removeEvent } from '../lib/events';
 // vào cây scope `series:<id>` (kbscope.ts). Offline (localStorage). Design: navy + gold, chuỗi = sọc màu dịu.
 
 const LANGS: { v: string; l: string }[] = [
-    { v: '', l: '— ngôn ngữ —' }, { v: 'vi', l: 'Vietnamese' }, { v: 'ja', l: '日本語' },
+    { v: '', l: '— ngôn ngữ —' }, { v: 'vi', l: 'Tiếng Việt' }, { v: 'ja', l: '日本語' },
     { v: 'en', l: 'English' }, { v: 'th', l: 'ไทย' }, { v: 'ko', l: '한국어' }, { v: 'zh', l: '中文' },
 ];
 const INPUT = 'w-full bg-surface text-on-surface border border-outline-variant rounded-lg px-3 py-2 text-sm focus:border-secondary focus:outline-none field-lux transition-shadow';
