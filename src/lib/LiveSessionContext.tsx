@@ -420,6 +420,8 @@ export const LiveSessionProvider: React.FC<{ children: React.ReactNode }> = ({ c
             // speaker is an atomic identity (who is speaking + their voice) — REPLACE, don't deep‑merge,
             // else a prior speaker's voice would bleed onto a later voiceless speaker on reconnect re‑apply.
             ...(patch.speaker ? { speaker: patch.speaker } : {}),
+            // audio gain is a full snapshot (vi/ja/master) — REPLACE so a reconnect re‑applies the latest levels.
+            ...(patch.audio ? { audio: patch.audio } : {}),
         };
         const id = `c${cmdSeqRef.current++}`;
         const fire = () => sendRaw({ cmd: 'set', id, patch });

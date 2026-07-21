@@ -86,6 +86,34 @@ const RoundBtn: React.FC<{
     );
 };
 
+// ── Âm lượng ngõ ra (doc 31 · B1) ────────────────────────────────────────────
+// Lật thành `true` khi đội backend XÁC NHẬN đã áp `gains` (config) + `audio.gain` (set) — xem doc 32.
+// Khi false: fader vẫn hoạt động (lưu + gửi lệnh), chỉ hiện chú thích "chờ backend" để không gây hiểu nhầm.
+const AUDIO_GAIN_BACKEND_READY = false;
+
+type VolSet = { vi: number; ja: number; master: number };
+const clampVol = (n: unknown, d: number) => (typeof n === 'number' && Number.isFinite(n) ? Math.max(0, Math.min(100, Math.round(n))) : d);
+const loadVols = (): VolSet => {
+    try {
+        const v = JSON.parse(localStorage.getItem('proyaku_audio_vol') || '{}');
+        return { vi: clampVol(v.vi, 100), ja: clampVol(v.ja, 100), master: clampVol(v.master, 100) };
+    } catch { return { vi: 100, ja: 100, master: 100 }; }
+};
+// UI 0–100% → gain 0.0–1.0 (unity = 1.0). Chỉ suy giảm, không khuếch đại (an toàn, tránh méo/clip).
+const gainsFrom = (v: VolSet) => ({ vi: v.vi / 100, ja: v.ja / 100, master: v.master / 100 });
+
+// Một fader âm lượng 0–100% có nhãn — dùng chung cho panel dưới thanh điều khiển + ngăn Cài đặt.
+const VolRow: React.FC<{ label: string; value: number; onChange: (v: number) => void }> = ({ label, value, onChange }) => (
+    <div className="flex items-center gap-3">
+        <span className="w-14 shrink-0 font-label-caps text-label-caps text-on-surface-variant">{label}</span>
+        <input type="range" min={0} max={100} step={1} value={value}
+            aria-label={`Âm lượng ${label}`}
+            onChange={(e) => onChange(Number(e.target.value))}
+            className="flex-1 accent-[var(--secondary)]" />
+        <span className="w-11 shrink-0 text-right tabular-nums text-sm text-on-surface">{value}%</span>
+    </div>
+);
+
 const AudioRouting: React.FC = () => {
     const session = useLiveSession();
     const { eventId, event } = useActiveEvent();
@@ -116,7 +144,9 @@ const AudioRouting: React.FC = () => {
     const [ttsRate, setTtsRate] = useState(() => { const r = loadTtsPrefs().rate; return typeof r === 'number' && r > 0 ? r : 1; });
     const [ttsHasVoice] = useState(() => { const p = loadTtsPrefs(); return !!(p.vi || p.ja); }); // whether a voice was picked at Chuẩn bị · Giọng đọc
     const [speaker, setSpeaker] = useState(() => { try { return String(JSON.parse(localStorage.getItem('proyaku_speaker') || '{}').name || ''); } catch { return ''; } });
-    const [panel, setPanel] = useState<null | 'speed' | 'speaker'>(null);
+    const [panel, setPanel] = useState<null | 'speed' | 'speaker' | 'volume'>(null);
+    // Âm lượng ngõ ra (0–100% mỗi kênh + tổng). Lưu tại máy; hot-apply giữa phiên; gửi trong config lúc BẮT ĐẦU.
+    const [vols, setVols] = useState<VolSet>(loadVols);
     // Người nói roster for the dispatch popover: the reusable Bộ nhớ library (spec 1.7) FIRST, then any
     // speakers from today's/last scheduled conference not already in the library (dedupe by name).
     // Frozen at mount (like the rest of the console) — set the library up pre‑event.
@@ -225,6 +255,7 @@ const AudioRouting: React.FC = () => {
             hotwords: true,
             ...(ttsBlock ? { tts: ttsBlock } : {}),
             ...(outVi !== null && outJa !== null ? { outputs: { vi: outVi, ja: outJa } } : {}),
+            gains: gainsFrom(vols),
         };
         session.start(config);
     };
@@ -234,6 +265,13 @@ const AudioRouting: React.FC = () => {
     const applyRate = (raw: number) => {
         const v = Math.max(0.5, Math.min(2, Math.round(raw * 10) / 10));
         setTtsRate(v); saveTtsPrefs({ ...loadTtsPrefs(), rate: v }); session.sendCommand({ tts: { rate: v } });
+    };
+    // Âm lượng: lưu tại máy (dùng ở lần BẮT ĐẦU kế) + hot-apply ngay qua sendCommand nếu đang chạy.
+    const applyVol = (patch: Partial<VolSet>) => {
+        const next = { ...vols, ...patch };
+        setVols(next);
+        try { localStorage.setItem('proyaku_audio_vol', JSON.stringify(next)); } catch { /* ignore */ }
+        session.sendCommand({ audio: { gain: gainsFrom(next) } });
     };
     const saveSpeakerLocal = (name: string) => {
         setSpeaker(name);
@@ -500,6 +538,7 @@ const AudioRouting: React.FC = () => {
                     title={!ttsHasVoice ? 'Chưa chọn giọng đọc — vào Chuẩn bị · Giọng đọc để chọn; hiện chỉ phụ đề' : ttsOn ? 'Đang đọc tiếng — bấm để chỉ phụ đề' : 'Chỉ phụ đề — bấm để bật đọc tiếng'}
                     tone={ttsOn && ttsHasVoice ? 'active' : 'default'} disabled={!ttsHasVoice} onClick={() => applyTtsOn(!ttsOn)} />
                 <RoundBtn icon="speed" label={`${ttsRate.toFixed(1)}×`} title="Tốc độ giọng đọc" tone={panel === 'speed' ? 'active' : 'default'} onClick={() => setPanel((p) => (p === 'speed' ? null : 'speed'))} />
+                <RoundBtn icon="tune" label="Âm lượng" title="Âm lượng loa VI / JA / Tổng" tone={panel === 'volume' ? 'active' : 'default'} onClick={() => setPanel((p) => (p === 'volume' ? null : 'volume'))} />
                 <RoundBtn icon="record_voice_over" label="Người nói" title="Điều phối người phát biểu" tone={panel === 'speaker' ? 'active' : 'default'} onClick={() => setPanel((p) => (p === 'speaker' ? null : 'speaker'))} />
                 <RoundBtn icon="menu_book" label="Từ điển" title="Mở Từ điển (cửa sổ mới)" onClick={() => window.open('/glossary', 'proyaku-glossary')} />
 
@@ -575,6 +614,27 @@ const AudioRouting: React.FC = () => {
                                         placeholder="Nhập tên người nói…"
                                         className="field-lux transition-shadow flex-1 min-w-0 bg-surface-container border border-outline-variant rounded-lg px-3 py-2 text-body-md text-on-surface placeholder:text-on-surface-variant focus:outline-none focus:border-secondary" />
                                 </div>
+                            </div>
+                        )}
+                        {panel === 'volume' && (
+                            <div className="flex flex-col gap-3">
+                                <div className="flex items-center justify-between">
+                                    <span className="font-label-caps text-label-caps text-on-surface-variant">ÂM LƯỢNG LOA</span>
+                                    <button onClick={() => applyVol({ vi: 100, ja: 100, master: 100 })}
+                                        className="text-label-md text-on-surface-variant hover:text-secondary">Đặt lại 100%</button>
+                                </div>
+                                <VolRow label="Tổng" value={vols.master} onChange={(v) => applyVol({ master: v })} />
+                                <div className="h-px bg-outline-variant"></div>
+                                <VolRow label="VI" value={vols.vi} onChange={(v) => applyVol({ vi: v })} />
+                                <VolRow label="JA" value={vols.ja} onChange={(v) => applyVol({ ja: v })} />
+                                {AUDIO_GAIN_BACKEND_READY ? (
+                                    <p className="text-body-sm text-on-surface-variant">Áp ngay khi đang chạy; nếu chưa có phiên sẽ dùng ở lần Bắt đầu.</p>
+                                ) : (
+                                    <p className="text-body-sm text-on-surface-variant flex items-start gap-1.5">
+                                        <span className="material-symbols-outlined text-[16px] text-primary shrink-0" aria-hidden="true">info</span>
+                                        Đã lưu &amp; gửi lệnh sẵn; âm lượng sẽ có tác dụng khi backend áp dụng (doc 32 · B1).
+                                    </p>
+                                )}
                             </div>
                         )}
                     </div>
@@ -673,6 +733,7 @@ const AudioRouting: React.FC = () => {
                                         {outputs.map((d) => <option key={d.index} value={d.index}>{d.name}</option>)}
                                     </select>
                                     <button onClick={() => handleTestTone('vi')} className="mt-2 w-full border border-outline-variant text-on-surface-variant py-1.5 rounded-DEFAULT text-xs hover:text-primary hover:border-primary transition-colors">{toneStatus.vi || 'Test loa VI'}</button>
+                                    <div className="mt-2.5"><VolRow label="Âm lượng" value={vols.vi} onChange={(v) => applyVol({ vi: v })} /></div>
                                 </div>
                                 <div>
                                     <div className="flex justify-between items-center mb-1.5"><label className="font-label-caps text-label-caps text-on-surface-variant">Loa JA</label><span className="font-label-caps text-label-caps text-on-surface-variant">VI → JA</span></div>
@@ -681,6 +742,7 @@ const AudioRouting: React.FC = () => {
                                         {outputs.map((d) => <option key={d.index} value={d.index}>{d.name}</option>)}
                                     </select>
                                     <button onClick={() => handleTestTone('ja')} className="mt-2 w-full border border-outline-variant text-on-surface-variant py-1.5 rounded-DEFAULT text-xs hover:text-primary hover:border-primary transition-colors">{toneStatus.ja || 'Test loa JA'}</button>
+                                    <div className="mt-2.5"><VolRow label="Âm lượng" value={vols.ja} onChange={(v) => applyVol({ ja: v })} /></div>
                                 </div>
                             </section>
                         </div>

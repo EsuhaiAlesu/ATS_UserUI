@@ -114,6 +114,8 @@ export interface LiveConfig {
     };
     tts?: Record<string, unknown>;
     outputs?: Record<string, number>;
+    // Ngõ ra: âm lượng từng kênh + tổng (0.0–1.0, unity = 1.0). Backend áp nếu hỗ trợ; bỏ qua nếu chưa (doc 32 · B1).
+    gains?: { vi?: number; ja?: number; master?: number };
     record?: boolean;
     post_correct?: boolean;
     hotwords?: boolean;
@@ -127,6 +129,8 @@ export interface LiveCommandPatch {
     tts?: { on?: boolean; rate?: number; engine?: string; voice?: string | number };
     direction?: { src: string; dst: string };
     speaker?: { name?: string; voice?: string | number };
+    // Âm lượng ngõ ra giữa phiên (0.0–1.0, unity = 1.0). Xem doc 32 · B1.
+    audio?: { gain?: { vi?: number; ja?: number; master?: number } };
 }
 
 // Events streamed by WS /api/ws/live (subset the UI consumes).
