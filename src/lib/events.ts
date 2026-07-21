@@ -60,6 +60,22 @@ export function clearActivationIf(id: string): void {
     if (getActivation().activatedId === id) { try { localStorage.removeItem(ACTIVATION_KEY); } catch { /* ignore */ } }
 }
 
+// --- so sánh "đang chọn" vs "đang kích hoạt cho matcher" (doc 29 · §4.2) ---
+export type ActivationState = 'matched' | 'mismatched' | 'none';
+/** matched = buổi đang chọn cũng là buổi matcher đang giữ; mismatched = matcher giữ buổi KHÁC;
+ *  none = chưa kích hoạt buổi nào (matcher đang dùng dữ liệu chung/cũ). NB: đây là "lời khai" phía
+ *  client (proyaku_activation) — chưa đọc ngược từ backend để kiểm chứng (xem doc 29 · §6.1). */
+export function activationState(selectedId: string): ActivationState {
+    const a = getActivation().activatedId;
+    if (!a) return 'none';
+    return a === selectedId ? 'matched' : 'mismatched';
+}
+/** Sự kiện mà matcher đang giữ dữ liệu (theo con trỏ kích hoạt cục bộ), nếu còn phân giải được. */
+export const getActivatedEvent = (): Conference | undefined => {
+    const a = getActivation().activatedId;
+    return a ? getEvent(a) : undefined;
+};
+
 /** Delete an event and reconcile the pointers: clear its activation, and repick the active event if
  * it was the selected one (so neither pointer is left dangling). Per‑event data keys are left as
  * orphans intentionally (harmless; a later cleanup version can sweep them). */

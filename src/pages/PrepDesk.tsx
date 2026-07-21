@@ -12,6 +12,8 @@ import {
 } from '../lib/prep';
 import type { Attest } from '../lib/prep';
 import PageHeader from '../components/PageHeader';
+import ActivationBanner from '../components/ActivationBanner';
+import EventDataDossier from '../components/EventDataDossier';
 import { eventDates } from '../lib/settings';
 import { toast } from '../lib/toast';
 
@@ -196,7 +198,7 @@ const SignalDrawer: React.FC<{
 
 const PrepDesk: React.FC = () => {
     const session = useLiveSession();
-    const { eventId } = useActiveEvent();
+    const { eventId, event } = useActiveEvent();
     const [data, setData] = useState<Fetched>(INITIAL);
     const [tick, setTick] = useState(0);
     const [prep, setPrepState] = useState(getPrep());
@@ -426,7 +428,7 @@ const PrepDesk: React.FC = () => {
 
     const exportKb = () => {
         if (!data.glossary || !data.script) return;
-        const payload = { exportedAt: new Date().toISOString(), event: 'Esuhai 20th — PROYAKU', glossary: data.glossary, script: data.script };
+        const payload = { exportedAt: new Date().toISOString(), event: event?.title?.trim() || 'PROYAKU', eventId, glossary: data.glossary, script: data.script };
         const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
@@ -455,6 +457,12 @@ const PrepDesk: React.FC = () => {
             >
                 <button onClick={() => setTick((t) => t + 1)} disabled={data.loading} className="border border-outline-variant text-on-surface-variant px-3 py-1.5 text-sm rounded-DEFAULT hover:text-primary hover:border-primary disabled:opacity-40">{data.loading ? 'Đang đo…' : 'Đo lại'}</button>
             </PageHeader>
+
+            {/* Hồ sơ dữ liệu sự kiện + băng cảnh hoạt (doc 29 · P0 — làm lộ rủi ro "dùng dữ liệu chung") */}
+            <div className="shrink-0 px-5 md:px-8 pt-4 space-y-2.5">
+                <ActivationBanner />
+                <EventDataDossier be={{ glossaryCount: data.glossary?.length, scriptApproved: data.script?.filter((r) => r.status === 'approved' && r.dst.trim()).length }} />
+            </div>
 
             <div className="flex-1 flex min-h-0 gap-5 p-5 md:p-8 overflow-hidden">
                 {/* CỘT 1 — menu pha: 3 ô chia đều chiều cao; active = viền + màu + icon + font to hơn */}

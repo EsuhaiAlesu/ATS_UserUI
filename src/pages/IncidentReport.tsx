@@ -2,6 +2,8 @@ import React, { useState } from 'react';
 import { useLiveSession } from '../lib/LiveSessionContext';
 import { getPrep, addIncident, removeIncident } from '../lib/prep';
 import PageHeader from '../components/PageHeader';
+import ActivationBanner from '../components/ActivationBanner';
+import EventDataDossier from '../components/EventDataDossier';
 
 // Báo cáo sự cố (req 4): tình trạng hệ thống/thiết bị + hướng khắc phục + nhật ký sự cố.
 // Nhật ký chạy OFFLINE (localStorage qua prep.ts); phần tình trạng suy ra từ phiên (phản ánh backend
@@ -51,6 +53,16 @@ const IncidentReport: React.FC = () => {
             <PageHeader icon="report" title="Báo cáo sự cố" subtitle={openCount > 0 ? `${openCount} mục cần chú ý · hướng khắc phục bên dưới` : 'Hệ thống ổn · nhật ký để rút kinh nghiệm'} />
             <div className="flex-1 overflow-y-auto">
                 <main className="max-w-[1100px] mx-auto px-6 md:px-10 py-8 space-y-8">
+                    {/* Độ sẵn sàng dữ liệu cho sự kiện (doc 29 · P0 — feedback trước/sau buổi) */}
+                    <section id="data" className="scroll-mt-4">
+                        <h2 className="font-label-caps text-label-caps text-on-surface-variant mb-3">Độ sẵn sàng dữ liệu cho sự kiện</h2>
+                        <ActivationBanner className="mb-2.5" />
+                        <EventDataDossier />
+                        <p className="mt-3 text-[13px] text-on-surface-variant/70">
+                            Bằng chứng thực tế khi chạy (tỉ lệ khớp kịch bản <span className="font-medium">on_script</span>, số lần sửa tên riêng) sẽ được bổ sung khi backend chạy (Bước 0 · doc 29 §6.2).
+                        </p>
+                    </section>
+
                     {/* Tình trạng hệ thống + gợi ý khắc phục */}
                     <section id="status" className="scroll-mt-4">
                         <h2 className="font-label-caps text-label-caps text-on-surface-variant mb-3">Tình trạng hệ thống</h2>

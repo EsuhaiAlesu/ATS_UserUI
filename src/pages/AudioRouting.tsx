@@ -9,6 +9,8 @@ import { useMeter } from '../lib/useMeter';
 import { buildTtsConfig, loadTtsPrefs, saveTtsPrefs } from '../lib/ttsPrefs';
 import { getSchedules } from '../lib/schedule';
 import { getSpeakers, findSpeakerByName } from '../lib/speakers';
+import { useActiveEvent } from '../lib/ActiveEventContext';
+import { computeReadiness, TIER_LABEL } from '../lib/readiness';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Operator console as a clean video-meeting cockpit (Zoom/Teams pattern):
@@ -86,6 +88,7 @@ const RoundBtn: React.FC<{
 
 const AudioRouting: React.FC = () => {
     const session = useLiveSession();
+    const { eventId, event } = useActiveEvent();
     const active = isSessionActive(session.status);
 
     // --- Backend catalog state ---
@@ -200,6 +203,19 @@ const AudioRouting: React.FC = () => {
     const handleStartStop = () => {
         if (active) { session.stop(); return; }
         if (!session.backendOnline) return;   // B0-3a: cổng cứng — không tạo phiên "giả" khi chưa có backend
+        // Cổng tiền-live (doc 29 · §4.3c): CẢNH BÁO khi buổi này chưa có dữ liệu riêng (vẫn cho tiếp tục).
+        if (eventId) {
+            const r = computeReadiness(eventId);
+            if (r.usingGeneric) {
+                const title = event?.title?.trim() || 'buổi này';
+                const ok = window.confirm(
+                    `⚠ «${title}» CHƯA có dữ liệu riêng đã kích hoạt (độ chính xác dự kiến: ${TIER_LABEL[r.tier]}).\n\n` +
+                    'Matcher sẽ dùng dữ liệu chung / đã lưu → độ chính xác thấp, có thể sai tên riêng và thuật ngữ.\n\n' +
+                    'Vẫn bắt đầu?',
+                );
+                if (!ok) return;
+            }
+        }
         const ttsBlock = buildTtsConfig(loadTtsPrefs());
         const config: LiveConfig = {
             device: 'mic',
