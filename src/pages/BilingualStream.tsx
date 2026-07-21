@@ -536,6 +536,7 @@ const BilingualStream: React.FC<Props> = ({ isEmbedded = false }) => {
 
                 {/* Layout control bar — auto-hides during presentation (hidden inside the app's STREAM tab) */}
                 {!isEmbedded && (
+                    <>
                     <div className={`absolute bottom-8 left-1/2 -translate-x-1/2 z-40 flex items-center gap-1 bg-surface-container/90 border border-outline-variant rounded-full px-2 py-1.5 shadow-lg backdrop-blur-sm transition-opacity duration-500 ${controlsVisible ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}>
                         {([
                             ['both', 'view_column', 'Both (1)'],
@@ -586,6 +587,11 @@ const BilingualStream: React.FC<Props> = ({ isEmbedded = false }) => {
                             </button>
                         ))}
                     </div>
+                    {/* Legend phím tắt an toàn — tự ẩn cùng thanh điều khiển nên màn khán giả lúc idle không thấy chrome. */}
+                    <div className={`absolute bottom-2 left-1/2 -translate-x-1/2 z-40 text-[11px] text-on-surface-variant/70 tracking-wide whitespace-nowrap transition-opacity duration-500 ${controlsVisible ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}>
+                        Phím tắt — <b className="text-on-surface">1–4</b> bố cục · <b className="text-on-surface">S</b> đổi bên · <b className="text-secondary">L</b> lên sóng · <b className="text-secondary">G</b> giữ hình · <b className="text-secondary">B</b> màn an toàn · <b className="text-on-surface">F</b> toàn màn hình
+                    </div>
+                    </>
                 )}
 
                 {/* Hint when the browser blocked the auto-opened language windows */}

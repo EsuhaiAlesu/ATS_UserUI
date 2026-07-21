@@ -390,9 +390,9 @@ const PrepDesk: React.FC = () => {
                 detail: `cắt hiện tại: ${session.audienceCut} — ký 'đã tập freeze/slate từ /audio xuống /stream + ≥1 cửa sổ LED đang mở'`,
             },
             {
-                id: 'recording-armed', label: 'Đã bật GHI phiên (record) trên /audio', phase: 'in', weight: 'nice', kind: 'attest',
+                id: 'recording-armed', label: 'Đã xác nhận GHI phiên ở backend (Mac Studio)', phase: 'in', weight: 'nice', kind: 'attest',
                 state: attState('recording-armed'),
-                detail: 'record là cầu nối DUY NHẤT sang Post-Event — bật TRƯỚC khi START',
+                detail: 'App CHƯA điều khiển ghi hình — record do backend/Mac Studio đảm nhiệm; hãy xác nhận backend đang GHI TRƯỚC khi START (cầu nối sang Post-Event).',
             },
             // ---- POST-EVENT ----
             {

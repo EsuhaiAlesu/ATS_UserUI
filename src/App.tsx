@@ -15,6 +15,7 @@ import DocumentsLibrary from './pages/DocumentsLibrary'
 import OperatorLayout from './components/OperatorLayout'
 import SplashScreen from './components/SplashScreen'
 import Toaster from './components/Toaster'
+import ErrorBoundary from './components/ErrorBoundary'
 import { LiveSessionProvider } from './lib/LiveSessionContext'
 import { ActiveEventProvider } from './lib/ActiveEventContext'
 
@@ -33,6 +34,7 @@ const App: React.FC = () => {
       <div className="bg-background min-h-screen">
         {splashState !== 'done' && <SplashScreen onStateChange={setSplashState} />}
         {splashState !== 'animating' && (
+          <ErrorBoundary>
           <Routes>
             {/* "/" is the ceremonial splash entry → the dashboard is the single home. */}
             <Route path="/" element={<Navigate to="/prep" replace />} />
@@ -59,6 +61,7 @@ const App: React.FC = () => {
 
             <Route path="*" element={<Navigate to="/prep" replace />} />
           </Routes>
+          </ErrorBoundary>
         )}
       </div>
       </ActiveEventProvider>
