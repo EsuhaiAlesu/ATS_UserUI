@@ -21,35 +21,11 @@ What is wired up:
 
 ---
 
-# React + TypeScript + Vite
+## Build & serve
 
-This template provides a minimal setup to get React working in Vite with HMR and some Oxlint rules.
+- **Dev:** `npm run dev` — Vite proxies every `/api` (REST + WS) to the backend (`ATS_BACKEND` env to point elsewhere).
+- **Build:** `npm run build` (`tsc -b && vite build` → `dist/`).
+- **Serve (production):** `npm start` runs `server.js` — a zero-dependency static server (Node built-ins only) with an optional login gate. Set `AUTH_PASSWORD` (and `SESSION_SECRET`) to enable the gate; without them it is OFF (fail-open) so a missing secret never locks the venue out.
+- **Lint:** `npm run lint` (oxlint).
 
-Currently, two official plugins are available:
-
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
-
-## React Compiler
-
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
-
-## Expanding the Oxlint configuration
-
-If you are developing a production application, we recommend enabling type-aware lint rules by installing `oxlint-tsgolint` and editing `.oxlintrc.json`:
-
-```json
-{
-  "$schema": "./node_modules/oxlint/configuration_schema.json",
-  "plugins": ["react", "typescript", "oxc"],
-  "options": {
-    "typeAware": true
-  },
-  "rules": {
-    "react/rules-of-hooks": "error",
-    "react/only-export-components": ["warn", { "allowConstantExport": true }]
-  }
-}
-```
-
-See the [Oxlint rules documentation](https://oxc.rs/docs/guide/usage/linter/rules) for the full list of rules and categories.
+Fonts + Material Symbols icons are **self-hosted** under `public/fonts/` (no Google Fonts CDN) so the whole UI — including every icon on the operator console and the audience subtitle wall — renders on an isolated/offline venue network.
