@@ -9,6 +9,8 @@ import { readImportFile, parseText } from '../lib/scriptImport';
 import { getScriptLocal, writeScriptLocal } from '../lib/script';
 import { getDocs, upsertDoc, removeDoc, newSourceDoc } from '../lib/docs';
 import type { SourceDoc } from '../lib/docs';
+import { kbScopeId } from '../lib/kbscope';
+import { getSeries } from '../lib/series';
 
 // Tài liệu nguồn (Chuẩn bị · spec 1.3) — the imported source documents (.docx/.pdf/.txt) of the
 // SELECTED event: a reference archive + provenance for the derived Kịch bản. Same event scope as the
@@ -57,7 +59,10 @@ const DocCard: React.FC<{ d: SourceDoc; onView: () => void; onToScript: () => vo
 const DocumentsLibraryInner: React.FC<{ eventId: string }> = ({ eventId }) => {
     const { event } = useActiveEvent();
     const session = useLiveSession();
-    const [docs, setDocs] = useState<SourceDoc[]>(() => getDocs(eventId));
+    // Scope kho tài liệu (doc 30): buổi-thuộc-chuỗi → kho CHUỖI (tích lũy chung), một lần → kho buổi.
+    const scope = event ? kbScopeId(event) : eventId;
+    const series = event?.seriesId ? getSeries(event.seriesId) : undefined;
+    const [docs, setDocs] = useState<SourceDoc[]>(() => getDocs(scope));
     const [busy, setBusy] = useState(false);
     const [drag, setDrag] = useState(false);
     const [viewing, setViewing] = useState<SourceDoc | null>(null);
@@ -74,8 +79,8 @@ const DocumentsLibraryInner: React.FC<{ eventId: string }> = ({ eventId }) => {
                 text = (await ingestPdf(file)).text ?? '';
             }
             if (!text.trim()) throw new Error('Không trích được văn bản từ tệp.');
-            setDocs(upsertDoc(eventId, newSourceDoc(file.name, r.kind, file.size, text, r.md)));
-            toast.success('Đã thêm tài liệu vào sự kiện');
+            setDocs(upsertDoc(scope, newSourceDoc(file.name, r.kind, file.size, text, r.md)));
+            toast.success(series ? `Đã thêm vào kho chuỗi «${series.name}»` : 'Đã thêm tài liệu vào sự kiện');
         } catch (e) { toast.error(e instanceof Error ? e.message : String(e)); }
         finally { setBusy(false); }
     };
@@ -95,14 +100,14 @@ const DocumentsLibraryInner: React.FC<{ eventId: string }> = ({ eventId }) => {
         } catch { toast.error('Không tải được'); }
     };
     const del = (d: SourceDoc) => {
-        if (window.confirm(`Xoá tài liệu "${d.name}"? Không thể hoàn tác.`)) { setDocs(removeDoc(eventId, d.id)); toast.success('Đã xoá tài liệu'); }
+        if (window.confirm(`Xoá tài liệu "${d.name}"? Không thể hoàn tác.`)) { setDocs(removeDoc(scope, d.id)); toast.success('Đã xoá tài liệu'); }
     };
 
     const accept = useMemo(() => `.md,.markdown,.txt,.csv,.srt,.docx,.docm,.dotx,.dotm${session.backendOnline ? ',.pdf' : ''}`, [session.backendOnline]);
 
     return (
         <div className="h-full flex flex-col text-on-background overflow-hidden relative">
-            <PageHeader icon="folder_open" title="Tài liệu nguồn" subtitle={event ? `Sự kiện: ${event.title || '(chưa đặt tên)'}` : 'Kho tài liệu theo sự kiện (lưu tại máy)'}>
+            <PageHeader icon="folder_open" title="Tài liệu nguồn" subtitle={series ? `Kho chuỗi «${series.name}» · dùng chung cho mọi buổi (tích lũy)` : event ? `Sự kiện: ${event.title || '(chưa đặt tên)'}` : 'Kho tài liệu theo sự kiện (lưu tại máy)'}>
                 <input ref={fileInput} type="file" accept={accept} className="hidden" onChange={(e) => handleFile(e.target.files?.[0])} />
                 <button onClick={() => fileInput.current?.click()} className="btn-lux flex items-center gap-1.5 bg-secondary text-on-secondary px-4 py-2 rounded-full font-label-caps text-label-caps hover:opacity-80"><span className="material-symbols-outlined text-[18px]" aria-hidden="true">upload_file</span>Nhập tài liệu</button>
             </PageHeader>

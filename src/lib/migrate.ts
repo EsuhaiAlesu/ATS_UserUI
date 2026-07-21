@@ -36,3 +36,15 @@ export function migrateToEventScoped(): void {
         localStorage.setItem(FLAG, 'v1');
     } catch { /* never brick boot */ }
 }
+
+// Chuỗi hội nghị (doc 30) — migration THUẦN CỘNG THÊM: không copy/move/sửa Conference nào. Mọi lịch cũ tự
+// thành "một lần" vì normConf mặc định seriesId=undefined và proyaku_series vắng ⇒ []. Chỉ tạo kho rỗng +
+// đặt cờ (idempotent, không bao giờ brick boot). Cờ riêng, độc lập với proyaku_migrated_events.
+const SERIES_FLAG = 'proyaku_series_migrated';
+export function migrateToSeries(): void {
+    try {
+        if (localStorage.getItem(SERIES_FLAG)) return;
+        if (localStorage.getItem('proyaku_series') == null) localStorage.setItem('proyaku_series', '[]');
+        localStorage.setItem(SERIES_FLAG, 'v1');
+    } catch { /* never brick boot */ }
+}

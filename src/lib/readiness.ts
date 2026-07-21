@@ -10,6 +10,7 @@
 
 import { getScriptLocal, readiness as scriptReadiness, getSyncState } from './script';
 import { getDocs } from './docs';
+import { effectiveDocs } from './kbscope';
 import { getSpeakers } from './speakers';
 import { getEvent, getActivatedEvent, activationState } from './events';
 import type { ActivationState } from './events';
@@ -103,12 +104,15 @@ function speakersPillar(eventId: string): Pillar {
 }
 
 function docsPillar(eventId: string, scriptState: PillarState): Pillar {
-    const n = getDocs(eventId).length;
+    // Buổi-thuộc-chuỗi kế thừa cả kho tài liệu tích lũy của chuỗi (doc 30); một lần → kho riêng buổi.
+    const conf = getEvent(eventId);
+    const fromSeries = !!conf?.seriesId;
+    const n = conf ? effectiveDocs(conf).length : getDocs(eventId).length;
     let state: PillarState;
     let detail: string;
     if (n === 0) { state = 'missing'; detail = 'Chưa nạp tài liệu nguồn cho buổi này'; }
-    else if (scriptState === 'full') { state = 'full'; detail = `${n} tệp · đã đưa vào kịch bản đang chạy`; }
-    else { state = 'generic'; detail = `${n} tệp trong kho — CHƯA chắc đã vào matcher (cần "Tách vào Kịch bản" + Đồng bộ)`; }
+    else if (scriptState === 'full') { state = 'full'; detail = `${n} tệp${fromSeries ? ' (kho chuỗi)' : ''} · đã đưa vào kịch bản đang chạy`; }
+    else { state = 'generic'; detail = `${n} tệp${fromSeries ? ' từ kho chuỗi' : ' trong kho'} — CHƯA chắc đã vào matcher (cần "Tách vào Kịch bản" + Đồng bộ)`; }
     return { key: 'docs', label: 'Tài liệu nguồn', icon: 'folder_open', state, detail, count: n, to: '/documents', cta: 'Mở tài liệu' };
 }
 

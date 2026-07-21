@@ -19,6 +19,7 @@ export interface Conference {
     booker: string;      // người book lịch
     agenda?: string;     // nội dung
     speakers: Speaker[];
+    seriesId?: string;   // thuộc Chuỗi hội nghị (doc 30). Vắng ⇒ sự kiện MỘT LẦN (mặc định).
     createdAt: string;   // ISO — auto
 }
 
@@ -43,6 +44,7 @@ function normConf(c: unknown): Conference {
         title: str(o.title), date: str(o.date), startTime: str(o.startTime), endTime: str(o.endTime),
         booker: str(o.booker), agenda: str(o.agenda),
         speakers: Array.isArray(o.speakers) ? o.speakers.map(normSpeaker) : [],
+        seriesId: str(o.seriesId) || undefined,   // vắng ⇒ một lần (lịch cũ nạp nguyên vẹn)
         createdAt: str(o.createdAt) || new Date().toISOString(),
     };
 }

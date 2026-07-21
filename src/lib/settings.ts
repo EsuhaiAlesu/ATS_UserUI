@@ -45,7 +45,7 @@ export function eventName(): string {
 // All Proyaku localStorage keys — used by the Data section to export / clear everything at once.
 // Static keys + a versioned migration flag + the event pointers; the PREFIXES cover the dynamic
 // per‑event keys (proyaku_script:<id>, proyaku_docs:<id>, …) so backup/clear never miss them.
-export const LOCAL_KEYS = ['proyaku_settings', 'proyaku_tts', 'proyaku_prep', 'proyaku_capscale', 'proyaku_speaker', 'proyaku_schedule', 'proyaku_speakers', 'proyaku_script', 'proyaku_script_sync', 'proyaku_active_event', 'proyaku_activation', 'proyaku_migrated_events', 'proyaku_rail_collapsed'];
+export const LOCAL_KEYS = ['proyaku_settings', 'proyaku_tts', 'proyaku_prep', 'proyaku_capscale', 'proyaku_speaker', 'proyaku_schedule', 'proyaku_speakers', 'proyaku_script', 'proyaku_script_sync', 'proyaku_active_event', 'proyaku_activation', 'proyaku_migrated_events', 'proyaku_rail_collapsed', 'proyaku_series', 'proyaku_series_migrated'];
 const LOCAL_PREFIXES = ['proyaku_script:', 'proyaku_script_sync:', 'proyaku_glossary:', 'proyaku_glossary_sync:', 'proyaku_docs:'];
 
 // Every proyaku key currently present: the static list + anything matching a per‑event prefix.
