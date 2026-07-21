@@ -1,7 +1,9 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
     getAudioDevices, getAudioOutputs, getBlocks, getLiveFast, playTestTone, setLiveFast,
 } from '../lib/api';
+import { getAudioProfiles, upsertAudioProfile, removeAudioProfile, newAudioProfileId } from '../lib/audioProfiles';
+import type { AudioProfile } from '../lib/audioProfiles';
 import type { AudioInputDevice, AudioOutputDevice, LiveConfig } from '../lib/api';
 import type { LiveLine } from '../lib/LiveSessionContext';
 import { isSessionActive, useLiveSession } from '../lib/LiveSessionContext';
@@ -114,6 +116,32 @@ const VolRow: React.FC<{ label: string; value: number; onChange: (v: number) => 
     </div>
 );
 
+// ── Nhận diện loại thiết bị từ tên (doc 31 · A2/A6) — icon + nhãn + cờ Bluetooth (để cảnh báo trễ) ──
+type DeviceKind = { icon: string; label: string; bt: boolean };
+const deviceKind = (name?: string): DeviceKind => {
+    const n = (name ?? '').toLowerCase();
+    if (/blue\s?tooth|airpod|handsfree|a2dp|\bbt\b/.test(n)) return { icon: 'bluetooth', label: 'Bluetooth', bt: true };
+    if (/dante|loopback|aggregate|blackhole|soundflower|virtual|ảo/.test(n)) return { icon: 'lan', label: 'Ảo / mạng', bt: false };
+    if (/usb/.test(n)) return { icon: 'usb', label: 'USB', bt: false };
+    if (/hdmi|display|monitor/.test(n)) return { icon: 'tv', label: 'HDMI', bt: false };
+    if (/built[\s-]?in|macbook|internal|imac|mac\s?studio|mac\s?mini|tích hợp/.test(n)) return { icon: 'laptop_mac', label: 'Tích hợp', bt: false };
+    return { icon: 'speaker', label: 'Loa', bt: false };
+};
+
+// Trạng thái trợ lý kiểm tra loa (A3).
+type CheckStatus = 'idle' | 'playing' | 'ok' | 'fail';
+
+// Nhãn vùng loa (A5) — lưu tại máy.
+const loadLabels = (): { vi: string; ja: string } => {
+    try { const v = JSON.parse(localStorage.getItem('proyaku_audio_labels') || '{}'); return { vi: String(v.vi ?? ''), ja: String(v.ja ?? '') }; }
+    catch { return { vi: '', ja: '' }; }
+};
+
+const hhmmNow = (): string => {
+    const d = new Date();
+    return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+};
+
 const AudioRouting: React.FC = () => {
     const session = useLiveSession();
     const { eventId, event } = useActiveEvent();
@@ -147,6 +175,12 @@ const AudioRouting: React.FC = () => {
     const [panel, setPanel] = useState<null | 'speed' | 'speaker' | 'volume'>(null);
     // Âm lượng ngõ ra (0–100% mỗi kênh + tổng). Lưu tại máy; hot-apply giữa phiên; gửi trong config lúc BẮT ĐẦU.
     const [vols, setVols] = useState<VolSet>(loadVols);
+    // Nhãn vùng loa (A5) · trạng thái trợ lý kiểm tra loa (A3) · hồ sơ âm thanh (A4) · quét thiết bị (A1).
+    const [labels, setLabels] = useState<{ vi: string; ja: string }>(loadLabels);
+    const [checkState, setCheckState] = useState<{ vi: CheckStatus; ja: CheckStatus }>({ vi: 'idle', ja: 'idle' });
+    const [profiles, setProfiles] = useState<AudioProfile[]>(getAudioProfiles);
+    const [scanning, setScanning] = useState(false);
+    const [lastScan, setLastScan] = useState('');
     // Người nói roster for the dispatch popover: the reusable Bộ nhớ library (spec 1.7) FIRST, then any
     // speakers from today's/last scheduled conference not already in the library (dedupe by name).
     // Frozen at mount (like the rest of the console) — set the library up pre‑event.
@@ -163,21 +197,29 @@ const AudioRouting: React.FC = () => {
         return [...lib, ...extra];
     }, []);
 
+    // A1: quét/nạp lại danh sách thiết bị (nhặt loa BT/USB vừa ghép ở macOS). GIỮ nguyên lựa chọn hiện tại.
+    const rescanDevices = useCallback(async () => {
+        setScanning(true);
+        try {
+            const [d, o] = await Promise.all([getAudioDevices(), getAudioOutputs()]);
+            setInputs(d.devices);
+            setDeviceError(d.error ?? null);
+            setInputDevice((cur) => cur ?? d.default ?? d.devices[0]?.index ?? null);
+            setOutputs(o.devices);
+            setOutVi((cur) => cur ?? o.default ?? o.devices[0]?.index ?? null);
+            setOutJa((cur) => cur ?? o.default ?? o.devices[0]?.index ?? null);
+            // Topo thiết bị có thể đã đổi (index trỏ sang loa khác) → xoá "đã nghe rõ" cũ, phải kiểm lại.
+            setCheckState({ vi: 'idle', ja: 'idle' });
+        } catch (e) {
+            setDeviceError(String(e));
+        } finally {
+            setScanning(false);
+            setLastScan(hhmmNow());
+        }
+    }, []);
+
     useEffect(() => {
-        getAudioDevices()
-            .then((d) => {
-                setInputs(d.devices);
-                setDeviceError(d.error ?? null);
-                setInputDevice((cur) => cur ?? d.default ?? d.devices[0]?.index ?? null);
-            })
-            .catch((e) => setDeviceError(String(e)));
-        getAudioOutputs()
-            .then((d) => {
-                setOutputs(d.devices);
-                setOutVi((cur) => cur ?? d.default ?? d.devices[0]?.index ?? null);
-                setOutJa((cur) => cur ?? d.default ?? d.devices[0]?.index ?? null);
-            })
-            .catch(() => { /* surfaced via deviceError / offline badge */ });
+        rescanDevices();
         getBlocks()
             .then(({ blocks }) => {
                 const opts = (type: string) =>
@@ -191,7 +233,7 @@ const AudioRouting: React.FC = () => {
             })
             .catch(() => { /* model pickers stay empty until backend is up */ });
         getLiveFast().then((r) => setFastMode(r.fast)).catch(() => { /* default off */ });
-    }, []);
+    }, [rescanDevices]);
 
     // VU meter: the live session owns the mic while running; otherwise open a dedicated meter stream.
     const meter = useMeter(active ? null : inputDevice);
@@ -222,6 +264,48 @@ const AudioRouting: React.FC = () => {
         }
         setTimeout(() => setToneStatus((s) => ({ ...s, [channel]: '' })), 2500);
     };
+
+    // A3 — Trợ lý kiểm tra loa: phát thử rồi để người vận hành xác nhận nghe rõ / không.
+    const startCheck = (ch: 'vi' | 'ja') => { setCheckState((s) => ({ ...s, [ch]: 'playing' })); handleTestTone(ch); };
+    const confirmCheck = (ch: 'vi' | 'ja', ok: boolean) => setCheckState((s) => ({ ...s, [ch]: ok ? 'ok' : 'fail' }));
+    // Đổi loa → hủy kết quả kiểm tra cũ (loa khác phải nghe lại).
+    const pickOut = (ch: 'vi' | 'ja', index: number) => {
+        (ch === 'vi' ? setOutVi : setOutJa)(index);
+        setCheckState((s) => ({ ...s, [ch]: 'idle' }));
+    };
+
+    // A5 — Nhãn vùng loa (lưu tại máy).
+    const saveLabel = (ch: 'vi' | 'ja', text: string) => {
+        setLabels((prev) => {
+            const next = { ...prev, [ch]: text };
+            try { localStorage.setItem('proyaku_audio_labels', JSON.stringify(next)); } catch { /* ignore */ }
+            return next;
+        });
+    };
+
+    // A4 — Hồ sơ âm thanh theo hội trường.
+    const saveCurrentProfile = () => {
+        const name = window.prompt('Tên hồ sơ âm thanh (vd: "Hội trường A")')?.trim();
+        if (!name) return;
+        const existing = profiles.find((p) => p.name.toLowerCase() === name.toLowerCase());
+        const prof: AudioProfile = {
+            id: existing?.id ?? newAudioProfileId(),
+            name, inputDevice, outVi, outJa, vols, labelVi: labels.vi, labelJa: labels.ja, updatedAt: Date.now(),
+        };
+        setProfiles(upsertAudioProfile(prof));
+    };
+    const applyProfile = (p: AudioProfile) => {
+        setInputDevice(p.inputDevice);
+        setOutVi(p.outVi); setOutJa(p.outJa);
+        setVols(p.vols);
+        try { localStorage.setItem('proyaku_audio_vol', JSON.stringify(p.vols)); } catch { /* ignore */ }
+        const nextLabels = { vi: p.labelVi, ja: p.labelJa };
+        setLabels(nextLabels);
+        try { localStorage.setItem('proyaku_audio_labels', JSON.stringify(nextLabels)); } catch { /* ignore */ }
+        setCheckState({ vi: 'idle', ja: 'idle' });
+        session.sendCommand({ audio: { gain: gainsFrom(p.vols) } });
+    };
+    const deleteProfile = (id: string) => { if (window.confirm('Xoá hồ sơ âm thanh này?')) setProfiles(removeAudioProfile(id)); };
 
     const handleToggleFast = async () => {
         try {
@@ -333,13 +417,17 @@ const AudioRouting: React.FC = () => {
     };
 
     // --- A3.5: pre-flight readiness ---
+    // A7: kiểm cả việc thiết bị đã chọn CÒN trong danh sách (rút dây / mất BT sau khi quét sẽ rớt kiểm tra).
+    const micReady = inputDevice !== null && inputs.some((d) => d.index === inputDevice);
+    const viReady = outVi !== null && outputs.some((d) => d.index === outVi);
+    const jaReady = outJa !== null && outputs.some((d) => d.index === outJa);
     const preflight = [
         { ok: session.backendOnline, label: 'Backend online' },
-        { ok: inputDevice !== null, label: 'Đã chọn mic' },
+        { ok: micReady, label: 'Mic sẵn sàng' },
         { ok: !!sttModel, label: 'Model nhận dạng (ASR)' },
         { ok: !!mtModel, label: 'Model dịch (MT)' },
-        { ok: outVi !== null, label: 'Ngõ ra VI' },
-        { ok: outJa !== null, label: 'Ngõ ra JA' },
+        { ok: viReady, label: 'Loa VI sẵn sàng' },
+        { ok: jaReady, label: 'Loa JA sẵn sàng' },
         { ok: outVi === null || outJa === null || outVi !== outJa, label: 'VI ≠ JA (khác loa)' },
     ];
     const preflightPass = preflight.filter((i) => i.ok).length;
@@ -376,6 +464,53 @@ const AudioRouting: React.FC = () => {
     const jaLive = langLines(session.lines, 'ja');
     const setupPhase = session.status === 'connecting' || session.status === 'warming';
     const openWall = () => window.open('/stream', 'proyaku-wall');
+
+    // Một kênh loa trong ngăn Cài đặt: chọn thiết bị + loại/Bluetooth (A2/A6) + nhãn vùng (A5)
+    // + âm lượng (B1) + trợ lý kiểm tra loa (A3).
+    const renderOutput = (ch: 'vi' | 'ja') => {
+        const dir = ch === 'vi' ? 'JA → VI' : 'VI → JA';
+        const val = ch === 'vi' ? outVi : outJa;
+        const present = val !== null && outputs.some((d) => d.index === val);
+        const kind = deviceKind(outputs.find((d) => d.index === val)?.name);
+        const st = checkState[ch];
+        return (
+            <div className="space-y-2">
+                <div className="flex justify-between items-center"><label className="font-label-caps text-label-caps text-on-surface-variant">Loa {ch.toUpperCase()}</label><span className="font-label-caps text-label-caps text-on-surface-variant">{dir}</span></div>
+                <select value={present ? String(val) : ''} onChange={(e) => pickOut(ch, Number(e.target.value))} disabled={active} className={SELECT_CLS}>
+                    {!present && <option value="" disabled>{outputs.length === 0 ? 'Chưa thấy loa' : '— Chọn lại loa —'}</option>}
+                    {outputs.map((d) => <option key={d.index} value={d.index}>{d.name}</option>)}
+                </select>
+                {present && (
+                    <div className={`flex items-start gap-1.5 text-[11px] ${kind.bt ? 'text-primary' : 'text-on-surface-variant'}`}>
+                        <span className="material-symbols-outlined text-[14px] shrink-0" aria-hidden="true">{kind.icon}</span>
+                        <span>{kind.label}{kind.bt && ' — độ trễ cao, không nên dùng cho dịch trực tiếp gala'}</span>
+                    </div>
+                )}
+                <input value={ch === 'vi' ? labels.vi : labels.ja} onChange={(e) => saveLabel(ch, e.target.value)}
+                    placeholder="Nhãn vùng (vd: Sân khấu)"
+                    className="field-lux transition-shadow w-full bg-surface text-on-surface border border-outline-variant rounded px-3 py-1.5 text-xs focus:border-secondary focus:outline-none placeholder:text-on-surface-variant/60" />
+                <VolRow label="Âm lượng" value={ch === 'vi' ? vols.vi : vols.ja} onChange={(v) => applyVol(ch === 'vi' ? { vi: v } : { ja: v })} />
+                {st === 'playing' ? (
+                    <div className="flex items-center gap-2">
+                        <span className="text-[11px] text-on-surface-variant flex-1">Đang phát — anh/chị nghe rõ?</span>
+                        <button onClick={() => confirmCheck(ch, true)} className="rounded-lg border border-secondary text-secondary px-2.5 py-1 text-xs hover:bg-secondary/10 transition-colors">Nghe rõ</button>
+                        <button onClick={() => confirmCheck(ch, false)} className="rounded-lg border border-error text-error px-2.5 py-1 text-xs hover:bg-error/10 transition-colors">Không nghe</button>
+                    </div>
+                ) : (
+                    <div className="flex items-center gap-2 flex-wrap">
+                        <button onClick={() => startCheck(ch)} disabled={val === null || !session.backendOnline}
+                            className="inline-flex items-center gap-1.5 rounded-lg border border-outline-variant text-on-surface-variant px-3 py-1.5 text-xs hover:text-primary hover:border-primary transition-colors disabled:opacity-40">
+                            <span className="material-symbols-outlined text-[16px]" aria-hidden="true">volume_up</span>
+                            {st === 'idle' ? 'Kiểm tra loa' : 'Kiểm tra lại'}
+                        </button>
+                        {st === 'ok' && <span className="inline-flex items-center gap-1 text-[11px] text-secondary"><span className="material-symbols-outlined text-[14px]" aria-hidden="true">check_circle</span>Đã nghe rõ</span>}
+                        {st === 'fail' && <span className="inline-flex items-center gap-1 text-[11px] text-error"><span className="material-symbols-outlined text-[14px]" aria-hidden="true">error</span>Chưa nghe được</span>}
+                        {toneStatus[ch] && <span className="text-[11px] text-on-surface-variant">{toneStatus[ch]}</span>}
+                    </div>
+                )}
+            </div>
+        );
+    };
 
     return (
         <div className="h-full flex flex-col text-on-background overflow-hidden relative">
@@ -687,13 +822,23 @@ const AudioRouting: React.FC = () => {
 
                             <div className="h-px bg-outline-variant"></div>
 
+                            {/* A1 — Quét lại thiết bị (nhặt loa BT/USB vừa ghép ở macOS) */}
+                            <div className="flex items-center justify-between gap-2">
+                                <span className="font-label-caps text-label-caps text-on-surface-variant">{lastScan ? `Đã quét lúc ${lastScan}` : 'Thiết bị'}</span>
+                                <button onClick={rescanDevices} disabled={scanning}
+                                    className="inline-flex items-center gap-1.5 rounded-lg border border-outline-variant text-on-surface-variant px-3 py-1.5 text-xs hover:text-primary hover:border-primary transition-colors disabled:opacity-50">
+                                    <span className={`material-symbols-outlined text-[16px] ${scanning ? 'animate-spin' : ''}`} aria-hidden="true">{scanning ? 'progress_activity' : 'refresh'}</span>
+                                    {scanning ? 'Đang quét…' : 'Quét lại thiết bị'}
+                                </button>
+                            </div>
+
                             {/* Source */}
                             <section className="space-y-3">
                                 <div className="flex items-center gap-2"><span className="material-symbols-outlined text-on-surface-variant" aria-hidden="true">mic_external_on</span><h3 className="font-label-caps text-label-caps text-on-surface">Nguồn vào</h3></div>
                                 <div>
                                     <label className="font-label-caps text-label-caps text-on-surface-variant block mb-1.5">Micro</label>
-                                    <select value={inputDevice ?? ''} onChange={(e) => setInputDevice(Number(e.target.value))} disabled={active} className={SELECT_CLS}>
-                                        {inputs.length === 0 && <option value="">Chưa thấy thiết bị vào</option>}
+                                    <select value={micReady ? String(inputDevice) : ''} onChange={(e) => setInputDevice(Number(e.target.value))} disabled={active} className={SELECT_CLS}>
+                                        {!micReady && <option value="" disabled>{inputs.length === 0 ? 'Chưa thấy thiết bị vào' : '— Chọn lại micro —'}</option>}
                                         {inputs.map((d) => <option key={d.index} value={d.index}>{d.name}</option>)}
                                     </select>
                                 </div>
@@ -723,27 +868,34 @@ const AudioRouting: React.FC = () => {
                                 <p className="text-xs text-on-surface-variant leading-relaxed">TTS đọc tiếng bật/tắt ở trang <span className="text-on-surface">Giọng đọc</span>. Hậu-kiểm &amp; hotword luôn bật.</p>
                             </section>
 
-                            {/* Outputs */}
-                            <section className="space-y-3">
+                            {/* Outputs — loại loa/BT (A2/A6) · nhãn vùng (A5) · âm lượng (B1) · kiểm tra loa (A3) */}
+                            <section className="space-y-4">
                                 <div className="flex items-center gap-2"><span className="material-symbols-outlined text-on-surface-variant" aria-hidden="true">speaker</span><h3 className="font-label-caps text-label-caps text-on-surface">Ngõ ra</h3></div>
-                                <div>
-                                    <div className="flex justify-between items-center mb-1.5"><label className="font-label-caps text-label-caps text-on-surface-variant">Loa VI</label><span className="font-label-caps text-label-caps text-on-surface-variant">JA → VI</span></div>
-                                    <select value={outVi ?? ''} onChange={(e) => setOutVi(Number(e.target.value))} disabled={active} className={SELECT_CLS}>
-                                        {outputs.length === 0 && <option value="">Chưa thấy loa</option>}
-                                        {outputs.map((d) => <option key={d.index} value={d.index}>{d.name}</option>)}
-                                    </select>
-                                    <button onClick={() => handleTestTone('vi')} className="mt-2 w-full border border-outline-variant text-on-surface-variant py-1.5 rounded-DEFAULT text-xs hover:text-primary hover:border-primary transition-colors">{toneStatus.vi || 'Test loa VI'}</button>
-                                    <div className="mt-2.5"><VolRow label="Âm lượng" value={vols.vi} onChange={(v) => applyVol({ vi: v })} /></div>
-                                </div>
-                                <div>
-                                    <div className="flex justify-between items-center mb-1.5"><label className="font-label-caps text-label-caps text-on-surface-variant">Loa JA</label><span className="font-label-caps text-label-caps text-on-surface-variant">VI → JA</span></div>
-                                    <select value={outJa ?? ''} onChange={(e) => setOutJa(Number(e.target.value))} disabled={active} className={SELECT_CLS}>
-                                        {outputs.length === 0 && <option value="">Chưa thấy loa</option>}
-                                        {outputs.map((d) => <option key={d.index} value={d.index}>{d.name}</option>)}
-                                    </select>
-                                    <button onClick={() => handleTestTone('ja')} className="mt-2 w-full border border-outline-variant text-on-surface-variant py-1.5 rounded-DEFAULT text-xs hover:text-primary hover:border-primary transition-colors">{toneStatus.ja || 'Test loa JA'}</button>
-                                    <div className="mt-2.5"><VolRow label="Âm lượng" value={vols.ja} onChange={(v) => applyVol({ ja: v })} /></div>
-                                </div>
+                                {renderOutput('vi')}
+                                <div className="h-px bg-outline-variant/60"></div>
+                                {renderOutput('ja')}
+                            </section>
+
+                            {/* A4 — Hồ sơ âm thanh theo hội trường */}
+                            <section className="space-y-2.5">
+                                <div className="flex items-center gap-2"><span className="material-symbols-outlined text-on-surface-variant" aria-hidden="true">bookmarks</span><h3 className="font-label-caps text-label-caps text-on-surface">Hồ sơ âm thanh</h3></div>
+                                {profiles.length === 0 ? (
+                                    <p className="text-xs text-on-surface-variant leading-relaxed">Chưa có hồ sơ. Lưu bộ thiết bị + âm lượng + nhãn hiện tại để gọi lại nhanh cho từng hội trường.</p>
+                                ) : (
+                                    <div className="space-y-1.5">
+                                        {profiles.map((p) => (
+                                            <div key={p.id} className="flex items-center gap-2 rounded-lg border border-outline-variant px-3 py-2">
+                                                <span className="material-symbols-outlined text-[18px] text-on-surface-variant shrink-0" aria-hidden="true">tune</span>
+                                                <span className="flex-1 min-w-0 text-sm text-on-surface truncate">{p.name}</span>
+                                                <button onClick={() => applyProfile(p)} disabled={active} title={active ? 'Đang chạy — dừng phiên để đổi thiết bị' : 'Áp dụng hồ sơ'} className="rounded-lg border border-secondary text-secondary px-2.5 py-1 text-xs hover:bg-secondary/10 transition-colors disabled:opacity-40">Áp dụng</button>
+                                                <button onClick={() => deleteProfile(p.id)} title="Xoá hồ sơ" className="w-7 h-7 flex items-center justify-center rounded-lg text-on-surface-variant hover:text-error transition-colors"><span className="material-symbols-outlined text-[18px]" aria-hidden="true">delete</span></button>
+                                            </div>
+                                        ))}
+                                    </div>
+                                )}
+                                <button onClick={saveCurrentProfile} className="inline-flex items-center gap-1.5 rounded-lg border border-outline-variant text-on-surface-variant px-3 py-1.5 text-xs hover:text-primary hover:border-primary transition-colors">
+                                    <span className="material-symbols-outlined text-[16px]" aria-hidden="true">save</span>Lưu hồ sơ hiện tại
+                                </button>
                             </section>
                         </div>
                     </aside>
