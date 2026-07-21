@@ -50,10 +50,10 @@ const App: React.FC = () => {
               <Route path="/schedule" element={<SchedulePlanner />} />
               <Route path="/speakers" element={<SpeakerMemory />} />
               <Route path="/documents" element={<DocumentsLibrary />} />
+              {/* Dịch hội nghị — TRONG shell: giữ headbar + pill "Dịch hội nghị" sáng; thanh điều khiển
+                  riêng của bàn điều khiển đóng vai side menu (OperatorLayout ẩn sidebar shell cho menu ops). */}
+              <Route path="/audio" element={<AudioRouting />} />
             </Route>
-
-            {/* Bàn điều khiển — console TOÀN MÀN HÌNH độc lập (ngoài shell): rail điều khiển trái + monitor giữa. */}
-            <Route path="/audio" element={<AudioRouting />} />
 
             {/* Audience / ceremonial surfaces are full-screen — no operator chrome. */}
             <Route path="/reveal" element={<RevealMoment />} />

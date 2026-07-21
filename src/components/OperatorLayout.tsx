@@ -165,6 +165,9 @@ const OperatorLayout: React.FC = () => {
 
             {/* ══════════ BODY: contextual sidebar + content ══════════ */}
             <div className="flex-1 min-h-0 flex overflow-hidden">
+                {/* Menu "Dịch hội nghị" (/audio) tự có thanh điều khiển riêng làm side menu → KHÔNG hiện
+                    sidebar ngữ cảnh của shell ở đây (tránh 2 thanh trùng nhau). Headbar vẫn giữ nguyên. */}
+                {cur.key !== 'ops' && (
                 <aside className={`hidden md:flex flex-col shrink-0 border-r border-outline-variant shell-rail rail-aside font-jakarta overflow-hidden ${collapsed ? 'w-16' : 'w-[248px]'}`}>
                     {collapsed
                         ? <div className="mx-auto my-3 h-px w-6 bg-outline-variant" aria-hidden="true"></div>
@@ -207,6 +210,7 @@ const OperatorLayout: React.FC = () => {
                         </button>
                     </div>
                 </aside>
+                )}
 
                 <div className="flex-1 min-w-0 overflow-hidden flex flex-col">
                     <Outlet />

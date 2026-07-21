@@ -613,20 +613,12 @@ const AudioRouting: React.FC = () => {
     };
 
     return (
-        <div className="h-screen w-screen flex text-on-background overflow-hidden relative">
+        <div className="h-full w-full flex text-on-background overflow-hidden relative">
             {/* ══════════ RAIL ĐIỀU KHIỂN (trái) — mọi chức năng, không phải rời màn ══════════ */}
             <aside className="shrink-0 w-[248px] h-full flex flex-col border-r border-outline-variant bg-surface-container-lowest">
-                {/* Đầu rail: thương hiệu + sự kiện đang chuẩn bị */}
-                <div className="shrink-0 px-4 pt-4 pb-3 border-b border-outline-variant">
-                    <span className="font-sora font-bold text-[15px] tracking-[0.14em] text-on-surface select-none">PROYAKU</span>
-                    <div className="mt-1.5 flex items-center gap-1.5 text-xs text-on-surface-variant">
-                        <span className="material-symbols-outlined text-[15px] shrink-0" aria-hidden="true">graphic_eq</span>
-                        <span className="truncate">{event?.title?.trim() || 'Chưa chọn sự kiện'}</span>
-                    </div>
-                </div>
-
+                {/* Thương hiệu + sự kiện đã nằm ở headbar shell → rail vào thẳng các nhóm chức năng (không lặp). */}
                 {/* Cuộn: các nhóm chức năng */}
-                <div className="flex-1 overflow-y-auto p-2.5 space-y-3.5">
+                <div className="flex-1 overflow-y-auto p-2.5 pt-3 space-y-3.5">
                     {/* A · PHIÊN — bắt đầu / dừng (giữ) */}
                     {active ? (
                         <button type="button" onPointerDown={startHold} onPointerUp={cancelHold} onPointerLeave={cancelHold} title="Giữ để dừng phiên"
