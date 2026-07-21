@@ -458,22 +458,24 @@ const PrepDesk: React.FC = () => {
                 <button onClick={() => setTick((t) => t + 1)} disabled={data.loading} className="border border-outline-variant text-on-surface-variant px-3 py-1.5 text-sm rounded-DEFAULT hover:text-primary hover:border-primary disabled:opacity-40">{data.loading ? 'Đang đo…' : 'Đo lại'}</button>
             </PageHeader>
 
+            {/* Toàn bộ nội dung dưới head bar cuộn CẤP TRANG (dossier có thể cao → không cắt nội dung ở dưới) */}
+            <div className="flex-1 min-h-0 overflow-y-auto">
             {/* Hồ sơ dữ liệu sự kiện + băng cảnh hoạt (doc 29 · P0 — làm lộ rủi ro "dùng dữ liệu chung") */}
-            <div className="shrink-0 px-5 md:px-8 pt-4 space-y-2.5">
+            <div className="px-5 md:px-8 pt-4 space-y-2.5">
                 <ActivationBanner />
                 <EventDataDossier be={{ glossaryCount: data.glossary?.length, scriptApproved: data.script?.filter((r) => r.status === 'approved' && r.dst.trim()).length }} />
             </div>
 
-            <div className="flex-1 flex min-h-0 gap-5 p-5 md:p-8 overflow-hidden">
-                {/* CỘT 1 — menu pha: 3 ô chia đều chiều cao; active = viền + màu + icon + font to hơn */}
-                <aside className="w-60 xl:w-72 shrink-0 flex flex-col gap-3">
+            <div className="flex gap-5 p-5 md:p-8 items-start">
+                {/* CỘT 1 — menu pha: 3 ô xếp dọc; active = viền + màu + icon + font to hơn */}
+                <aside className="w-60 xl:w-72 shrink-0 flex flex-col gap-3 md:sticky md:top-0">
                     {PHASES.map((ph, pi) => {
                         const c = phaseCount(ph.key);
                         const activeP = selPhase === ph.key;
                         return (
                             <button key={ph.key} onClick={() => setSelPhase(ph.key)} aria-pressed={activeP}
                                 style={activeP ? { boxShadow: '0 16px 36px -12px rgba(244,208,106,0.30), 0 6px 16px -6px rgba(0,0,0,0.55)' } : undefined}
-                                className={`group relative flex-1 flex flex-col justify-between rounded-2xl border-2 p-6 text-left transition-all duration-200 ease-out will-change-transform motion-reduce:transition-none motion-reduce:hover:translate-y-0 ${activeP
+                                className={`group relative flex flex-col justify-between min-h-[150px] rounded-2xl border-2 p-6 text-left transition-all duration-200 ease-out will-change-transform motion-reduce:transition-none motion-reduce:hover:translate-y-0 ${activeP
                                     ? 'bg-surface-container-high bg-gradient-to-b from-surface-container-high to-surface-container border-secondary -translate-y-1'
                                     : 'bg-surface-container/40 border-outline-variant hover:bg-surface-container hover:border-outline hover:-translate-y-0.5'}`}>
                                 {/* Trên: icon (đưa vào khối bo tròn) + số thứ tự pha */}
@@ -501,7 +503,7 @@ const PrepDesk: React.FC = () => {
                 </aside>
 
                 {/* CỘT 2–3 — verdict + thẻ nội dung của pha đang chọn */}
-                <div className="flex-1 flex flex-col min-h-0">
+                <div className="flex-1 min-w-0 flex flex-col">
                     <div className={`shrink-0 rounded-2xl border p-5 flex items-center gap-5 ${tone.wrap}`}>
                         <Ring pct={blockPct} size={64} />
                         <div className="flex-1 min-w-0">
@@ -522,7 +524,7 @@ const PrepDesk: React.FC = () => {
                                 : null}
                     </div>
 
-                    <div className="flex-1 overflow-y-auto min-h-0 -mr-2 pr-2 pt-5 space-y-4">
+                    <div className="pt-5 space-y-4">
                         {/* In-event quick actions */}
                     {selPhase === 'in' && (
                         <div className="grid sm:grid-cols-3 gap-3">
@@ -573,6 +575,7 @@ const PrepDesk: React.FC = () => {
                         )}
                     </div>
                 </div>
+            </div>
             </div>
 
             {openSignal && (
