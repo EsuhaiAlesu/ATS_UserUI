@@ -45,7 +45,10 @@ export function eventName(): string {
 // All Proyaku localStorage keys — used by the Data section to export / clear everything at once.
 // Static keys + a versioned migration flag + the event pointers; the PREFIXES cover the dynamic
 // per‑event keys (proyaku_script:<id>, proyaku_docs:<id>, …) so backup/clear never miss them.
-export const LOCAL_KEYS = ['proyaku_settings', 'proyaku_tts', 'proyaku_prep', 'proyaku_capscale', 'proyaku_speaker', 'proyaku_schedule', 'proyaku_speakers', 'proyaku_script', 'proyaku_script_sync', 'proyaku_active_event', 'proyaku_activation', 'proyaku_migrated_events', 'proyaku_rail_collapsed', 'proyaku_series', 'proyaku_series_migrated'];
+export const LOCAL_KEYS = ['proyaku_settings', 'proyaku_tts', 'proyaku_prep', 'proyaku_capscale', 'proyaku_speaker', 'proyaku_schedule', 'proyaku_speakers', 'proyaku_script', 'proyaku_script_sync', 'proyaku_active_event', 'proyaku_activation', 'proyaku_migrated_events', 'proyaku_rail_collapsed', 'proyaku_series', 'proyaku_series_migrated',
+    // Cấu hình âm thanh + định tuyến phụ đề đa màn (nếu thiếu ở đây, sao lưu/mang sang máy gala sẽ MẤT
+    // định tuyến loa VI/JA, âm lượng, nhãn vùng, phân màn phụ đề → phải đấu lại tay dưới áp lực).
+    'proyaku_audio_profiles', 'proyaku_audio_vol', 'proyaku_audio_labels', 'proyaku_subtitle_outputs'];
 const LOCAL_PREFIXES = ['proyaku_script:', 'proyaku_script_sync:', 'proyaku_glossary:', 'proyaku_glossary_sync:', 'proyaku_docs:'];
 
 // Every proyaku key currently present: the static list + anything matching a per‑event prefix.

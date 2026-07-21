@@ -1,8 +1,7 @@
-@import url('https://fonts.googleapis.com/css2?family=Be+Vietnam+Pro:wght@400;600;700&family=Noto+Sans+JP:wght@400;500;700&display=swap');
-@import url('https://fonts.googleapis.com/css2?family=Cinzel:wght@500;700&family=Montserrat:wght@300;400&display=swap');
-@import url('https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap');
-/* Shell typography: Sora (Latin wordmark only) + Plus Jakarta Sans (Vietnamese-complete UI). */
-@import url('https://fonts.googleapis.com/css2?family=Sora:wght@600;700&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap');
+/* Font + icon (Material Symbols) TỰ LƯU TẠI MÁY — nạp qua <link href="/fonts/fonts.css"> ở index.html,
+   an toàn khi mạng hội trường cô lập (không còn phụ thuộc fonts.googleapis.com). Tiếng Nhật dùng
+   font hệ thống (Hiragino/Yu Gothic) vì Noto Sans JP bị chẻ thành hàng trăm mảnh CJK — xem .jp-text.
+   Shell: Sora (chữ ký Latin) + Plus Jakarta Sans (UI đủ tiếng Việt); nội dung: Be Vietnam Pro. */
 
 @tailwind base;
 @tailwind components;
@@ -239,7 +238,9 @@
 }
 
 /* Bilingual Stream Custom Utilities */
-.jp-text { font-family: 'Noto Sans JP', sans-serif !important; }
+/* Tiếng Nhật: 'Noto Sans JP' nếu máy có sẵn, nếu không → font Nhật hệ thống (Mac: Hiragino · Win: Yu Gothic/Meiryo).
+   KHÔNG tự-host Noto Sans JP (bị chẻ ~hàng trăm mảnh CJK) — fallback hệ thống đủ đẹp & an toàn offline. */
+.jp-text { font-family: 'Noto Sans JP', 'Hiragino Sans', 'Hiragino Kaku Gothic ProN', 'Yu Gothic', 'YuGothic', 'Meiryo', sans-serif !important; }
 
 .fade-oldest {
     opacity: 0.15;

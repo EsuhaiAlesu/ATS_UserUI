@@ -43,6 +43,9 @@ interface BusState {
     everStarted: boolean;
     hadSession: boolean;
     lines: LiveLine[];
+    // Cắt an toàn (live/freeze/slate): PHẢI nằm trong snapshot để cửa sổ màn LED mở lại/tải lại giữa
+    // lúc đang GIỮ HÌNH/AN TOÀN không mặc định về 'live' rồi nháy phụ đề trực tiếp ra khán giả.
+    audienceCut: AudienceCut;
 }
 
 interface LiveSessionValue {
@@ -217,6 +220,8 @@ export const LiveSessionProvider: React.FC<{ children: React.ReactNode }> = ({ c
                 setEverStarted(s.everStarted);
                 setHadSession(s.hadSession);
                 setLines(s.lines);
+                // Đồng bộ cắt an toàn ngay khi vào (cửa sổ mới/tải lại kế thừa đúng trạng thái GIỮ HÌNH/AN TOÀN).
+                if (s.audienceCut) setAudienceCutState(s.audienceCut);
             }
         };
         bus.postMessage({ type: 'hello' });   // ask any existing publisher for the current state
@@ -225,11 +230,11 @@ export const LiveSessionProvider: React.FC<{ children: React.ReactNode }> = ({ c
 
     // Publisher: keep the shared snapshot fresh and broadcast it to mirror windows on change.
     useEffect(() => {
-        latestStateRef.current = { status, warming, error, everStarted, hadSession, lines };
+        latestStateRef.current = { status, warming, error, everStarted, hadSession, lines, audienceCut };
         if (isPublisherRef.current) {
             busRef.current?.postMessage({ type: 'state', payload: latestStateRef.current });
         }
-    }, [status, warming, error, everStarted, hadSession, lines]);
+    }, [status, warming, error, everStarted, hadSession, lines, audienceCut]);
 
     const setAudienceCut = useCallback((cut: AudienceCut) => {
         setAudienceCutState(cut);
