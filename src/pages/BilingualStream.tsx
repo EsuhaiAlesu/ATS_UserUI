@@ -367,10 +367,16 @@ const BilingualStream: React.FC<Props> = ({ isEmbedded = false }) => {
         };
     }, []);
 
-    // Keyboard shortcuts: 1=both 2=stacked 3=VN 4=JA · S=swap · P=pop-out ·
+    // Keyboard shortcuts: 1=both 2=stacked 3=VN 4=JA · S=swap · P=pop-out · F=toàn màn hình ·
     // L=live G=freeze B=safe-slate (take-to-safe, broadcast to every screen).
     useEffect(() => {
         const onKey = (e: KeyboardEvent) => {
+            // An toàn gala: KHÔNG kích hoạt phím tắt khi đang gõ vào ô nhập (tên/chức danh diễn giả) —
+            // gõ 'b/g/l/s/p/f' sẽ vô tình cắt/blank/toàn-màn-hình MỌI màn khán giả. Cũng bỏ qua tổ hợp Ctrl/Cmd/Alt
+            // (Cmd+P/Cmd+S… là lệnh trình duyệt, không phải phím tắt của ta).
+            const t = e.target as HTMLElement | null;
+            if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable)) return;
+            if (e.ctrlKey || e.metaKey || e.altKey) return;
             switch (e.key) {
                 case '1': setMode('both'); break;
                 case '2': setMode('stacked'); break;
@@ -378,6 +384,11 @@ const BilingualStream: React.FC<Props> = ({ isEmbedded = false }) => {
                 case '4': setMode('ja'); break;
                 case 's': case 'S': setSwap((v) => !v); break;
                 case 'p': case 'P': openLanguageWindows(); break;
+                case 'f': case 'F':
+                    // F = toàn màn hình (bỏ viền trình duyệt trên màn khán giả). Cần thao tác phím trong chính cửa sổ.
+                    if (document.fullscreenElement) document.exitFullscreen?.().catch(() => { /* ignore */ });
+                    else document.documentElement.requestFullscreen?.().catch(() => { /* ignore */ });
+                    break;
                 case 'l': case 'L': setAudienceCut('live'); break;
                 case 'g': case 'G': setAudienceCut('freeze'); break;
                 case 'b': case 'B': setAudienceCut('slate'); break;

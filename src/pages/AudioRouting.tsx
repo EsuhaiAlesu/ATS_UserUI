@@ -143,7 +143,11 @@ const hhmmNow = (): string => {
 
 // ── Định tuyến phụ đề đa màn (doc 34 · Bước 1) — mỗi "màn" chọn ngôn ngữ, mở cửa sổ /stream tương ứng ──
 type SubMode = 'both' | 'stacked' | 'vi' | 'ja';
-type SubOutput = { id: string; label: string; enabled: boolean; mode: SubMode };
+type SubOutput = { id: string; label: string; enabled: boolean; mode: SubMode; screenIdx?: number };
+// Window Management API (Chrome/Edge 100+) — khai báo tối thiểu để không lệ thuộc phiên bản TS lib; LUÔN có fallback.
+interface WmScreen { availLeft: number; availTop: number; availWidth: number; availHeight: number; isPrimary: boolean; label: string }
+interface WmScreenDetails { screens: WmScreen[]; addEventListener?: (t: string, cb: () => void) => void }
+type ScreenSupport = 'idle' | 'unsupported' | 'single' | 'multi' | 'denied';
 const SUB_MODES: { v: SubMode; l: string }[] = [
     { v: 'both', l: 'Cả 2 (2 cột)' }, { v: 'stacked', l: 'Xếp dọc' }, { v: 'vi', l: 'Chỉ VI' }, { v: 'ja', l: 'Chỉ 日本語' },
 ];
@@ -193,8 +197,11 @@ const AudioRouting: React.FC = () => {
     const [ttsHasVoice] = useState(() => { const p = loadTtsPrefs(); return !!(p.vi || p.ja); }); // whether a voice was picked at Chuẩn bị · Giọng đọc
     const [speaker, setSpeaker] = useState(() => { try { return String(JSON.parse(localStorage.getItem('proyaku_speaker') || '{}').name || ''); } catch { return ''; } });
     const [panel, setPanel] = useState<null | 'speed' | 'speaker' | 'volume' | 'wall'>(null);
-    // Định tuyến phụ đề đa màn (doc 34 · Bước 1) — mặc định 3 màn (giữa cả 2 · trái VI · phải JA).
+    // Định tuyến phụ đề đa màn (doc 34) — mặc định 3 màn (giữa cả 2 · trái VI · phải JA).
     const [subOutputs, setSubOutputs] = useState<SubOutput[]>(loadSubOutputs);
+    // Bước 2: Window Management API — danh sách màn thật + trạng thái hỗ trợ.
+    const [screens, setScreens] = useState<WmScreen[]>([]);
+    const [screenSupport, setScreenSupport] = useState<ScreenSupport>('idle');
     // Âm lượng ngõ ra (0–100% mỗi kênh + tổng). Lưu tại máy; hot-apply giữa phiên; gửi trong config lúc BẮT ĐẦU.
     const [vols, setVols] = useState<VolSet>(loadVols);
     // Nhãn vùng loa (A5) · trạng thái trợ lý kiểm tra loa (A3) · hồ sơ âm thanh (A4) · quét thiết bị (A1).
@@ -487,18 +494,72 @@ const AudioRouting: React.FC = () => {
         setSubOutputs(next);
         try { localStorage.setItem('proyaku_subtitle_outputs', JSON.stringify(next)); } catch { /* ignore */ }
     };
-    // Mở một cửa sổ /stream cho MỖI màn đang bật (chia đều màn hiện tại; kéo mỗi cửa sổ sang đúng màn + Toàn màn hình).
+    // Bước 2: liệt kê MÀN THẬT qua Window Management API (Chrome/Edge). Có fallback đầy đủ.
+    const detectScreens = useCallback(async () => {
+        const wm = (window as unknown as { getScreenDetails?: () => Promise<WmScreenDetails> }).getScreenDetails;
+        const isExt = (window.screen as unknown as { isExtended?: boolean }).isExtended;
+        // Sau khi quét: bỏ gán màn nào trỏ RA NGOÀI số màn còn nhận diện được (đã rút màn → index cũ vô hiệu),
+        // tránh dropdown "blank mà vẫn giữ index" và tránh trỏ nhầm màn. n = số màn được phép gán (0 nếu chỉ 1 màn).
+        const reconcile = (n: number) => setSubOutputs((prev) => {
+            const next = prev.map((o) => (o.screenIdx != null && o.screenIdx >= n ? { ...o, screenIdx: undefined } : o));
+            if (!next.some((o, i) => o !== prev[i])) return prev;
+            try { localStorage.setItem('proyaku_subtitle_outputs', JSON.stringify(next)); } catch { /* ignore */ }
+            return next;
+        });
+        if (typeof wm !== 'function') { setScreens([]); setScreenSupport('unsupported'); return; }
+        if (isExt === false) { setScreens([]); setScreenSupport('single'); reconcile(0); return; }
+        try {
+            const d = await wm();
+            const list = Array.isArray(d.screens) ? d.screens : [];
+            const multi = list.length > 1;
+            setScreens(list);
+            setScreenSupport(multi ? 'multi' : 'single');
+            reconcile(multi ? list.length : 0);
+        } catch { setScreens([]); setScreenSupport('denied'); }
+    }, []);
+
+    // Nhớ cửa sổ đã mở theo từng "màn" (id) — để lần bấm sau ĐƯA ĐÚNG VỊ TRÍ, vì window.open tái dùng cửa sổ
+    // cùng tên và BỎ QUA chuỗi toạ độ (chỉ áp lúc TẠO MỚI). Không nhớ handle thì đổi màn gán rồi bấm lại sẽ vô hiệu.
+    const wallWinsRef = useRef<Record<string, { win: Window; url: string }>>({});
+    // Mở một cửa sổ /stream cho MỖI màn đang bật — đặt vào ĐÚNG màn nếu đã gán (Bước 2), nếu không thì chia đều màn hiện tại (Bước 1).
     const openSubOutputs = () => {
         const on = subOutputs.filter((o) => o.enabled);
         if (!on.length) return;
+        // Cảnh báo nếu hai màn cùng gán vào MỘT màn hình (sẽ chồng lên nhau, một ngôn ngữ bị che).
+        const assigned = on.map((o) => o.screenIdx).filter((v): v is number => v != null);
+        if (new Set(assigned).size < assigned.length &&
+            !window.confirm('Có hai màn phụ đề đang gán vào CÙNG một màn hình — chúng sẽ chồng lên nhau. Vẫn mở?')) return;
         const sw = window.screen.availWidth || window.innerWidth;
         const sh = window.screen.availHeight || window.innerHeight;
         const colW = Math.max(320, Math.round(sw / on.length));
         let opened = 0;
         on.forEach((o, i) => {
-            const q = o.mode === 'vi' ? 'lang=vi' : o.mode === 'ja' ? 'lang=ja' : `mode=${o.mode}`;
-            const win = window.open(`/stream?${q}&display=1&fill=1`, `proyaku-wall-${o.id}`, `popup=yes,width=${colW},height=${sh},left=${i * colW},top=0`);
-            if (win) { opened++; win.focus?.(); }
+            const single = o.mode === 'vi' || o.mode === 'ja';
+            const q = single ? `lang=${o.mode}` : `mode=${o.mode}`;
+            // Màn đơn-ngữ (VI/JA) phủ kín; màn "cả 2"/"xếp dọc" giữ 16:9 (fill=0) đúng thiết kế /stream.
+            const fill = single ? '1' : '0';
+            const scr = (o.screenIdx != null && screens[o.screenIdx]) ? screens[o.screenIdx] : null;
+            const left = scr ? scr.availLeft : i * colW;
+            const top = scr ? scr.availTop : 0;
+            const width = scr ? scr.availWidth : colW;
+            const height = scr ? scr.availHeight : sh;
+            const url = `/stream?${q}&display=1&fill=${fill}`;
+            const prev = wallWinsRef.current[o.id];
+            if (prev && !prev.win.closed) {
+                // Cửa sổ đang mở: chỉ điều hướng lại khi ĐỔI nội dung (tránh nháy/ngắt WS), luôn đưa về đúng màn + kích thước.
+                if (prev.url !== url) { try { prev.win.location.replace(url); prev.url = url; } catch { /* điều hướng bị chặn — bỏ qua */ } }
+                try { prev.win.moveTo(left, top); prev.win.resizeTo(width, height); } catch { /* trình duyệt hạn chế move/resize */ }
+                prev.win.focus?.();
+                opened++;
+            } else {
+                const win = window.open(url, `proyaku-wall-${o.id}`, `popup=yes,left=${left},top=${top},width=${width},height=${height}`);
+                if (win) {
+                    wallWinsRef.current[o.id] = { win, url };
+                    try { win.moveTo(left, top); win.resizeTo(width, height); } catch { /* ignore */ }
+                    win.focus?.();
+                    opened++;
+                }
+            }
         });
         // An toàn gala: đừng để mở hụt màn mà im lặng — báo rõ nếu pop-up bị chặn.
         if (opened < on.length) window.alert('Một số màn phụ đề không mở được — trình duyệt có thể đang chặn pop-up. Hãy cho phép pop-up cho trang này rồi bấm lại.');
@@ -780,6 +841,20 @@ const AudioRouting: React.FC = () => {
                                     <span className="font-label-caps text-label-caps text-on-surface-variant">XUẤT PHỤ ĐỀ — ĐỊNH TUYẾN MÀN</span>
                                     <button onClick={() => patchSubOutputs(DEFAULT_SUB_OUTPUTS)} className="text-label-md text-on-surface-variant hover:text-secondary">Mặc định</button>
                                 </div>
+                                {/* Bước 2: quét MÀN THẬT (Window Management API) + trạng thái */}
+                                <div className="flex items-center justify-between gap-2">
+                                    <span className="text-[11px] text-on-surface-variant flex items-center gap-1.5 min-w-0">
+                                        <span className={`material-symbols-outlined text-[15px] shrink-0 ${screenSupport === 'multi' ? 'text-secondary' : (screenSupport === 'denied' || screenSupport === 'unsupported') ? 'text-primary' : 'text-on-surface-variant'}`} aria-hidden="true">{screenSupport === 'multi' ? 'check_circle' : screenSupport === 'idle' ? 'devices' : 'info'}</span>
+                                        <span className="truncate">{screenSupport === 'multi' ? `Thấy ${screens.length} màn — chọn màn cho từng dòng`
+                                            : screenSupport === 'single' ? 'Chỉ thấy 1 màn — dùng chia đôi + kéo tay'
+                                            : screenSupport === 'denied' ? 'Chưa cấp quyền — dùng chia đôi + kéo tay'
+                                            : screenSupport === 'unsupported' ? 'Trình duyệt không hỗ trợ tự đặt màn'
+                                            : 'Bấm "Quét màn hình" để tự đặt đúng màn'}</span>
+                                    </span>
+                                    <button onClick={detectScreens} className="shrink-0 inline-flex items-center gap-1 rounded-lg border border-outline-variant text-on-surface-variant px-2.5 py-1 text-[11px] hover:text-primary hover:border-primary transition-colors">
+                                        <span className="material-symbols-outlined text-[15px]" aria-hidden="true">refresh</span>Quét màn hình
+                                    </button>
+                                </div>
                                 <div className="flex flex-col gap-1.5">
                                     {subOutputs.map((o, i) => (
                                         <div key={o.id} className={`flex items-center gap-2 rounded-lg border px-2.5 py-2 ${o.enabled ? 'border-outline-variant' : 'border-outline-variant/40 opacity-60'}`}>
@@ -788,11 +863,18 @@ const AudioRouting: React.FC = () => {
                                                 className={`shrink-0 w-6 h-6 rounded-md flex items-center justify-center transition-colors ${o.enabled ? 'bg-secondary text-on-secondary' : 'border border-outline-variant text-on-surface-variant'}`}>
                                                 <span className="material-symbols-outlined text-[16px]" aria-hidden="true">{o.enabled ? 'check' : 'remove'}</span>
                                             </button>
-                                            <span className="w-16 shrink-0 text-sm text-on-surface truncate">{o.label}</span>
+                                            <span className="w-14 shrink-0 text-sm text-on-surface truncate">{o.label}</span>
                                             <select value={o.mode} onChange={(e) => patchSubOutputs(subOutputs.map((x, j) => (j === i ? { ...x, mode: e.target.value as SubMode } : x)))}
                                                 className="flex-1 min-w-0 bg-surface border border-outline-variant rounded-lg px-2 py-1.5 text-sm text-on-surface focus:outline-none focus:border-secondary">
                                                 {SUB_MODES.map((m) => <option key={m.v} value={m.v}>{m.l}</option>)}
                                             </select>
+                                            {screens.length > 1 && (
+                                                <select value={o.screenIdx ?? ''} title="Gán vào màn hình" onChange={(e) => patchSubOutputs(subOutputs.map((x, j) => (j === i ? { ...x, screenIdx: e.target.value === '' ? undefined : Number(e.target.value) } : x)))}
+                                                    className="w-24 shrink-0 bg-surface border border-outline-variant rounded-lg px-2 py-1.5 text-sm text-on-surface focus:outline-none focus:border-secondary">
+                                                    <option value="">Tự chia</option>
+                                                    {screens.map((s, si) => <option key={si} value={si}>{(s.label || `Màn ${si + 1}`) + (s.isPrimary ? ' ★' : '')}</option>)}
+                                                </select>
+                                            )}
                                         </div>
                                     ))}
                                 </div>
@@ -802,7 +884,9 @@ const AudioRouting: React.FC = () => {
                                 </button>
                                 <p className="text-body-sm text-on-surface-variant flex items-start gap-1.5">
                                     <span className="material-symbols-outlined text-[16px] text-primary shrink-0" aria-hidden="true">info</span>
-                                    Mỗi màn mở một cửa sổ — kéo sang đúng màn ngoài rồi Toàn màn hình. (Bước 2: tự đặt màn.)
+                                    {screenSupport === 'multi'
+                                        ? 'Mỗi màn mở vào ĐÚNG màn đã gán. Bấm phím F trong cửa sổ để bỏ viền (toàn màn hình).'
+                                        : 'Mỗi màn mở một cửa sổ — kéo sang đúng màn ngoài rồi bấm F (hoặc F11) để toàn màn hình.'}
                                 </p>
                             </div>
                         )}
