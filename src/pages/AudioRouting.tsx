@@ -141,6 +141,26 @@ const hhmmNow = (): string => {
     return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
 };
 
+// ── Định tuyến phụ đề đa màn (doc 34 · Bước 1) — mỗi "màn" chọn ngôn ngữ, mở cửa sổ /stream tương ứng ──
+type SubMode = 'both' | 'stacked' | 'vi' | 'ja';
+type SubOutput = { id: string; label: string; enabled: boolean; mode: SubMode };
+const SUB_MODES: { v: SubMode; l: string }[] = [
+    { v: 'both', l: 'Cả 2 (2 cột)' }, { v: 'stacked', l: 'Xếp dọc' }, { v: 'vi', l: 'Chỉ VI' }, { v: 'ja', l: 'Chỉ 日本語' },
+];
+// Mặc định gala: Màn giữa = cả 2 ngôn ngữ · Màn trái = VI · Màn phải = 日本語.
+const DEFAULT_SUB_OUTPUTS: SubOutput[] = [
+    { id: 'center', label: 'Màn giữa', enabled: true, mode: 'both' },
+    { id: 'left', label: 'Màn trái', enabled: true, mode: 'vi' },
+    { id: 'right', label: 'Màn phải', enabled: true, mode: 'ja' },
+];
+const loadSubOutputs = (): SubOutput[] => {
+    try {
+        const a = JSON.parse(localStorage.getItem('proyaku_subtitle_outputs') || 'null');
+        if (Array.isArray(a) && a.length) return a.filter((o) => o && typeof o.id === 'string');
+    } catch { /* ignore */ }
+    return DEFAULT_SUB_OUTPUTS;
+};
+
 const AudioRouting: React.FC = () => {
     const session = useLiveSession();
     const { eventId, event } = useActiveEvent();
@@ -172,7 +192,9 @@ const AudioRouting: React.FC = () => {
     const [ttsRate, setTtsRate] = useState(() => { const r = loadTtsPrefs().rate; return typeof r === 'number' && r > 0 ? r : 1; });
     const [ttsHasVoice] = useState(() => { const p = loadTtsPrefs(); return !!(p.vi || p.ja); }); // whether a voice was picked at Chuẩn bị · Giọng đọc
     const [speaker, setSpeaker] = useState(() => { try { return String(JSON.parse(localStorage.getItem('proyaku_speaker') || '{}').name || ''); } catch { return ''; } });
-    const [panel, setPanel] = useState<null | 'speed' | 'speaker' | 'volume'>(null);
+    const [panel, setPanel] = useState<null | 'speed' | 'speaker' | 'volume' | 'wall'>(null);
+    // Định tuyến phụ đề đa màn (doc 34 · Bước 1) — mặc định 3 màn (giữa cả 2 · trái VI · phải JA).
+    const [subOutputs, setSubOutputs] = useState<SubOutput[]>(loadSubOutputs);
     // Âm lượng ngõ ra (0–100% mỗi kênh + tổng). Lưu tại máy; hot-apply giữa phiên; gửi trong config lúc BẮT ĐẦU.
     const [vols, setVols] = useState<VolSet>(loadVols);
     // Nhãn vùng loa (A5) · trạng thái trợ lý kiểm tra loa (A3) · hồ sơ âm thanh (A4) · quét thiết bị (A1).
@@ -460,7 +482,27 @@ const AudioRouting: React.FC = () => {
     const viLive = langLines(session.lines, 'vi');
     const jaLive = langLines(session.lines, 'ja');
     const setupPhase = session.status === 'connecting' || session.status === 'warming';
-    const openWall = () => window.open('/stream', 'proyaku-wall');
+    // Định tuyến phụ đề (doc 34 · Bước 1): cập nhật + lưu tại máy.
+    const patchSubOutputs = (next: SubOutput[]) => {
+        setSubOutputs(next);
+        try { localStorage.setItem('proyaku_subtitle_outputs', JSON.stringify(next)); } catch { /* ignore */ }
+    };
+    // Mở một cửa sổ /stream cho MỖI màn đang bật (chia đều màn hiện tại; kéo mỗi cửa sổ sang đúng màn + Toàn màn hình).
+    const openSubOutputs = () => {
+        const on = subOutputs.filter((o) => o.enabled);
+        if (!on.length) return;
+        const sw = window.screen.availWidth || window.innerWidth;
+        const sh = window.screen.availHeight || window.innerHeight;
+        const colW = Math.max(320, Math.round(sw / on.length));
+        let opened = 0;
+        on.forEach((o, i) => {
+            const q = o.mode === 'vi' ? 'lang=vi' : o.mode === 'ja' ? 'lang=ja' : `mode=${o.mode}`;
+            const win = window.open(`/stream?${q}&display=1&fill=1`, `proyaku-wall-${o.id}`, `popup=yes,width=${colW},height=${sh},left=${i * colW},top=0`);
+            if (win) { opened++; win.focus?.(); }
+        });
+        // An toàn gala: đừng để mở hụt màn mà im lặng — báo rõ nếu pop-up bị chặn.
+        if (opened < on.length) window.alert('Một số màn phụ đề không mở được — trình duyệt có thể đang chặn pop-up. Hãy cho phép pop-up cho trang này rồi bấm lại.');
+    };
 
     // Một kênh loa trong ngăn Cài đặt: chọn thiết bị + loại/Bluetooth (A2/A6) + nhãn vùng (A5)
     // + âm lượng (B1) + trợ lý kiểm tra loa (A3).
@@ -541,7 +583,7 @@ const AudioRouting: React.FC = () => {
                     {/* B · MÀN KHÁN GIẢ */}
                     <div className="space-y-0.5">
                         <div className="px-2 pb-1 font-label-caps text-[10px] text-on-surface-variant/55 tracking-[0.16em]">MÀN KHÁN GIẢ</div>
-                        <RailBtn icon="cast" label="Xuất phụ đề" title="Mở màn phụ đề khán giả — kéo sang màn 2" onClick={openWall} />
+                        <RailBtn icon="cast" label="Xuất phụ đề" title="Định tuyến phụ đề ra các màn khán giả" tone={panel === 'wall' ? 'active' : 'default'} onClick={() => setPanel((p) => (p === 'wall' ? null : 'wall'))} />
                         {active && (
                             <>
                                 <RailBtn icon="play_arrow" label="Live" title="Phát trực tiếp" tone={session.audienceCut === 'live' ? 'active' : 'default'} onClick={() => session.setAudienceCut('live')} />
@@ -730,6 +772,38 @@ const AudioRouting: React.FC = () => {
                                     ))}
                                 </div>
                                 <p className="text-body-sm text-on-surface-variant">Áp ngay khi đang chạy; nếu chưa có phiên sẽ dùng ở lần Bắt đầu.</p>
+                            </div>
+                        )}
+                        {panel === 'wall' && (
+                            <div className="flex flex-col gap-3">
+                                <div className="flex items-center justify-between">
+                                    <span className="font-label-caps text-label-caps text-on-surface-variant">XUẤT PHỤ ĐỀ — ĐỊNH TUYẾN MÀN</span>
+                                    <button onClick={() => patchSubOutputs(DEFAULT_SUB_OUTPUTS)} className="text-label-md text-on-surface-variant hover:text-secondary">Mặc định</button>
+                                </div>
+                                <div className="flex flex-col gap-1.5">
+                                    {subOutputs.map((o, i) => (
+                                        <div key={o.id} className={`flex items-center gap-2 rounded-lg border px-2.5 py-2 ${o.enabled ? 'border-outline-variant' : 'border-outline-variant/40 opacity-60'}`}>
+                                            <button onClick={() => patchSubOutputs(subOutputs.map((x, j) => (j === i ? { ...x, enabled: !x.enabled } : x)))}
+                                                title={o.enabled ? 'Đang bật — bấm để tắt' : 'Đang tắt — bấm để bật'}
+                                                className={`shrink-0 w-6 h-6 rounded-md flex items-center justify-center transition-colors ${o.enabled ? 'bg-secondary text-on-secondary' : 'border border-outline-variant text-on-surface-variant'}`}>
+                                                <span className="material-symbols-outlined text-[16px]" aria-hidden="true">{o.enabled ? 'check' : 'remove'}</span>
+                                            </button>
+                                            <span className="w-16 shrink-0 text-sm text-on-surface truncate">{o.label}</span>
+                                            <select value={o.mode} onChange={(e) => patchSubOutputs(subOutputs.map((x, j) => (j === i ? { ...x, mode: e.target.value as SubMode } : x)))}
+                                                className="flex-1 min-w-0 bg-surface border border-outline-variant rounded-lg px-2 py-1.5 text-sm text-on-surface focus:outline-none focus:border-secondary">
+                                                {SUB_MODES.map((m) => <option key={m.v} value={m.v}>{m.l}</option>)}
+                                            </select>
+                                        </div>
+                                    ))}
+                                </div>
+                                <button onClick={openSubOutputs} disabled={!subOutputs.some((o) => o.enabled)}
+                                    className="btn-lux inline-flex items-center justify-center gap-1.5 rounded-lg bg-secondary text-on-secondary px-4 py-2.5 text-sm font-label-caps text-label-caps hover:opacity-80 disabled:opacity-40">
+                                    <span className="material-symbols-outlined text-[18px]" aria-hidden="true">cast</span>Mở {subOutputs.filter((o) => o.enabled).length} màn phụ đề
+                                </button>
+                                <p className="text-body-sm text-on-surface-variant flex items-start gap-1.5">
+                                    <span className="material-symbols-outlined text-[16px] text-primary shrink-0" aria-hidden="true">info</span>
+                                    Mỗi màn mở một cửa sổ — kéo sang đúng màn ngoài rồi Toàn màn hình. (Bước 2: tự đặt màn.)
+                                </p>
                             </div>
                         )}
                         {panel === 'speaker' && (
