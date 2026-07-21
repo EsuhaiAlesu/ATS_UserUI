@@ -12,32 +12,33 @@ import EventSwitcher from './EventSwitcher';
 interface Tool { label: string; icon: string; desc: string; to?: string; hash?: string; external?: boolean; soon?: boolean }
 interface Menu { key: string; label: string; gear?: boolean; match: string[]; tools: Tool[] }
 
+// desc = dòng phụ chú ngắn (tối đa 4–5 chữ); hiển thị dưới nhãn, đổi xanh lá non khi active.
 const MENUS: Menu[] = [
     { key: 'prep', label: 'Chuẩn bị', match: ['/prep', '/script', '/glossary', '/voices', '/schedule', '/speakers', '/documents'], tools: [
-        { label: 'Tổng quan', icon: 'dashboard', desc: 'Bảng sẵn sàng GO/NO-GO và đếm ngược.', to: '/prep' },
-        { label: 'Đặt lịch', icon: 'calendar_month', desc: 'Lịch hội nghị: ngày, người đặt, diễn giả.', to: '/schedule' },
-        { label: 'Tài liệu', icon: 'folder_open', desc: 'Thư viện tài liệu nguồn cho sự kiện.', to: '/documents' },
-        { label: 'Kịch bản', icon: 'description', desc: 'Câu kịch bản song ngữ Việt–Nhật đã duyệt.', to: '/script' },
-        { label: 'Từ điển', icon: 'menu_book', desc: 'Thuật ngữ và danh từ riêng cần giữ đúng.', to: '/glossary' },
-        { label: 'Giọng đọc', icon: 'record_voice_over', desc: 'Giọng đọc và luyện phát âm từng ngôn ngữ.', to: '/voices' },
-        { label: 'Bộ nhớ', icon: 'psychology', desc: 'Hồ sơ diễn giả: tên, biệt danh, giọng.', to: '/speakers' },
+        { label: 'Tổng quan', icon: 'dashboard', desc: 'Sẵn sàng & đếm ngược', to: '/prep' },
+        { label: 'Đặt lịch', icon: 'calendar_month', desc: 'Lịch hội nghị, diễn giả', to: '/schedule' },
+        { label: 'Tài liệu', icon: 'folder_open', desc: 'Thư viện tài liệu nguồn', to: '/documents' },
+        { label: 'Kịch bản', icon: 'description', desc: 'Câu song ngữ đã duyệt', to: '/script' },
+        { label: 'Từ điển', icon: 'menu_book', desc: 'Thuật ngữ & tên riêng', to: '/glossary' },
+        { label: 'Giọng đọc', icon: 'record_voice_over', desc: 'Luyện giọng & phát âm', to: '/voices' },
+        { label: 'Bộ nhớ', icon: 'psychology', desc: 'Hồ sơ diễn giả, giọng', to: '/speakers' },
     ] },
     { key: 'report', label: 'Báo cáo', match: ['/report'], tools: [
-        { label: 'Tình trạng', icon: 'monitor_heart', desc: 'Tình trạng hệ thống theo thời gian thực.', to: '/report', hash: 'status' },
-        { label: 'Nhật ký', icon: 'history', desc: 'Nhật ký hoạt động các phiên làm việc.', to: '/report', hash: 'log' },
+        { label: 'Tình trạng', icon: 'monitor_heart', desc: 'Hệ thống thời gian thực', to: '/report', hash: 'status' },
+        { label: 'Nhật ký', icon: 'history', desc: 'Hoạt động từng phiên', to: '/report', hash: 'log' },
     ] },
     { key: 'ops', label: 'Dịch hội nghị', match: ['/audio'], tools: [
-        { label: 'Điều khiển', icon: 'tune', desc: 'Bàn điều khiển dịch trực tiếp hội nghị.', to: '/audio' },
-        { label: 'Phụ đề', icon: 'subtitles', desc: 'Màn chiếu phụ đề cho khán giả (tab mới).', to: '/stream', external: true },
-        { label: 'Reveal', icon: 'auto_awesome', desc: 'Màn chiếu khoảnh khắc công bố (tab mới).', to: '/reveal', external: true },
+        { label: 'Điều khiển', icon: 'tune', desc: 'Bàn dịch trực tiếp', to: '/audio' },
+        { label: 'Phụ đề', icon: 'subtitles', desc: 'Màn chiếu cho khán giả', to: '/stream', external: true },
+        { label: 'Reveal', icon: 'auto_awesome', desc: 'Màn công bố khoảnh khắc', to: '/reveal', external: true },
     ] },
     { key: 'settings', label: 'Cài đặt', gear: true, match: ['/settings'], tools: [
-        { label: 'Kết nối', icon: 'lan', desc: 'Kết nối tới máy chủ xử lý.', to: '/settings', hash: 'kn' },
-        { label: 'Sự kiện', icon: 'event', desc: 'Thông tin và cấu hình sự kiện.', to: '/settings', hash: 'sk' },
-        { label: 'Phụ đề', icon: 'format_size', desc: 'Cỡ chữ và hiển thị phụ đề.', to: '/settings', hash: 'pd' },
-        { label: 'Giọng đọc', icon: 'record_voice_over', desc: 'Giọng đọc mặc định theo ngôn ngữ.', to: '/settings', hash: 'gd' },
-        { label: 'Tài khoản', icon: 'account_circle', desc: 'Tài khoản và thông tin đăng nhập.', to: '/settings', hash: 'tk' },
-        { label: 'Dữ liệu', icon: 'database', desc: 'Xuất và xóa dữ liệu ứng dụng.', to: '/settings', hash: 'dl' },
+        { label: 'Kết nối', icon: 'lan', desc: 'Máy chủ xử lý dịch', to: '/settings', hash: 'kn' },
+        { label: 'Sự kiện', icon: 'event', desc: 'Thông tin, cấu hình', to: '/settings', hash: 'sk' },
+        { label: 'Phụ đề', icon: 'format_size', desc: 'Cỡ chữ & hiển thị', to: '/settings', hash: 'pd' },
+        { label: 'Giọng đọc', icon: 'record_voice_over', desc: 'Mặc định theo ngôn ngữ', to: '/settings', hash: 'gd' },
+        { label: 'Tài khoản', icon: 'account_circle', desc: 'Thông tin đăng nhập', to: '/settings', hash: 'tk' },
+        { label: 'Dữ liệu', icon: 'database', desc: 'Xuất & xóa dữ liệu', to: '/settings', hash: 'dl' },
     ] },
 ];
 
@@ -189,7 +190,7 @@ const OperatorLayout: React.FC = () => {
                                             {t.external && <span className="material-symbols-outlined text-[15px] opacity-50 shrink-0">open_in_new</span>}
                                             {t.soon && <span className="font-label-caps text-[9px] px-1.5 py-0.5 rounded-full border border-outline-variant text-on-surface-variant/50 shrink-0">sắp có</span>}
                                         </span>
-                                        <span className="text-xs text-on-surface-variant/90 leading-snug truncate">{t.desc}</span>
+                                        <span className={`text-xs leading-snug truncate ${on ? 'text-[#a3e635]' : 'text-on-surface-variant/90'}`}>{t.desc}</span>
                                     </span>
                                 </button>
                             );
