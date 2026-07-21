@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
     getAudioDevices, getAudioOutputs, getBlocks, getLiveFast, playTestTone, setLiveFast,
 } from '../lib/api';
@@ -66,25 +67,22 @@ const MonitorColumn: React.FC<{ label: React.ReactNode; lines: LiveLine[]; jp?: 
     );
 };
 
-/** A round icon control button (bottom cluster). Kept module-scope for stable identity. */
-const RoundBtn: React.FC<{
+/** A control row for the LEFT control rail: icon + nhãn (+ chấm trạng thái). Module-scope cho identity ổn định. */
+const RailBtn: React.FC<{
     icon: string; label: string; title?: string; onClick?: () => void;
-    tone?: 'default' | 'active' | 'primary' | 'danger'; disabled?: boolean; dot?: string;
-}> = ({ icon, label, title, onClick, tone = 'default', disabled, dot }) => {
-    const big = tone === 'primary' || tone === 'danger';
-    const ring =
-        tone === 'primary' ? 'w-16 h-16 bg-secondary text-on-secondary shadow-lg shadow-secondary/25 hover:opacity-90'
-            : tone === 'danger' ? 'w-16 h-16 bg-error text-on-error hover:opacity-90'
-                : tone === 'active' ? 'w-14 h-14 bg-secondary/15 text-secondary border border-secondary/50'
-                    : 'w-14 h-14 bg-surface-container text-on-surface-variant border border-outline-variant hover:text-on-surface hover:border-outline';
+    tone?: 'default' | 'active' | 'primary' | 'danger'; disabled?: boolean; dot?: string; big?: boolean;
+}> = ({ icon, label, title, onClick, tone = 'default', disabled, dot, big }) => {
+    const cls =
+        tone === 'primary' ? 'bg-secondary text-on-secondary hover:opacity-90 shadow-lg shadow-secondary/20'
+            : tone === 'danger' ? 'bg-error text-on-error hover:opacity-90'
+                : tone === 'active' ? 'bg-secondary/15 text-secondary border border-secondary/40'
+                    : 'text-on-surface-variant hover:text-on-surface hover:bg-surface-container border border-transparent';
     return (
         <button type="button" title={title ?? label} onClick={onClick} disabled={disabled}
-            className="flex flex-col items-center gap-1.5 disabled:opacity-40 disabled:cursor-not-allowed">
-            <span className={`relative rounded-full flex items-center justify-center transition-all ${ring}`}>
-                <span className="material-symbols-outlined" style={{ fontSize: big ? '30px' : '25px' }} aria-hidden="true">{icon}</span>
-                {dot && <span className={`absolute top-0.5 right-0.5 w-3 h-3 rounded-full border-2 border-surface-container-lowest ${dot}`} aria-hidden="true"></span>}
-            </span>
-            <span className="text-[10px] font-label-caps text-on-surface-variant leading-none">{label}</span>
+            className={`relative w-full flex items-center gap-3 rounded-xl transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${big ? 'px-3.5 py-3' : 'px-3 py-2.5'} ${cls}`}>
+            <span className="material-symbols-outlined shrink-0" style={{ fontSize: big ? '24px' : '21px' }} aria-hidden="true">{icon}</span>
+            <span className={`flex-1 min-w-0 text-left leading-tight truncate font-medium ${big ? 'text-[16px]' : 'text-[14.5px]'}`}>{label}</span>
+            {dot && <span className={`shrink-0 w-2.5 h-2.5 rounded-full ${dot}`} aria-hidden="true"></span>}
         </button>
     );
 };
@@ -146,6 +144,7 @@ const hhmmNow = (): string => {
 const AudioRouting: React.FC = () => {
     const session = useLiveSession();
     const { eventId, event } = useActiveEvent();
+    const nav = useNavigate();
     const active = isSessionActive(session.status);
 
     // --- Backend catalog state ---
@@ -511,8 +510,81 @@ const AudioRouting: React.FC = () => {
     };
 
     return (
-        <div className="h-full flex flex-col text-on-background overflow-hidden relative">
-            {/* ══════════ TOP BAR (minimal) ══════════ */}
+        <div className="h-screen w-screen flex text-on-background overflow-hidden relative">
+            {/* ══════════ RAIL ĐIỀU KHIỂN (trái) — mọi chức năng, không phải rời màn ══════════ */}
+            <aside className="shrink-0 w-[248px] h-full flex flex-col border-r border-outline-variant bg-surface-container-lowest">
+                {/* Đầu rail: thương hiệu + sự kiện đang chuẩn bị */}
+                <div className="shrink-0 px-4 pt-4 pb-3 border-b border-outline-variant">
+                    <span className="font-sora font-bold text-[15px] tracking-[0.14em] text-on-surface select-none">PROYAKU</span>
+                    <div className="mt-1.5 flex items-center gap-1.5 text-xs text-on-surface-variant">
+                        <span className="material-symbols-outlined text-[15px] shrink-0" aria-hidden="true">graphic_eq</span>
+                        <span className="truncate">{event?.title?.trim() || 'Chưa chọn sự kiện'}</span>
+                    </div>
+                </div>
+
+                {/* Cuộn: các nhóm chức năng */}
+                <div className="flex-1 overflow-y-auto p-2.5 space-y-3.5">
+                    {/* A · PHIÊN — bắt đầu / dừng (giữ) */}
+                    {active ? (
+                        <button type="button" onPointerDown={startHold} onPointerUp={cancelHold} onPointerLeave={cancelHold} title="Giữ để dừng phiên"
+                            className="relative z-50 w-full flex items-center gap-3 rounded-xl overflow-hidden bg-error text-on-error px-3.5 py-3 select-none">
+                            <span className="absolute inset-y-0 left-0 bg-on-error/25" style={{ width: `${Math.round(holdPct * 100)}%` }}></span>
+                            <span className="material-symbols-outlined shrink-0 relative" style={{ fontSize: '24px' }} aria-hidden="true">stop</span>
+                            <span className="relative flex-1 text-left text-[16px] font-semibold">{holdPct > 0 ? `GIỮ… ${Math.round(holdPct * 100)}%` : 'Dừng (giữ)'}</span>
+                        </button>
+                    ) : (
+                        <RailBtn icon="play_arrow" label="Bắt đầu dịch" big tone="primary" disabled={!canStart}
+                            title={canStart ? 'Bắt đầu phiên dịch' : !session.backendOnline ? 'Backend (lõi dịch) offline — không thể bắt đầu' : 'Chưa đạt kiểm tra thiết bị — mở Cài đặt'}
+                            onClick={handleStartStop} />
+                    )}
+
+                    {/* B · MÀN KHÁN GIẢ */}
+                    <div className="space-y-0.5">
+                        <div className="px-2 pb-1 font-label-caps text-[10px] text-on-surface-variant/55 tracking-[0.16em]">MÀN KHÁN GIẢ</div>
+                        <RailBtn icon="cast" label="Xuất phụ đề" title="Mở màn phụ đề khán giả — kéo sang màn 2" onClick={openWall} />
+                        {active && (
+                            <>
+                                <RailBtn icon="play_arrow" label="Live" title="Phát trực tiếp" tone={session.audienceCut === 'live' ? 'active' : 'default'} onClick={() => session.setAudienceCut('live')} />
+                                <RailBtn icon="ac_unit" label="Giữ hình" title="Đóng băng dòng cuối (freeze)" tone={session.audienceCut === 'freeze' ? 'active' : 'default'} onClick={() => session.setAudienceCut('freeze')} />
+                                <RailBtn icon="block" label="Màn an toàn" title="Màn an toàn (slate)" tone={session.audienceCut === 'slate' ? 'active' : 'default'} onClick={() => session.setAudienceCut('slate')} />
+                            </>
+                        )}
+                        <RailBtn icon="auto_awesome" label="Reveal" title="Mở màn công bố (tab mới)" onClick={() => window.open('/reveal', 'proyaku-reveal')} />
+                    </div>
+
+                    {/* C · ÂM THANH & GIỌNG */}
+                    <div className="space-y-0.5">
+                        <div className="px-2 pb-1 font-label-caps text-[10px] text-on-surface-variant/55 tracking-[0.16em]">ÂM THANH & GIỌNG</div>
+                        <RailBtn icon={ttsOn && ttsHasVoice ? 'volume_up' : 'subtitles'} label={ttsOn && ttsHasVoice ? 'Đang đọc tiếng' : 'Chỉ phụ đề'}
+                            title={!ttsHasVoice ? 'Chưa chọn giọng đọc — vào Chuẩn bị · Giọng đọc' : ttsOn ? 'Đang đọc tiếng — bấm để chỉ phụ đề' : 'Chỉ phụ đề — bấm để bật đọc tiếng'}
+                            tone={ttsOn && ttsHasVoice ? 'active' : 'default'} disabled={!ttsHasVoice} onClick={() => applyTtsOn(!ttsOn)} />
+                        <RailBtn icon="speed" label={`Tốc độ ${ttsRate.toFixed(1)}×`} title="Tốc độ giọng đọc" tone={panel === 'speed' ? 'active' : 'default'} onClick={() => setPanel((p) => (p === 'speed' ? null : 'speed'))} />
+                        <RailBtn icon="tune" label="Âm lượng" title="Âm lượng loa VI / JA / Tổng" tone={panel === 'volume' ? 'active' : 'default'} onClick={() => setPanel((p) => (p === 'volume' ? null : 'volume'))} />
+                    </div>
+
+                    {/* D · NỘI DUNG */}
+                    <div className="space-y-0.5">
+                        <div className="px-2 pb-1 font-label-caps text-[10px] text-on-surface-variant/55 tracking-[0.16em]">NỘI DUNG</div>
+                        <RailBtn icon="record_voice_over" label={speaker || 'Người nói'} title="Điều phối người phát biểu" tone={panel === 'speaker' ? 'active' : 'default'} onClick={() => setPanel((p) => (p === 'speaker' ? null : 'speaker'))} />
+                        <RailBtn icon="menu_book" label="Từ điển" title="Mở Từ điển (cửa sổ mới)" onClick={() => window.open('/glossary', 'proyaku-glossary')} />
+                    </div>
+                </div>
+
+                {/* Chân rail: hệ thống */}
+                <div className="shrink-0 p-2.5 space-y-0.5 border-t border-outline-variant">
+                    <RailBtn icon="settings" label="Cài đặt & thiết bị"
+                        dot={preflightOk ? 'bg-secondary' : 'bg-primary animate-pulse'}
+                        title={preflightOk ? 'Thiết bị sẵn sàng · mở Cài đặt & kiểm tra' : `Chưa đủ điều kiện (${preflightPass}/${preflight.length}) · mở Cài đặt`}
+                        onClick={() => { setPanel(null); setSettingsOpen(true); }} />
+                    <RailBtn icon="bolt" label="Chế độ nhanh" title="Giảm độ trễ" tone={fastMode ? 'active' : 'default'} onClick={handleToggleFast} />
+                    <RailBtn icon={isFs ? 'fullscreen_exit' : 'fullscreen'} label={isFs ? 'Thoát toàn màn' : 'Toàn màn hình'} onClick={toggleFullscreen} />
+                    <RailBtn icon="logout" label="Thoát console" title="Về Bảng chỉ huy" onClick={() => nav('/prep')} />
+                </div>
+            </aside>
+
+            {/* ══════════ CỘT PHẢI — monitor kết quả (đúng cái khán giả thấy) ══════════ */}
+            <div className="flex-1 min-w-0 flex flex-col overflow-hidden">
+            {/* ══════════ MONITOR STRIP ══════════ */}
             <header className="shrink-0 h-14 flex items-center gap-4 px-5 border-b border-outline-variant bg-surface-container-lowest">
                 <div className="flex items-center gap-2.5 min-w-0">
                     <span className={`w-3 h-3 rounded-full shrink-0 ${master.dot} ${master.anim}`}></span>
@@ -526,17 +598,7 @@ const AudioRouting: React.FC = () => {
                     <span className={`jp-text font-label-caps text-label-caps ${dir.startsWith('JA') ? 'text-secondary' : 'text-on-surface-variant'}`}>JA</span>
                 </div>
 
-                <div className="flex items-center gap-1 shrink-0">
-                    {/* Lối vào Cài đặt/readiness đã gộp về nút "Cài đặt" duy nhất ở dock dưới (kèm chấm trạng thái). */}
-                    <button onClick={handleToggleFast} title="Chế độ nhanh — giảm độ trễ"
-                        className={`w-9 h-9 flex items-center justify-center rounded-full transition-colors ${fastMode ? 'text-on-secondary bg-secondary' : 'text-on-surface-variant hover:text-on-surface hover:bg-surface-container'}`}>
-                        <span className="material-symbols-outlined text-[20px]" aria-hidden="true">bolt</span>
-                    </button>
-                    <button onClick={toggleFullscreen} title={isFs ? 'Thoát toàn màn hình' : 'Toàn màn hình'}
-                        className="w-9 h-9 flex items-center justify-center rounded-full text-on-surface-variant hover:text-on-surface hover:bg-surface-container transition-colors">
-                        <span className="material-symbols-outlined text-[20px]" aria-hidden="true">{isFs ? 'fullscreen_exit' : 'fullscreen'}</span>
-                    </button>
-                </div>
+                {/* fast-mode + toàn màn hình đã dời vào rail điều khiển (nhóm Hệ thống). */}
             </header>
 
             {/* ══════════ CENTER STAGE — always "the screen" ══════════ */}
@@ -607,7 +669,7 @@ const AudioRouting: React.FC = () => {
                                 {!session.backendOnline
                                     ? 'Backend (lõi dịch) chưa online — chạy backend trên Mac Studio rồi mới bắt đầu được.'
                                     : canStart
-                                        ? 'Nhấn ● Bắt đầu ở thanh dưới để lên sóng — kết quả song ngữ sẽ hiện ngay tại đây.'
+                                        ? 'Nhấn ▶ Bắt đầu dịch ở thanh bên trái để lên sóng — kết quả song ngữ sẽ hiện ngay tại đây.'
                                         : 'Mở ⚙ Cài đặt để chọn mic & mô hình, rồi Bắt đầu.'}
                             </span>
                         </div>
@@ -633,54 +695,13 @@ const AudioRouting: React.FC = () => {
                     <div className={`h-full transition-all duration-100 ${noSignal ? 'bg-error' : 'bg-gradient-to-r from-primary-fixed via-secondary to-secondary'}`} style={{ width: `${Math.round(Math.min(1, vuLevel) * 100)}%` }}></div>
                 </div>
             </main>
+            </div>
 
-            {/* ══════════ BOTTOM CONTROL CLUSTER (icon buttons) ══════════ */}
-            <footer className={`relative shrink-0 h-24 flex items-center justify-center gap-5 px-5 border-t border-outline-variant bg-surface-container-lowest ${panel ? 'z-40' : ''}`}>
-                {active ? (
-                    <button type="button" onPointerDown={startHold} onPointerUp={cancelHold} onPointerLeave={cancelHold} title="Giữ để dừng phiên"
-                        className="flex flex-col items-center gap-1.5 select-none">
-                        <span className="relative w-16 h-16 rounded-full overflow-hidden bg-error text-on-error flex items-center justify-center">
-                            <span className="absolute inset-x-0 bottom-0 bg-on-error/30" style={{ height: `${Math.round(holdPct * 100)}%` }}></span>
-                            <span className="material-symbols-outlined relative" style={{ fontSize: '30px' }} aria-hidden="true">stop</span>
-                        </span>
-                        <span className="text-[10px] font-label-caps text-error leading-none">{holdPct > 0 ? `GIỮ… ${Math.round(holdPct * 100)}%` : 'DỪNG (giữ)'}</span>
-                    </button>
-                ) : (
-                    <RoundBtn icon="play_arrow" label="BẮT ĐẦU" title={canStart ? 'Bắt đầu phiên dịch' : !session.backendOnline ? 'Backend (lõi dịch) offline — không thể bắt đầu' : 'Chưa đạt kiểm tra thiết bị — mở Cài đặt'} tone="primary" disabled={!canStart} onClick={handleStartStop} />
-                )}
-
-                {active && (
-                    <>
-                        <RoundBtn icon="play_arrow" label="Live" title="Phát trực tiếp" tone={session.audienceCut === 'live' ? 'active' : 'default'} onClick={() => session.setAudienceCut('live')} />
-                        <RoundBtn icon="ac_unit" label="Giữ hình" title="Đóng băng dòng cuối (freeze)" tone={session.audienceCut === 'freeze' ? 'active' : 'default'} onClick={() => session.setAudienceCut('freeze')} />
-                        <RoundBtn icon="block" label="An toàn" title="Màn an toàn (slate)" tone={session.audienceCut === 'slate' ? 'active' : 'default'} onClick={() => session.setAudienceCut('slate')} />
-                    </>
-                )}
-
-                <div className="w-px h-12 bg-outline-variant mx-1"></div>
-                {/* live operation controls (spec 2.1–2.6) — hot-applied via sendCommand */}
-                <RoundBtn icon={ttsOn && ttsHasVoice ? 'volume_up' : 'subtitles'} label={ttsOn && ttsHasVoice ? 'Giọng' : 'Phụ đề'}
-                    title={!ttsHasVoice ? 'Chưa chọn giọng đọc — vào Chuẩn bị · Giọng đọc để chọn; hiện chỉ phụ đề' : ttsOn ? 'Đang đọc tiếng — bấm để chỉ phụ đề' : 'Chỉ phụ đề — bấm để bật đọc tiếng'}
-                    tone={ttsOn && ttsHasVoice ? 'active' : 'default'} disabled={!ttsHasVoice} onClick={() => applyTtsOn(!ttsOn)} />
-                <RoundBtn icon="speed" label={`${ttsRate.toFixed(1)}×`} title="Tốc độ giọng đọc" tone={panel === 'speed' ? 'active' : 'default'} onClick={() => setPanel((p) => (p === 'speed' ? null : 'speed'))} />
-                <RoundBtn icon="tune" label="Âm lượng" title="Âm lượng loa VI / JA / Tổng" tone={panel === 'volume' ? 'active' : 'default'} onClick={() => setPanel((p) => (p === 'volume' ? null : 'volume'))} />
-                <RoundBtn icon="record_voice_over" label="Người nói" title="Điều phối người phát biểu" tone={panel === 'speaker' ? 'active' : 'default'} onClick={() => setPanel((p) => (p === 'speaker' ? null : 'speaker'))} />
-                <RoundBtn icon="menu_book" label="Từ điển" title="Mở Từ điển (cửa sổ mới)" onClick={() => window.open('/glossary', 'proyaku-glossary')} />
-
-                <div className="w-px h-12 bg-outline-variant mx-1"></div>
-                {/* Lối vào Cài đặt/thiết bị DUY NHẤT (gộp từ chip "1/7" + nút MIC cũ). Chấm: vàng = đủ điều kiện, hổ phách nhấp nháy = còn thiếu. */}
-                <RoundBtn icon="settings" label="Cài đặt"
-                    dot={preflightOk ? 'bg-secondary' : 'bg-primary animate-pulse'}
-                    title={preflightOk ? 'Thiết bị sẵn sàng · mở Cài đặt & kiểm tra' : `Chưa đủ điều kiện (${preflightPass}/${preflight.length}) · mở Cài đặt`}
-                    onClick={() => { setPanel(null); setSettingsOpen(true); }} />
-                <RoundBtn icon="open_in_new" label="Tường" title="Mở Tường phụ đề" onClick={openWall} />
-            </footer>
-
-            {/* ══════════ LIVE-CONTROL POPOVERS (anchored above the footer) ══════════ */}
+            {/* ══════════ LIVE-CONTROL POPOVERS (flyout cạnh rail) ══════════ */}
             {panel && (
                 <>
                     <div className="absolute inset-0 z-30" onClick={() => setPanel(null)}></div>
-                    <div className="absolute bottom-[104px] left-1/2 -translate-x-1/2 z-40 w-[min(92vw,380px)] rounded-2xl border border-outline-variant bg-surface-container-high p-4 shadow-2xl"
+                    <div className="absolute top-1/2 -translate-y-1/2 left-[256px] z-40 w-[min(72vw,360px)] rounded-2xl border border-outline-variant bg-surface-container-high p-4 shadow-2xl"
                         style={{ boxShadow: '0 18px 48px rgba(0,0,0,0.55)' }}>
                         {panel === 'speed' && (
                             <div className="flex flex-col gap-3">

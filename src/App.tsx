@@ -40,7 +40,6 @@ const App: React.FC = () => {
             {/* Operator surfaces share ONE nav shell (rail + safety block). */}
             <Route element={<OperatorLayout />}>
               <Route path="/prep" element={<PrepDesk />} />
-              <Route path="/audio" element={<AudioRouting />} />
               <Route path="/script" element={<ScriptPrep />} />
               <Route path="/glossary" element={<GlossaryEditor />} />
               <Route path="/voices" element={<VoiceStudio />} />
@@ -50,6 +49,9 @@ const App: React.FC = () => {
               <Route path="/speakers" element={<SpeakerMemory />} />
               <Route path="/documents" element={<DocumentsLibrary />} />
             </Route>
+
+            {/* Bàn điều khiển — console TOÀN MÀN HÌNH độc lập (ngoài shell): rail điều khiển trái + monitor giữa. */}
+            <Route path="/audio" element={<AudioRouting />} />
 
             {/* Audience / ceremonial surfaces are full-screen — no operator chrome. */}
             <Route path="/reveal" element={<RevealMoment />} />
