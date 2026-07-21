@@ -69,8 +69,8 @@ const MonitorColumn: React.FC<{ label: React.ReactNode; lines: LiveLine[]; jp?: 
 /** A round icon control button (bottom cluster). Kept module-scope for stable identity. */
 const RoundBtn: React.FC<{
     icon: string; label: string; title?: string; onClick?: () => void;
-    tone?: 'default' | 'active' | 'primary' | 'danger'; disabled?: boolean;
-}> = ({ icon, label, title, onClick, tone = 'default', disabled }) => {
+    tone?: 'default' | 'active' | 'primary' | 'danger'; disabled?: boolean; dot?: string;
+}> = ({ icon, label, title, onClick, tone = 'default', disabled, dot }) => {
     const big = tone === 'primary' || tone === 'danger';
     const ring =
         tone === 'primary' ? 'w-16 h-16 bg-secondary text-on-secondary shadow-lg shadow-secondary/25 hover:opacity-90'
@@ -80,8 +80,9 @@ const RoundBtn: React.FC<{
     return (
         <button type="button" title={title ?? label} onClick={onClick} disabled={disabled}
             className="flex flex-col items-center gap-1.5 disabled:opacity-40 disabled:cursor-not-allowed">
-            <span className={`rounded-full flex items-center justify-center transition-all ${ring}`}>
+            <span className={`relative rounded-full flex items-center justify-center transition-all ${ring}`}>
                 <span className="material-symbols-outlined" style={{ fontSize: big ? '30px' : '25px' }} aria-hidden="true">{icon}</span>
+                {dot && <span className={`absolute top-0.5 right-0.5 w-3 h-3 rounded-full border-2 border-surface-container-lowest ${dot}`} aria-hidden="true"></span>}
             </span>
             <span className="text-[10px] font-label-caps text-on-surface-variant leading-none">{label}</span>
         </button>
@@ -236,12 +237,9 @@ const AudioRouting: React.FC = () => {
     }, [rescanDevices]);
 
     // VU meter: the live session owns the mic while running; otherwise open a dedicated meter stream.
+    // Mức âm vào hiển thị bằng thanh VU mảnh ở đáy sân khấu (dưới) + đèn trạng thái (mất tín hiệu).
     const meter = useMeter(active ? null : inputDevice);
     const vuLevel = active ? session.level : meter.level;
-    const vuDb = useMemo(() => {
-        const rms = active ? vuLevel : meter.rms;
-        return rms > 0 ? Math.max(-60, Math.round(20 * Math.log10(rms))) : -60;
-    }, [active, vuLevel, meter.rms]);
 
     // Trust HUD signals (A3.1).
     const lastLine = session.lines[session.lines.length - 1];
@@ -529,12 +527,7 @@ const AudioRouting: React.FC = () => {
                 </div>
 
                 <div className="flex items-center gap-1 shrink-0">
-                    {/* readiness chip → opens settings */}
-                    <button onClick={() => setSettingsOpen(true)} title="Kiểm tra sẵn sàng & cài đặt"
-                        className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full font-label-caps text-label-caps border transition-colors ${preflightOk ? 'border-secondary/50 text-secondary' : 'border-outline-variant text-on-surface-variant hover:text-on-surface'}`}>
-                        <span className="material-symbols-outlined text-base" aria-hidden="true">{preflightOk ? 'check_circle' : 'checklist'}</span>
-                        <span className="hidden sm:inline">{preflightOk ? 'Sẵn sàng' : `${preflightPass}/${preflight.length}`}</span>
-                    </button>
+                    {/* Lối vào Cài đặt/readiness đã gộp về nút "Cài đặt" duy nhất ở dock dưới (kèm chấm trạng thái). */}
                     <button onClick={handleToggleFast} title="Chế độ nhanh — giảm độ trễ"
                         className={`w-9 h-9 flex items-center justify-center rounded-full transition-colors ${fastMode ? 'text-on-secondary bg-secondary' : 'text-on-surface-variant hover:text-on-surface hover:bg-surface-container'}`}>
                         <span className="material-symbols-outlined text-[20px]" aria-hidden="true">bolt</span>
@@ -643,9 +636,6 @@ const AudioRouting: React.FC = () => {
 
             {/* ══════════ BOTTOM CONTROL CLUSTER (icon buttons) ══════════ */}
             <footer className={`relative shrink-0 h-24 flex items-center justify-center gap-5 px-5 border-t border-outline-variant bg-surface-container-lowest ${panel ? 'z-40' : ''}`}>
-                <RoundBtn icon={noSignal ? 'mic_off' : 'mic'} label={noSignal ? 'KHÔNG TÍN HIỆU' : `MIC ${vuDb}dB`}
-                    title="Nguồn thu — mở Cài đặt để đổi mic" onClick={() => { setPanel(null); setSettingsOpen(true); }} tone={noSignal ? 'danger' : active ? 'active' : 'default'} />
-
                 {active ? (
                     <button type="button" onPointerDown={startHold} onPointerUp={cancelHold} onPointerLeave={cancelHold} title="Giữ để dừng phiên"
                         className="flex flex-col items-center gap-1.5 select-none">
@@ -678,7 +668,11 @@ const AudioRouting: React.FC = () => {
                 <RoundBtn icon="menu_book" label="Từ điển" title="Mở Từ điển (cửa sổ mới)" onClick={() => window.open('/glossary', 'proyaku-glossary')} />
 
                 <div className="w-px h-12 bg-outline-variant mx-1"></div>
-                <RoundBtn icon="settings" label="Cài đặt" title="Cấu hình thiết bị & mô hình (pre-event)" onClick={() => { setPanel(null); setSettingsOpen(true); }} />
+                {/* Lối vào Cài đặt/thiết bị DUY NHẤT (gộp từ chip "1/7" + nút MIC cũ). Chấm: vàng = đủ điều kiện, hổ phách nhấp nháy = còn thiếu. */}
+                <RoundBtn icon="settings" label="Cài đặt"
+                    dot={preflightOk ? 'bg-secondary' : 'bg-primary animate-pulse'}
+                    title={preflightOk ? 'Thiết bị sẵn sàng · mở Cài đặt & kiểm tra' : `Chưa đủ điều kiện (${preflightPass}/${preflight.length}) · mở Cài đặt`}
+                    onClick={() => { setPanel(null); setSettingsOpen(true); }} />
                 <RoundBtn icon="open_in_new" label="Tường" title="Mở Tường phụ đề" onClick={openWall} />
             </footer>
 
