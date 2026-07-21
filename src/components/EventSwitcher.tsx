@@ -32,7 +32,7 @@ const EventSwitcher: React.FC = () => {
                 <span className="material-symbols-outlined text-[18px] text-on-surface-variant shrink-0" aria-hidden="true">expand_more</span>
             </button>
             {open && (
-                <div className="absolute left-0 top-full mt-1 w-72 max-h-[60vh] overflow-y-auto rounded-xl border border-outline-variant bg-surface-container-high z-50 p-1.5" style={{ boxShadow: '0 18px 48px rgba(0,0,0,0.5)' }}>
+                <div className="absolute right-0 top-full mt-1.5 w-72 max-h-[70vh] overflow-y-auto rounded-xl border border-outline-variant bg-surface-container-high z-50 p-1.5" style={{ boxShadow: '0 18px 48px rgba(0,0,0,0.5)' }}>
                     <div className="font-label-caps text-label-caps text-on-surface-variant/60 px-2.5 py-1.5">Chọn sự kiện</div>
                     {events.length === 0 && <div className="px-2.5 py-2 text-sm text-on-surface-variant">Chưa có sự kiện nào.</div>}
                     {events.map((e) => {

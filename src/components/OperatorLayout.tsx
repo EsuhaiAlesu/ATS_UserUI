@@ -40,7 +40,6 @@ const MENUS: Menu[] = [
         { label: 'Dữ liệu', icon: 'database', desc: 'Xuất và xóa dữ liệu ứng dụng.', to: '/settings', hash: 'dl' },
     ] },
 ];
-const GEAR = MENUS.find((mm) => mm.gear) as Menu;
 
 function master(backendOnline: boolean, status: LiveStatus): { text: string; cls: string; dot: string } {
     if (!backendOnline) return { text: 'OFFLINE', cls: 'text-error', dot: 'bg-error' };
@@ -115,24 +114,22 @@ const OperatorLayout: React.FC = () => {
     return (
         <div className="h-screen flex flex-col overflow-hidden text-on-background app-aurora">
             {/* ══════════ HEAD BAR ══════════ */}
-            <header className="relative shrink-0 h-16 flex items-center px-4 pr-2.5 border-b border-outline-variant shell-rail font-jakarta">
+            <header className="relative !z-20 shrink-0 h-16 flex items-center px-4 pr-2.5 border-b border-outline-variant shell-rail font-jakarta">
                 {/* Thương hiệu — chữ Latin, dùng Sora; canh trái 16px thẳng cột với tiêu đề sidebar */}
                 <span className="font-sora font-bold text-[20px] tracking-[0.16em] leading-none text-on-surface select-none shrink-0" style={{ textShadow: '0 0 18px rgba(244,208,106,0.20)' }}>PROYAKU</span>
-                {/* Điều hướng chính — tab full-height, active có gạch chân vàng (thanh vàng sidebar xoay 90°) */}
-                <nav aria-label="Điều hướng chính" className="h-full flex items-center gap-0.5 ml-3">
-                    {MENUS.filter((mm) => !mm.gear).map((mm) => {
+                {/* Menu chính — 4 tab full-height (gồm Cài đặt), dời xa logo + font lớn hơn; active gạch chân vàng đồng bộ */}
+                <nav aria-label="Điều hướng chính" className="h-full flex items-center gap-1 ml-8">
+                    {MENUS.map((mm) => {
                         const on = mm.key === cur.key;
                         return (
                             <button key={mm.key} onClick={() => goMenu(mm)} aria-current={on ? 'page' : undefined}
-                                className={`relative h-full flex items-center px-3.5 text-[15px] font-medium leading-none transition-colors focus-visible:[outline-offset:-2px] ${on ? 'text-secondary' : 'text-on-surface-variant hover:text-on-surface'}`}>
+                                className={`relative h-full flex items-center px-4 text-[17px] font-medium leading-none transition-colors focus-visible:[outline-offset:-2px] ${on ? 'text-secondary' : 'text-on-surface-variant hover:text-on-surface'}`}>
                                 {mm.label}
-                                {on && <span aria-hidden="true" className="absolute inset-x-2.5 bottom-[-1px] h-[3px] rounded-t-full bg-secondary"></span>}
+                                {on && <span aria-hidden="true" className="absolute inset-x-3 bottom-[-1px] h-[3px] rounded-t-full bg-secondary"></span>}
                             </button>
                         );
                     })}
                 </nav>
-                <div className="w-px h-7 bg-outline-variant mx-2 hidden lg:block"></div>
-                <div className="hidden lg:block"><EventSwitcher /></div>
                 <div className="flex-1"></div>
                 {/* Đèn trạng thái — chỉ dùng màu, không viền */}
                 <div role="status" aria-live="polite" aria-label={`Trạng thái: ${m.text}`} className="flex items-center gap-2 mr-2">
@@ -145,13 +142,9 @@ const OperatorLayout: React.FC = () => {
                     <span className="material-symbols-outlined text-[20px]" aria-hidden="true">pan_tool</span>
                     <span className="text-[11px] font-semibold tracking-[0.06em] leading-none">DỪNG</span>
                 </button>
-                <div className="w-px h-7 bg-outline-variant mx-1.5"></div>
-                {/* Cài đặt — tiện ích, icon tô đặc vàng khi active (đồng bộ icon-fill của sidebar) */}
-                <button onClick={() => goMenu(GEAR)} title="Cài đặt" aria-label="Cài đặt" aria-current={GEAR.key === cur.key ? 'page' : undefined}
-                    className={`flex items-center gap-1.5 h-9 px-3 rounded-lg text-[15px] font-medium transition-colors ${GEAR.key === cur.key ? 'text-secondary' : 'text-on-surface-variant hover:text-on-surface hover:bg-surface-container'}`}>
-                    <span className="material-symbols-outlined text-[22px]" aria-hidden="true" style={{ fontVariationSettings: GEAR.key === cur.key ? "'FILL' 1, 'wght' 500" : "'FILL' 0, 'wght' 400" }}>settings</span>
-                    <span className="hidden sm:inline">Cài đặt</span>
-                </button>
+                {/* Sự kiện — tách riêng bên phải; dropdown mở canh phải, nổi lên trên */}
+                <div className="w-px h-7 bg-outline-variant mx-2 hidden lg:block"></div>
+                <div className="hidden lg:block"><EventSwitcher /></div>
             </header>
 
             {/* ══════════ BODY: contextual sidebar + content ══════════ */}
@@ -177,7 +170,7 @@ const OperatorLayout: React.FC = () => {
                                         style={{ fontSize: collapsed ? '24px' : '20px', fontVariationSettings: on ? "'FILL' 1, 'wght' 500" : "'FILL' 0, 'wght' 400" }}>{t.icon}</span>
                                     <span className={`rail-labels min-w-0 flex flex-col ${collapsed ? 'w-0 opacity-0 -translate-x-1 overflow-hidden' : 'flex-1 opacity-100 translate-x-0'}`} aria-hidden="true">
                                         <span className="flex items-center gap-1.5 min-w-0">
-                                            <span className="text-sm font-medium leading-snug truncate min-w-0">{t.label}</span>
+                                            <span className="text-[19px] font-medium leading-snug truncate min-w-0">{t.label}</span>
                                             {t.external && <span className="material-symbols-outlined text-[15px] opacity-50 shrink-0">open_in_new</span>}
                                             {t.soon && <span className="font-label-caps text-[9px] px-1.5 py-0.5 rounded-full border border-outline-variant text-on-surface-variant/50 shrink-0">sắp có</span>}
                                         </span>
