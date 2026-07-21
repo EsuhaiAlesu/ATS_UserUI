@@ -324,10 +324,10 @@ const BilingualStream: React.FC<Props> = ({ isEmbedded = false }) => {
     };
 
     const ViBadge = (
-        <span className="font-label-caps text-xl font-bold text-secondary tracking-widest border border-secondary px-3 py-1 rounded">TIẾNG VIỆT (VN)</span>
+        <span className="font-label-caps text-xl font-bold text-secondary tracking-widest border border-secondary px-3 py-1 rounded">Vietnamese</span>
     );
     const JaBadge = (
-        <span className="jp-text font-label-caps text-xl font-bold text-secondary tracking-widest border border-secondary px-3 py-1 rounded">日本語 (JA)</span>
+        <span className="jp-text font-label-caps text-xl font-bold text-secondary tracking-widest border border-secondary px-3 py-1 rounded">日本語</span>
     );
     const badgeFor = (lang: 'vi' | 'ja') => (lang === 'vi' ? ViBadge : JaBadge);
 
@@ -418,9 +418,9 @@ const BilingualStream: React.FC<Props> = ({ isEmbedded = false }) => {
             )}
 
             {/* Main Display Canvas — 16:9 letterbox, or fills the screen for a single-language monitor */}
-            <main className={`${canvasClass} w-full bg-background relative flex flex-col ceremonial-bg overflow-hidden shadow-2xl`}>
-                {/* Ambient Top Glow for Depth */}
-                <div className="absolute top-0 left-0 w-full h-[30%] bg-gradient-to-b from-surface-container/50 to-transparent pointer-events-none z-0"></div>
+            <main className={`${canvasClass} w-full bg-background relative flex flex-col overflow-hidden shadow-2xl`}>
+                {/* Hi-tech ceremonial wall — layered gold circuitry + drifting aurora, dark & clean where subtitles flow. */}
+                <div className="hitech-wall absolute inset-0 z-0" aria-hidden="true"></div>
 
                 {/* Header: Speaker Context & Branding */}
                 <header className="w-full flex items-center justify-between px-section-gap py-8 z-20 relative">

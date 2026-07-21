@@ -129,9 +129,9 @@ const VoiceLane: React.FC<{
                     <button
                         onClick={handlePreview}
                         disabled={!voiceId}
-                        className="border border-outline-variant text-on-surface-variant px-4 py-2 text-sm hover:text-primary hover:border-primary transition-colors disabled:opacity-40"
+                        className="inline-flex items-center gap-1.5 rounded border border-outline-variant text-on-surface-variant px-4 py-2 text-sm hover:text-primary hover:border-primary transition-colors disabled:opacity-40"
                     >
-                        ▶ Nghe thử
+                        <span className="material-symbols-outlined text-[18px]" aria-hidden="true">play_arrow</span>Nghe thử
                     </button>
                     <span className="font-label-caps text-label-caps text-on-surface-variant">{status}</span>
                 </div>
@@ -191,7 +191,7 @@ const PronunciationClinic: React.FC = () => {
     return (
         <div className="space-y-4">
             <div className="border border-outline-variant rounded-xl p-4 bg-surface text-on-surface-variant font-label-caps text-label-caps">
-                ⓘ Việc thu âm diễn ra trên <b className="text-secondary">chính máy chạy backend</b> (Mac Studio), không phải trên trình duyệt này. Đọc to đoạn kịch bản để máy học cách nghe đúng tên riêng &amp; thuật ngữ.
+                <span className="material-symbols-outlined text-secondary text-base align-[-3px] mr-1" aria-hidden="true">info</span>Việc thu âm diễn ra trên <b className="text-secondary">chính máy chạy backend</b> (Mac Studio), không phải trên trình duyệt này. Đọc to đoạn kịch bản để máy học cách nghe đúng tên riêng &amp; thuật ngữ.
             </div>
 
             <div>
@@ -203,9 +203,9 @@ const PronunciationClinic: React.FC = () => {
                     onChange={(e) => setScript(e.target.value)}
                     rows={5}
                     placeholder="VD: Xin chào, tôi đến từ Esuhai. Tổng Giám Đốc Lê Long Sơn. Kaizen Yoshida School. 御社…"
-                    className="field-lux transition-shadow w-full bg-surface text-on-surface border border-outline-variant rounded-DEFAULT p-2 text-sm focus:border-secondary"
+                    className="field-lux transition-shadow w-full bg-surface text-on-surface border border-outline-variant rounded p-2 text-sm focus:border-secondary"
                 />
-                <button onClick={handleSaveScript} className="mt-2 border border-outline-variant text-on-surface-variant px-4 py-2 text-sm hover:text-primary hover:border-primary transition-colors">
+                <button onClick={handleSaveScript} className="mt-2 rounded border border-outline-variant text-on-surface-variant px-4 py-2 text-sm hover:text-primary hover:border-primary transition-colors">
                     Lưu kịch bản
                 </button>
             </div>
@@ -222,9 +222,9 @@ const PronunciationClinic: React.FC = () => {
                 <button
                     onClick={handleRecord}
                     disabled={recording}
-                    className={`btn-lux px-5 py-2 text-sm font-label-caps text-label-caps rounded-DEFAULT ${recording ? 'bg-error text-on-error' : 'bg-secondary text-on-secondary hover:opacity-80'}`}
+                    className={`btn-lux inline-flex items-center justify-center gap-1.5 px-5 py-2 text-sm font-label-caps text-label-caps rounded ${recording ? 'bg-error text-on-error' : 'bg-secondary text-on-secondary hover:opacity-80'}`}
                 >
-                    {recording ? '● Đang thu…' : '● Thu âm (trên máy backend)'}
+                    <span className="material-symbols-outlined text-[18px]" aria-hidden="true">fiber_manual_record</span>{recording ? 'Đang thu…' : 'Thu âm (trên máy backend)'}
                 </button>
             </div>
 
@@ -241,13 +241,13 @@ const PronunciationClinic: React.FC = () => {
                         <div>
                             <label className="font-label-caps text-label-caps text-on-surface-variant block mb-1">Máy nghe được</label>
                             <textarea value={heard} onChange={(e) => setHeard(e.target.value)} rows={3}
-                                className="field-lux transition-shadow w-full bg-surface text-on-surface border border-outline-variant rounded-DEFAULT p-2 text-sm focus:border-secondary" />
+                                className="field-lux transition-shadow w-full bg-surface text-on-surface border border-outline-variant rounded p-2 text-sm focus:border-secondary" />
                         </div>
                     )}
                     <button
                         onClick={handleLearn}
                         disabled={learnBusy || !script.trim() || !heard.trim()}
-                        className="border border-secondary text-secondary px-4 py-2 text-sm hover:opacity-80 transition-opacity disabled:opacity-40"
+                        className="rounded border border-secondary text-secondary px-4 py-2 text-sm hover:opacity-80 transition-opacity disabled:opacity-40"
                     >
                         {learnBusy ? 'Đang học…' : 'Học (thêm luật sửa nghe-sai → đúng)'}
                     </button>
@@ -303,14 +303,14 @@ const VoiceStudio: React.FC = () => {
                         </label>
                     </div>
 
-                    <div className="mb-4 border border-outline-variant text-on-surface-variant font-label-caps text-label-caps px-4 py-3 rounded-DEFAULT">
-                        ⚠️ Khuyến nghị (theo audit): <b>gala 8/8 nên phụ đề-only</b>; nếu cần đọc tiếng, thu sẵn đoạn kính ngữ bằng giọng người. Chọn giọng ở đây phù hợp cho <b>pha phòng họp</b>.
+                    <div className="mb-4 border border-outline-variant text-on-surface-variant font-label-caps text-label-caps px-4 py-3 rounded">
+                        <span className="material-symbols-outlined text-secondary text-base align-[-3px] mr-1" aria-hidden="true">warning</span>Khuyến nghị (theo audit): <b>gala 8/8 nên phụ đề-only</b>; nếu cần đọc tiếng, thu sẵn đoạn kính ngữ bằng giọng người. Chọn giọng ở đây phù hợp cho <b>pha phòng họp</b>.
                     </div>
 
                     <div className="grid md:grid-cols-2 gap-4">
-                        <VoiceLane lang="vi" title="TIẾNG VIỆT (VN)" value={prefs.vi}
+                        <VoiceLane lang="vi" title="Vietnamese" value={prefs.vi}
                             onChange={(v) => setPrefs((p) => ({ ...p, vi: v }))} />
-                        <VoiceLane lang="ja" title="日本語 (JA)" value={prefs.ja}
+                        <VoiceLane lang="ja" title="日本語" value={prefs.ja}
                             onChange={(v) => setPrefs((p) => ({ ...p, ja: v }))} />
                     </div>
 

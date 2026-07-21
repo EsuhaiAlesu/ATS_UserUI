@@ -112,7 +112,7 @@ const OperatorLayout: React.FC = () => {
     };
 
     return (
-        <div className="h-screen flex flex-col overflow-clip text-on-background app-aurora">
+        <div className="h-screen flex flex-col overflow-clip text-on-background app-aurora font-jakarta">
             {/* ══════════ HEAD BAR ══════════ */}
             <header className="relative !z-20 shrink-0 h-16 flex items-center px-4 pr-2.5 border-b border-outline-variant shell-rail font-jakarta">
                 {/* Thương hiệu — chữ Latin, dùng Sora; canh trái 16px thẳng cột với tiêu đề sidebar */}

@@ -107,7 +107,7 @@ const GlossaryEditor: React.FC = () => {
                         <p>Để <b className="text-on-surface">JA trống</b> = giữ nguyên tên (không dịch). Bật <span className="material-symbols-outlined text-secondary text-[15px] align-middle" aria-hidden="true">lock</span> (hotword) cho tên riêng để máy nghe đúng.</p>
                     </div>
 
-                    {error && <div className="border border-error text-error font-label-caps text-label-caps px-4 py-3 rounded-DEFAULT flex items-center gap-2"><span className="material-symbols-outlined text-base" aria-hidden="true">error</span>{error}</div>}
+                    {error && <div className="border border-error text-error font-label-caps text-label-caps px-4 py-3 rounded flex items-center gap-2"><span className="material-symbols-outlined text-base" aria-hidden="true">error</span>{error}</div>}
 
                     <div className="flex flex-wrap items-center gap-2">
                         <button onClick={addRow} className={BTN_OUT}><span className="material-symbols-outlined text-[18px]" aria-hidden="true">add</span>Thêm dòng</button>
@@ -139,11 +139,11 @@ const GlossaryEditor: React.FC = () => {
                                 <thead>
                                     <tr className="bg-surface-container-lowest text-on-surface-variant font-label-caps text-label-caps text-left">
                                         <th className="px-3 py-3 w-8"></th>
-                                        <th className="px-3 py-3">VI</th>
-                                        <th className="px-3 py-3">JA <span className="opacity-60">(trống = giữ nguyên)</span></th>
+                                        <th className="px-3 py-3">Vietnamese</th>
+                                        <th className="px-3 py-3">日本語 <span className="opacity-60">(trống = giữ nguyên)</span></th>
                                         <th className="px-3 py-3">Reading (かな)</th>
                                         <th className="px-3 py-3">Loại</th>
-                                        <th className="px-3 py-3 text-center">🔒</th>
+                                        <th className="px-3 py-3 text-center"><span className="material-symbols-outlined text-[16px] align-middle" role="img" aria-label="Khoá (hotword)">lock</span></th>
                                         <th className="px-3 py-3">Nghe-sai → sửa</th>
                                         <th className="px-3 py-3">Ghi chú</th>
                                         <th className="px-3 py-3 w-8"></th>

@@ -23,7 +23,7 @@ import { computeReadiness, TIER_LABEL } from '../lib/readiness';
 // ─────────────────────────────────────────────────────────────────────────────
 
 const SELECT_CLS =
-    'field-lux transition-shadow w-full bg-surface text-on-surface border border-outline-variant rounded-DEFAULT py-2 px-3 ' +
+    'field-lux transition-shadow w-full bg-surface text-on-surface border border-outline-variant rounded py-2 px-3 ' +
     'focus:ring-0 focus:border-secondary appearance-none cursor-pointer disabled:opacity-50 text-sm';
 
 const langLines = (lines: LiveLine[], lang: string) =>
@@ -349,10 +349,16 @@ const AudioRouting: React.FC = () => {
                     {active && <span className="font-label-caps text-label-caps text-on-surface-variant tabular-nums ml-1" style={{ fontFamily: 'ui-monospace, monospace' }}>{mmss}</span>}
                 </div>
 
-                <div className="mx-auto flex items-center gap-2 px-3 py-1.5 rounded-full border border-outline-variant bg-surface-container-lowest">
-                    <span className={`font-label-caps text-label-caps ${dir.startsWith('VI') || !dir ? 'text-secondary' : 'text-on-surface-variant'}`}>VI</span>
-                    <span className="material-symbols-outlined text-base text-primary" aria-hidden="true">swap_horiz</span>
-                    <span className={`jp-text font-label-caps text-label-caps ${dir.startsWith('JA') ? 'text-secondary' : 'text-on-surface-variant'}`}>JA</span>
+                {/* Hướng dịch (tự nhận) — cặp icon‑chip tròn đồng bộ dock: bên đang nói SÁNG (vàng),
+                    bên chờ TỐI (mờ); mũi tên chỉ đúng chiều nguồn → đích. */}
+                <div className="mx-auto flex items-center gap-2" role="status"
+                    aria-label={dir ? `Hướng dịch ${dir}` : 'Chưa nhận hướng dịch'}
+                    title={dir ? `Đang dịch: ${dir}` : 'Chưa nhận hướng dịch'}>
+                    <span aria-hidden="true"
+                        className={`w-8 h-8 flex items-center justify-center rounded-full border font-label-caps text-label-caps transition-colors ${dir.startsWith('VI') || !dir ? 'bg-secondary/15 border-secondary text-secondary' : 'border-outline-variant text-on-surface-variant'}`}>VI</span>
+                    <span className="material-symbols-outlined text-[20px] text-primary" aria-hidden="true">{dir.startsWith('JA') ? 'arrow_back' : dir.startsWith('VI') ? 'arrow_forward' : 'swap_horiz'}</span>
+                    <span aria-hidden="true"
+                        className={`w-8 h-8 flex items-center justify-center rounded-full border jp-text font-label-caps text-label-caps transition-colors ${dir.startsWith('JA') ? 'bg-secondary/15 border-secondary text-secondary' : 'border-outline-variant text-on-surface-variant'}`}>JA</span>
                 </div>
 
                 <div className="flex items-center gap-1 shrink-0">
@@ -376,7 +382,7 @@ const AudioRouting: React.FC = () => {
             {/* ══════════ CENTER STAGE — always "the screen" ══════════ */}
             <main className="flex-1 min-h-0 relative flex flex-col bg-gradient-radial overflow-hidden">
                 {shownError && (
-                    <div className="shrink-0 mx-4 mt-4 border border-error text-error font-label-caps text-label-caps px-4 py-2.5 rounded-DEFAULT flex items-center gap-2 z-20">
+                    <div className="shrink-0 mx-4 mt-4 border border-error text-error font-label-caps text-label-caps px-4 py-2.5 rounded flex items-center gap-2 z-20">
                         <span className="material-symbols-outlined text-base" aria-hidden="true">error</span>
                         <span className="truncate">{shownError}</span>
                     </div>
@@ -388,7 +394,7 @@ const AudioRouting: React.FC = () => {
                         <div className="absolute top-0 inset-x-0 h-1/3 bg-gradient-to-b from-surface-container/40 to-transparent pointer-events-none z-0"></div>
                         <div className="absolute inset-0 flex z-10">
                             <div className="flex-1 min-w-0">
-                                <MonitorColumn label={<span className="font-label-caps text-label-caps tracking-widest text-secondary border border-secondary/60 rounded px-2.5 py-0.5">TIẾNG VIỆT</span>} lines={viLive} />
+                                <MonitorColumn label={<span className="font-label-caps text-label-caps tracking-widest text-secondary border border-secondary/60 rounded px-2.5 py-0.5">Vietnamese</span>} lines={viLive} />
                             </div>
                             <div className="w-px relative flex flex-col items-center justify-center opacity-50 shrink-0" aria-hidden="true">
                                 <div className="w-full h-full bg-gradient-to-b from-transparent via-secondary to-transparent"></div>
@@ -672,7 +678,7 @@ const AudioRouting: React.FC = () => {
                                         {outputs.length === 0 && <option value="">Chưa thấy loa</option>}
                                         {outputs.map((d) => <option key={d.index} value={d.index}>{d.name}</option>)}
                                     </select>
-                                    <button onClick={() => handleTestTone('vi')} className="mt-2 w-full border border-outline-variant text-on-surface-variant py-1.5 rounded-DEFAULT text-xs hover:text-primary hover:border-primary transition-colors">{toneStatus.vi || 'Test loa VI'}</button>
+                                    <button onClick={() => handleTestTone('vi')} className="mt-2 w-full border border-outline-variant text-on-surface-variant py-1.5 rounded text-xs hover:text-primary hover:border-primary transition-colors">{toneStatus.vi || 'Test loa VI'}</button>
                                 </div>
                                 <div>
                                     <div className="flex justify-between items-center mb-1.5"><label className="font-label-caps text-label-caps text-on-surface-variant">Loa JA</label><span className="font-label-caps text-label-caps text-on-surface-variant">VI → JA</span></div>
@@ -680,7 +686,7 @@ const AudioRouting: React.FC = () => {
                                         {outputs.length === 0 && <option value="">Chưa thấy loa</option>}
                                         {outputs.map((d) => <option key={d.index} value={d.index}>{d.name}</option>)}
                                     </select>
-                                    <button onClick={() => handleTestTone('ja')} className="mt-2 w-full border border-outline-variant text-on-surface-variant py-1.5 rounded-DEFAULT text-xs hover:text-primary hover:border-primary transition-colors">{toneStatus.ja || 'Test loa JA'}</button>
+                                    <button onClick={() => handleTestTone('ja')} className="mt-2 w-full border border-outline-variant text-on-surface-variant py-1.5 rounded text-xs hover:text-primary hover:border-primary transition-colors">{toneStatus.ja || 'Test loa JA'}</button>
                                 </div>
                             </section>
                         </div>

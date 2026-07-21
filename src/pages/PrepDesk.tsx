@@ -455,7 +455,7 @@ const PrepDesk: React.FC = () => {
                 title="Bảng chỉ huy"
                 subtitle={`Tổng duyệt ${dRehearsal >= 0 ? `còn ${dRehearsal}n` : 'đã qua'} · Gala ${dGala >= 0 ? `còn ${dGala}n` : 'đã qua'}`}
             >
-                <button onClick={() => setTick((t) => t + 1)} disabled={data.loading} className="border border-outline-variant text-on-surface-variant px-3 py-1.5 text-sm rounded-DEFAULT hover:text-primary hover:border-primary disabled:opacity-40">{data.loading ? 'Đang đo…' : 'Đo lại'}</button>
+                <button onClick={() => setTick((t) => t + 1)} disabled={data.loading} className="border border-outline-variant text-on-surface-variant px-3 py-1.5 text-sm rounded hover:text-primary hover:border-primary disabled:opacity-40">{data.loading ? 'Đang đo…' : 'Đo lại'}</button>
             </PageHeader>
 
             {/* Hồ sơ dữ liệu sự kiện + băng cảnh hoạt (doc 29 · P0 — làm lộ rủi ro "dùng dữ liệu chung") */}
@@ -552,14 +552,14 @@ const PrepDesk: React.FC = () => {
                                 <div className="font-label-caps text-label-caps text-on-surface-variant mb-2">Ghi sự cố (nền cho lần sau)</div>
                                 <div className="flex gap-2">
                                     <input value={incident} onChange={(e) => setIncident(e.target.value)} placeholder="vd: 'Kaizen' nghe thành 'kaisen'…"
-                                        className="field-lux transition-shadow flex-1 bg-surface text-on-surface border border-outline-variant rounded-DEFAULT px-3 py-2 text-base" />
+                                        className="field-lux transition-shadow flex-1 bg-surface text-on-surface border border-outline-variant rounded px-3 py-2 text-base" />
                                     <button onClick={() => { setPrepState(addIncident(incident)); setIncident(''); }} disabled={!incident.trim()}
-                                        className="border border-outline-variant text-on-surface-variant px-3 py-2 text-base rounded-DEFAULT hover:border-primary disabled:opacity-40">Ghi</button>
+                                        className="border border-outline-variant text-on-surface-variant px-3 py-2 text-base rounded hover:border-primary disabled:opacity-40">Ghi</button>
                                 </div>
                                 <ul className="mt-2 space-y-1">
                                     {prep.incidents.map((it, i) => (
                                         <li key={i} className="text-base text-on-surface-variant flex items-start gap-2">
-                                            <button onClick={() => setPrepState(removeIncident(i))} className="text-error hover:opacity-70">✕</button>
+                                            <button onClick={() => setPrepState(removeIncident(i))} aria-label="Xóa" className="text-error hover:opacity-70 flex items-center"><span className="material-symbols-outlined text-[18px]" aria-hidden="true">close</span></button>
                                             <span>{it}</span>
                                         </li>
                                     ))}
