@@ -112,41 +112,51 @@ const OperatorLayout: React.FC = () => {
         return loc.hash ? loc.hash === `#${t.hash}` : t.hash === firstHash;
     };
 
-    const tabCls = (on: boolean) =>
-        `px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${on ? 'bg-secondary/15 text-secondary' : 'text-on-surface-variant hover:text-on-surface hover:bg-surface-container'}`;
-
     return (
         <div className="h-screen flex flex-col overflow-hidden text-on-background app-aurora">
             {/* ══════════ HEAD BAR ══════════ */}
-            <header className="shrink-0 h-14 flex items-center gap-2 px-4 border-b border-outline-variant shell-rail">
-                <span className="font-bold text-lg tracking-[0.22em] text-on-surface select-none shrink-0 pr-1" style={{ textShadow: '0 0 18px rgba(244,208,106,0.20)' }}>PROYAKU</span>
-                <nav className="flex items-center gap-1">
-                    {MENUS.filter((mm) => !mm.gear).map((mm) => (
-                        <button key={mm.key} onClick={() => goMenu(mm)} className={tabCls(mm.key === cur.key)}>{mm.label}</button>
-                    ))}
+            <header className="relative shrink-0 h-16 flex items-center px-4 pr-2.5 border-b border-outline-variant shell-rail font-jakarta">
+                {/* Thương hiệu — chữ Latin, dùng Sora; canh trái 16px thẳng cột với tiêu đề sidebar */}
+                <span className="font-sora font-bold text-[20px] tracking-[0.16em] leading-none text-on-surface select-none shrink-0" style={{ textShadow: '0 0 18px rgba(244,208,106,0.20)' }}>PROYAKU</span>
+                {/* Điều hướng chính — tab full-height, active có gạch chân vàng (thanh vàng sidebar xoay 90°) */}
+                <nav aria-label="Điều hướng chính" className="h-full flex items-center gap-0.5 ml-3">
+                    {MENUS.filter((mm) => !mm.gear).map((mm) => {
+                        const on = mm.key === cur.key;
+                        return (
+                            <button key={mm.key} onClick={() => goMenu(mm)} aria-current={on ? 'page' : undefined}
+                                className={`relative h-full flex items-center px-3.5 text-[15px] font-medium leading-none transition-colors focus-visible:[outline-offset:-2px] ${on ? 'text-secondary' : 'text-on-surface-variant hover:text-on-surface'}`}>
+                                {mm.label}
+                                {on && <span aria-hidden="true" className="absolute inset-x-2.5 bottom-[-1px] h-[3px] rounded-t-full bg-secondary"></span>}
+                            </button>
+                        );
+                    })}
                 </nav>
-                <div className="w-px h-6 bg-outline-variant mx-1 hidden lg:block"></div>
+                <div className="w-px h-7 bg-outline-variant mx-2 hidden lg:block"></div>
                 <div className="hidden lg:block"><EventSwitcher /></div>
                 <div className="flex-1"></div>
-                <div className="flex items-center gap-1.5 mr-1" title={`Trạng thái: ${m.text}`}>
-                    <span className={`w-2.5 h-2.5 rounded-full ${m.dot}`}></span>
-                    <span className={`font-label-caps text-[10px] ${m.cls}`}>{m.text}</span>
+                {/* Đèn trạng thái — chỉ dùng màu, không viền */}
+                <div role="status" aria-live="polite" aria-label={`Trạng thái: ${m.text}`} className="flex items-center gap-2 mr-2">
+                    <span className={`w-2.5 h-2.5 rounded-full ${m.dot}`} aria-hidden="true"></span>
+                    <span className={`text-[11px] font-semibold tracking-[0.1em] leading-none ${m.cls}`}>{m.text}</span>
                 </div>
-                <button onClick={() => session.stop()} title="Dừng phiên ngay (khẩn cấp)"
-                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-error text-error hover:bg-error hover:text-on-error transition-colors">
-                    <span className="material-symbols-outlined text-[18px]" aria-hidden="true">pan_tool</span>
-                    <span className="font-label-caps text-[10px] leading-none">DỪNG</span>
+                {/* Dừng khẩn cấp — control duy nhất màu đỏ, luôn sẵn sàng */}
+                <button onClick={() => session.stop()} title="Dừng phiên ngay (khẩn cấp)" aria-label="Dừng phiên khẩn cấp"
+                    className="flex items-center gap-1.5 h-9 px-3 rounded-lg border border-error text-error hover:bg-error hover:text-on-error transition-colors">
+                    <span className="material-symbols-outlined text-[20px]" aria-hidden="true">pan_tool</span>
+                    <span className="text-[11px] font-semibold tracking-[0.06em] leading-none">DỪNG</span>
                 </button>
-                <div className="w-px h-6 bg-outline-variant mx-1"></div>
-                <button onClick={() => goMenu(GEAR)} title="Cài đặt" className={`flex items-center gap-1.5 ${tabCls(GEAR.key === cur.key)}`}>
-                    <span className="material-symbols-outlined text-[20px]" aria-hidden="true">settings</span>
+                <div className="w-px h-7 bg-outline-variant mx-1.5"></div>
+                {/* Cài đặt — tiện ích, icon tô đặc vàng khi active (đồng bộ icon-fill của sidebar) */}
+                <button onClick={() => goMenu(GEAR)} title="Cài đặt" aria-label="Cài đặt" aria-current={GEAR.key === cur.key ? 'page' : undefined}
+                    className={`flex items-center gap-1.5 h-9 px-3 rounded-lg text-[15px] font-medium transition-colors ${GEAR.key === cur.key ? 'text-secondary' : 'text-on-surface-variant hover:text-on-surface hover:bg-surface-container'}`}>
+                    <span className="material-symbols-outlined text-[22px]" aria-hidden="true" style={{ fontVariationSettings: GEAR.key === cur.key ? "'FILL' 1, 'wght' 500" : "'FILL' 0, 'wght' 400" }}>settings</span>
                     <span className="hidden sm:inline">Cài đặt</span>
                 </button>
             </header>
 
             {/* ══════════ BODY: contextual sidebar + content ══════════ */}
             <div className="flex-1 min-h-0 flex overflow-hidden">
-                <aside className={`hidden md:flex flex-col shrink-0 border-r border-outline-variant shell-rail rail-aside overflow-hidden ${collapsed ? 'w-16' : 'w-[248px]'}`}>
+                <aside className={`hidden md:flex flex-col shrink-0 border-r border-outline-variant shell-rail rail-aside font-jakarta overflow-hidden ${collapsed ? 'w-16' : 'w-[248px]'}`}>
                     {collapsed
                         ? <div className="mx-auto my-3 h-px w-6 bg-outline-variant" aria-hidden="true"></div>
                         : <div className="px-4 pt-4 pb-2 font-label-caps text-label-caps text-on-surface-variant/60 truncate">{cur.label}</div>}

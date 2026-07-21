@@ -76,9 +76,11 @@ export default {
         "display-lg": ["Be Vietnam Pro", "sans-serif"],
         "body-md": ["Be Vietnam Pro", "sans-serif"],
         "display-lg-mobile": ["Be Vietnam Pro", "sans-serif"],
-        "label-caps": ["Be Vietnam Pro", "sans-serif"],
+        "label-caps": ["Plus Jakarta Sans", "Be Vietnam Pro", "sans-serif"],
         "headline-sm": ["Be Vietnam Pro", "sans-serif"],
-        "body-lg": ["Be Vietnam Pro", "sans-serif"]
+        "body-lg": ["Be Vietnam Pro", "sans-serif"],
+        "sora": ["Sora", "system-ui", "sans-serif"],
+        "jakarta": ["Plus Jakarta Sans", "Be Vietnam Pro", "system-ui", "sans-serif"]
       },
       fontSize: {
         "headline-md": ["32px", { "lineHeight": "40px", "fontWeight": "600" }],
