@@ -68,6 +68,9 @@ const OperatorLayout: React.FC = () => {
     const nav = useNavigate();
     const m = master(session.backendOnline, session.status);
     const cur = menuOf(loc.pathname);
+    // "Dịch hội nghị" tách khỏi nhóm tab trái → pill riêng (kiểu tikme) đặt cạnh Sự kiện.
+    const opsMenu = MENUS.find((mm) => mm.key === 'ops')!;
+    const opsActive = cur.key === 'ops';
     const firstHash = cur.tools.find((t) => t.hash)?.hash;
 
     // On landing with a hash in the URL (e.g. cross-page nav to /settings#dl), scroll after render.
@@ -117,24 +120,35 @@ const OperatorLayout: React.FC = () => {
             <header className="relative !z-20 shrink-0 h-16 flex items-center px-4 pr-2.5 border-b border-outline-variant shell-rail font-jakarta">
                 {/* Thương hiệu — chữ Latin, dùng Sora; canh trái 16px thẳng cột với tiêu đề sidebar */}
                 <span className="font-sora font-bold text-[20px] tracking-[0.16em] leading-none text-on-surface select-none shrink-0" style={{ textShadow: '0 0 18px rgba(244,208,106,0.20)' }}>PROYAKU</span>
-                {/* Menu chính — PILL kiểu tikme "Omni Channel": tab ĐANG MỞ = nền gradient cam→vàng + chữ tối + glow;
-                    tab CHƯA VÀO = nền tối, viền mờ, chữ dịu. Chữ to hơn; "Dịch hội nghị" đứng sát "Cài đặt". */}
-                <nav aria-label="Điều hướng chính" className="flex items-center gap-2 ml-8">
-                    {MENUS.map((mm) => {
+                {/* Menu chính — 3 tab full-height (Chuẩn bị · Báo cáo · Cài đặt), gạch chân vàng khi active (kiểu cũ).
+                    "Dịch hội nghị" KHÔNG nằm ở đây — nó là pill riêng (kiểu tikme) đặt cạnh Sự kiện, xem bên dưới. */}
+                <nav aria-label="Điều hướng chính" className="h-full flex items-center gap-1 ml-8">
+                    {MENUS.filter((mm) => mm.key !== 'ops').map((mm) => {
                         const on = mm.key === cur.key;
                         return (
                             <button key={mm.key} onClick={() => goMenu(mm)} aria-current={on ? 'page' : undefined}
-                                style={on ? { background: 'linear-gradient(90deg, #f97316 0%, #f0a93a 52%, #f4d06a 100%)', boxShadow: '0 8px 22px -8px rgba(249,115,22,0.55)' } : undefined}
-                                className={`flex items-center px-4 py-2 rounded-full text-[18px] font-semibold leading-none whitespace-nowrap transition-all focus-visible:[outline-offset:2px] ${on
-                                    ? 'text-on-secondary ring-1 ring-[#fdba74]/60'
-                                    : 'text-on-surface-variant border border-outline-variant bg-surface-container/50 hover:text-on-surface hover:border-outline hover:bg-surface-container'}`}>
+                                className={`relative h-full flex items-center px-4 text-[17px] font-medium leading-none transition-colors focus-visible:[outline-offset:-2px] ${on ? 'text-secondary' : 'text-on-surface-variant hover:text-on-surface'}`}>
                                 {mm.label}
+                                {on && <span aria-hidden="true" className="absolute inset-x-3 bottom-[-1px] h-[3px] rounded-t-full bg-secondary"></span>}
                             </button>
                         );
                     })}
                 </nav>
-                {/* Sự kiện — nằm GIỮA, cân đối giữa nhóm tab (trái) và cụm trạng thái/DỪNG (phải) */}
-                <div className="flex-1 min-w-0 flex justify-center px-4"><EventSwitcher /></div>
+                {/* Cụm GIỮA — pill "Dịch hội nghị" (kiểu tikme Omni Channel) đứng sát TRÁI, rồi tới Sự kiện */}
+                <div className="flex-1 min-w-0 flex items-center justify-center gap-3 px-4">
+                    {/* Dịch hội nghị — pill: ĐANG MỞ = gradient cam→vàng + chữ tối + glow; CHƯA VÀO = nền tối, viền mờ */}
+                    <button onClick={() => goMenu(opsMenu)} aria-current={opsActive ? 'page' : undefined}
+                        title="Dịch hội nghị — bàn điều khiển dịch trực tiếp"
+                        style={opsActive ? { background: 'linear-gradient(90deg, #f97316 0%, #f0a93a 52%, #f4d06a 100%)', boxShadow: '0 8px 22px -8px rgba(249,115,22,0.55)' } : undefined}
+                        className={`shrink-0 flex items-center gap-2 pl-3.5 pr-3 py-2 rounded-full text-[18px] font-semibold leading-none whitespace-nowrap transition-all focus-visible:[outline-offset:2px] ${opsActive
+                            ? 'text-on-secondary ring-1 ring-[#fdba74]/60'
+                            : 'text-on-surface-variant border border-outline-variant bg-surface-container/50 hover:text-on-surface hover:border-outline hover:bg-surface-container'}`}>
+                        <span className="material-symbols-outlined text-[20px]" aria-hidden="true">graphic_eq</span>
+                        {opsMenu.label}
+                        <span className="material-symbols-outlined text-[20px] opacity-80" aria-hidden="true">chevron_right</span>
+                    </button>
+                    <EventSwitcher />
+                </div>
                 {/* Đèn trạng thái — chỉ dùng màu, không viền */}
                 <div role="status" aria-live="polite" aria-label={`Trạng thái: ${m.text}`} className="flex items-center gap-2 mr-2">
                     <span className={`w-2.5 h-2.5 rounded-full ${m.dot}`} aria-hidden="true"></span>
