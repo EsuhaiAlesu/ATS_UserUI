@@ -800,7 +800,7 @@ const AudioRouting: React.FC = () => {
             {panel && (
                 <>
                     <div className="absolute inset-0 z-30" onClick={() => setPanel(null)}></div>
-                    <div className="absolute top-1/2 -translate-y-1/2 left-[256px] z-40 w-[min(72vw,360px)] rounded-2xl border border-outline-variant bg-surface-container-high p-4 shadow-2xl"
+                    <div className="absolute top-1/2 -translate-y-1/2 left-[256px] z-40 w-[min(80vw,400px)] rounded-2xl border border-outline-variant bg-surface-container-high p-4 shadow-2xl"
                         style={{ boxShadow: '0 18px 48px rgba(0,0,0,0.55)' }}>
                         {panel === 'speed' && (
                             <div className="flex flex-col gap-3">
@@ -851,35 +851,34 @@ const AudioRouting: React.FC = () => {
                                         <span className="material-symbols-outlined text-[15px]" aria-hidden="true">refresh</span>Quét màn hình
                                     </button>
                                 </div>
-                                <div className="flex flex-col gap-1.5">
-                                    {/* Nhãn cột — thấy rõ cấu trúc phân luồng: Vùng → Ngôn ngữ → Màn hình đích */}
-                                    <div className="flex items-center gap-2 px-2.5 font-label-caps text-[10px] text-on-surface-variant/55">
-                                        <span className="w-6 shrink-0" aria-hidden="true"></span>
-                                        <span className="w-14 shrink-0">Vùng</span>
-                                        <span className="flex-1 min-w-0">Ngôn ngữ</span>
-                                        <span className="w-24 shrink-0">Màn hình</span>
-                                    </div>
+                                <div className="flex flex-col gap-2">
                                     {subOutputs.map((o, i) => (
-                                        <div key={o.id} className={`flex items-center gap-2 rounded-lg border px-2.5 py-2 ${o.enabled ? 'border-outline-variant' : 'border-outline-variant/40 opacity-60'}`}>
-                                            <button onClick={() => patchSubOutputs(subOutputs.map((x, j) => (j === i ? { ...x, enabled: !x.enabled } : x)))}
-                                                title={o.enabled ? 'Đang bật — bấm để tắt' : 'Đang tắt — bấm để bật'}
-                                                className={`shrink-0 w-6 h-6 rounded-md flex items-center justify-center transition-colors ${o.enabled ? 'bg-secondary text-on-secondary' : 'border border-outline-variant text-on-surface-variant'}`}>
-                                                <span className="material-symbols-outlined text-[16px]" aria-hidden="true">{o.enabled ? 'check' : 'remove'}</span>
-                                            </button>
-                                            <span className="w-14 shrink-0 text-sm text-on-surface truncate">{o.label}</span>
-                                            <select value={o.mode} onChange={(e) => patchSubOutputs(subOutputs.map((x, j) => (j === i ? { ...x, mode: e.target.value as SubMode } : x)))}
-                                                className="flex-1 min-w-0 bg-surface border border-outline-variant rounded-lg px-2 py-1.5 text-sm text-on-surface focus:outline-none focus:border-secondary">
-                                                {SUB_MODES.map((m) => <option key={m.v} value={m.v}>{m.l}</option>)}
-                                            </select>
-                                            {/* Màn hình đích — LUÔN hiện để thấy phân luồng từng dòng. Chọn được khi quét thấy >1 màn;
-                                                còn lại disabled hiện "Tự chia" (chia đôi màn hiện tại) + tooltip hướng dẫn cắm/quét thêm. */}
-                                            <select value={o.screenIdx ?? ''} disabled={screens.length <= 1}
-                                                title={screens.length > 1 ? 'Chọn màn hình xuất dòng này' : 'Cắm thêm màn + bấm "Quét màn hình" để chọn — hiện đang tự chia'}
-                                                onChange={(e) => patchSubOutputs(subOutputs.map((x, j) => (j === i ? { ...x, screenIdx: e.target.value === '' ? undefined : Number(e.target.value) } : x)))}
-                                                className="w-24 shrink-0 bg-surface border border-outline-variant rounded-lg px-2 py-1.5 text-sm text-on-surface focus:outline-none focus:border-secondary disabled:opacity-50 disabled:cursor-not-allowed">
-                                                <option value="">Tự chia</option>
-                                                {screens.map((s, si) => <option key={si} value={si}>{(s.label || `Màn ${si + 1}`) + (s.isPrimary ? ' ★' : '')}</option>)}
-                                            </select>
+                                        <div key={o.id} className={`flex flex-col gap-1.5 rounded-lg border px-2.5 py-2 ${o.enabled ? 'border-outline-variant' : 'border-outline-variant/40 opacity-60'}`}>
+                                            {/* Dòng 1 — bật/tắt · vùng · ngôn ngữ hiển thị */}
+                                            <div className="flex items-center gap-2">
+                                                <button onClick={() => patchSubOutputs(subOutputs.map((x, j) => (j === i ? { ...x, enabled: !x.enabled } : x)))}
+                                                    title={o.enabled ? 'Đang bật — bấm để tắt' : 'Đang tắt — bấm để bật'}
+                                                    className={`shrink-0 w-6 h-6 rounded-md flex items-center justify-center transition-colors ${o.enabled ? 'bg-secondary text-on-secondary' : 'border border-outline-variant text-on-surface-variant'}`}>
+                                                    <span className="material-symbols-outlined text-[16px]" aria-hidden="true">{o.enabled ? 'check' : 'remove'}</span>
+                                                </button>
+                                                <span className="w-16 shrink-0 text-sm font-medium text-on-surface truncate">{o.label}</span>
+                                                <select value={o.mode} onChange={(e) => patchSubOutputs(subOutputs.map((x, j) => (j === i ? { ...x, mode: e.target.value as SubMode } : x)))}
+                                                    className="flex-1 min-w-0 bg-surface border border-outline-variant rounded-lg px-2 py-1.5 text-sm text-on-surface focus:outline-none focus:border-secondary">
+                                                    {SUB_MODES.map((m) => <option key={m.v} value={m.v}>{m.l}</option>)}
+                                                </select>
+                                            </div>
+                                            {/* Dòng 2 — MÀN HÌNH đích: trọn chiều rộng để hiện ĐỦ tên thiết bị màn hình (tên + độ phân giải)
+                                                mà trình duyệt quét được. LUÔN hiện; ≤1 màn → "Tự chia" (disabled); >1 màn → chọn màn thật. */}
+                                            <div className="flex items-center gap-2 pl-8">
+                                                <span className="material-symbols-outlined text-[17px] text-on-surface-variant/70 shrink-0" aria-hidden="true">desktop_windows</span>
+                                                <select value={o.screenIdx ?? ''} disabled={screens.length <= 1}
+                                                    title={screens.length > 1 ? 'Chọn màn hình xuất vùng này' : 'Cắm thêm màn + bấm "Quét màn hình" để chọn — hiện đang tự chia'}
+                                                    onChange={(e) => patchSubOutputs(subOutputs.map((x, j) => (j === i ? { ...x, screenIdx: e.target.value === '' ? undefined : Number(e.target.value) } : x)))}
+                                                    className="flex-1 min-w-0 bg-surface border border-outline-variant rounded-lg px-2 py-1.5 text-sm text-on-surface focus:outline-none focus:border-secondary disabled:opacity-50 disabled:cursor-not-allowed">
+                                                    <option value="">{screens.length > 1 ? 'Tự chia (chưa gán màn)' : 'Tự chia — chỉ thấy 1 màn'}</option>
+                                                    {screens.map((s, si) => <option key={si} value={si}>{`${s.label || `Màn ${si + 1}`}${s.isPrimary ? ' ★' : ''} · ${s.availWidth}×${s.availHeight}`}</option>)}
+                                                </select>
+                                            </div>
                                         </div>
                                     ))}
                                 </div>
