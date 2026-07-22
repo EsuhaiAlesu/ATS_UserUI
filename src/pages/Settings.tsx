@@ -1,11 +1,9 @@
 import React, { useState } from 'react';
-import { Link } from 'react-router-dom';
 import PageHeader from '../components/PageHeader';
 import { useLiveSession } from '../lib/LiveSessionContext';
 import { API_BASE } from '../lib/api';
-import { loadTtsPrefs, saveTtsPrefs } from '../lib/ttsPrefs';
 import {
-    loadSettings, saveSettings, exportLocalData, clearLocalData, DEFAULT_EVENT_NAME,
+    loadSettings, saveSettings, exportLocalData, clearLocalData,
 } from '../lib/settings';
 import { toast } from '../lib/toast';
 
@@ -43,21 +41,11 @@ const Settings: React.FC = () => {
     const [apiBase, setApiBase] = useState(initial.apiBase ?? '');
     const [testStatus, setTestStatus] = useState('');
 
-    // Event
-    const [eventName, setEventName] = useState(initial.eventName ?? DEFAULT_EVENT_NAME);
-    const [rehearsalDate, setRehearsalDate] = useState(initial.rehearsalDate ?? '2026-08-07');
-    const [galaDate, setGalaDate] = useState(initial.galaDate ?? '2026-08-08');
-    const [venue, setVenue] = useState(initial.venue ?? '');
-
     // Display (caption size — the previously keyboard-only /stream zoom)
     const [capScale, setCapScale] = useState(() => {
         const s = Number(localStorage.getItem('proyaku_capscale'));
         return s >= 0.5 && s <= 3 ? s : 1;
     });
-
-    // TTS
-    const [ttsEnabled, setTtsEnabled] = useState(() => loadTtsPrefs().enabled);
-    const ttsPrefs = loadTtsPrefs();
 
     const testConnection = async () => {
         setTestStatus('Đang thử…');
@@ -76,21 +64,10 @@ const Settings: React.FC = () => {
         if (window.confirm('Đã lưu địa chỉ backend. Tải lại trang để áp dụng?')) window.location.reload();
     };
 
-    const saveEvent = () => {
-        saveSettings({ eventName: eventName.trim(), rehearsalDate, galaDate, venue: venue.trim() });
-        toast.success('Đã lưu thông tin sự kiện');
-    };
-
     const changeCap = (v: number) => {
         const s = Math.max(0.5, Math.min(3, v));
         setCapScale(s);
         try { localStorage.setItem('proyaku_capscale', String(s)); } catch { /* ignore */ }
-    };
-
-    const toggleTts = () => {
-        const next = !ttsEnabled;
-        setTtsEnabled(next);
-        saveTtsPrefs({ ...loadTtsPrefs(), enabled: next });
     };
 
     const doExport = () => {
@@ -139,23 +116,6 @@ const Settings: React.FC = () => {
                         </div>
                     </Section>
 
-                    {/* SỰ KIỆN */}
-                    <Section id="sk" icon="event" title="Sự kiện" desc="Tên & mốc thời gian — dùng cho đếm ngược ở Bảng chỉ huy.">
-                        <Field label="Tên sự kiện">
-                            <input value={eventName} onChange={(e) => setEventName(e.target.value)} className={INPUT} />
-                        </Field>
-                        <div className="grid grid-cols-2 gap-3">
-                            <Field label="Ngày tổng duyệt"><input type="date" value={rehearsalDate} onChange={(e) => setRehearsalDate(e.target.value)} className={INPUT} /></Field>
-                            <Field label="Ngày gala"><input type="date" value={galaDate} onChange={(e) => setGalaDate(e.target.value)} className={INPUT} /></Field>
-                        </div>
-                        <Field label="Địa điểm"><input value={venue} onChange={(e) => setVenue(e.target.value)} placeholder="Hội trường…" className={INPUT} /></Field>
-                        <div className="flex items-center gap-3">
-                            <button onClick={saveEvent} className={`${BTN} btn-lux bg-secondary text-on-secondary hover:opacity-80`}>
-                                <span className="material-symbols-outlined text-[18px]" aria-hidden="true">save</span>Lưu sự kiện
-                            </button>
-                        </div>
-                    </Section>
-
                     {/* HIỂN THỊ */}
                     <Section id="pd" icon="format_size" title="Hiển thị phụ đề" desc="Cỡ chữ mặc định cho Tường phụ đề (trước đây chỉ chỉnh được bằng phím +/−).">
                         <div className="flex items-center gap-3">
@@ -168,18 +128,6 @@ const Settings: React.FC = () => {
                             <span className="text-on-surface font-semibold" style={{ fontSize: `calc(1rem * ${capScale})` }}>Kính thưa quý vị · ご来賓の皆様</span>
                         </div>
                         <button onClick={() => changeCap(1)} className="text-sm text-on-surface-variant hover:text-primary underline">Đặt lại 100%</button>
-                    </Section>
-
-                    {/* GIỌNG ĐỌC */}
-                    <Section id="gd" icon="record_voice_over" title="Giọng đọc (TTS)" desc="Máy đọc thành tiếng, hay chỉ hiện phụ đề.">
-                        <label className="flex items-center justify-between gap-3 cursor-pointer">
-                            <span className="text-on-surface">{ttsEnabled ? 'BẬT đọc tiếng' : 'CHỈ phụ đề (khuyến nghị cho gala)'}</span>
-                            <button onClick={toggleTts} className={`font-label-caps text-label-caps px-3 py-1.5 rounded-full ${ttsEnabled ? 'bg-secondary text-on-secondary' : 'border border-outline-variant text-on-surface-variant'}`}>{ttsEnabled ? 'ON' : 'OFF'}</button>
-                        </label>
-                        <div className="text-sm text-on-surface-variant">Giọng đang chọn — VI: <span className="text-on-surface">{ttsPrefs.vi?.label ?? '—'}</span> · JA: <span className="text-on-surface">{ttsPrefs.ja?.label ?? '—'}</span></div>
-                        <Link to="/voices" className={`${BTN} border border-outline-variant text-on-surface-variant hover:text-primary hover:border-primary`}>
-                            <span className="material-symbols-outlined text-[18px]" aria-hidden="true">tune</span>Chọn giọng chi tiết
-                        </Link>
                     </Section>
 
                     {/* TÀI KHOẢN */}
@@ -209,7 +157,6 @@ const Settings: React.FC = () => {
                             <span className="text-on-surface-variant">Ứng dụng</span><span className="text-on-surface">PROYAKU — Phiên dịch VI ⇄ JA</span>
                             <span className="text-on-surface-variant">Phiên bản</span><span className="text-on-surface tabular-nums">{APP_VERSION}</span>
                             <span className="text-on-surface-variant">Backend</span><span className={session.backendOnline ? 'text-secondary' : 'text-error'}>{session.backendOnline ? 'Đang kết nối' : 'Offline'}</span>
-                            <span className="text-on-surface-variant">Sự kiện</span><span className="text-on-surface">{eventName}</span>
                         </div>
                         <p className="text-xs text-on-surface-variant pt-2 border-t border-outline-variant">Esuhai 20 năm · 2006–2026 · Cầu nối Việt–Nhật.</p>
                     </Section>

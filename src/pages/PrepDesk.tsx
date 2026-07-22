@@ -438,7 +438,8 @@ const PrepDesk: React.FC = () => {
     };
 
     const _ev = eventDates();
-    const dRehearsal = daysUntil(_ev.rehearsal), dGala = daysUntil(_ev.gala);
+    // Ưu tiên mốc thời gian của SỰ KIỆN đang chọn (Đặt lịch); thiếu thì rơi về mặc định (settings/hằng số).
+    const dRehearsal = daysUntil(event?.rehearsalDate || _ev.rehearsal), dGala = daysUntil(event?.date || _ev.gala);
     const shownSignals = signals.filter((s) => s.phase === selPhase);
     const openSignal = openId ? signals.find((s) => s.id === openId) ?? null : null;
     const openPre = preSignals.filter((s) => s.state !== 'ok').length;

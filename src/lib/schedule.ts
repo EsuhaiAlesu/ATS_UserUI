@@ -18,6 +18,8 @@ export interface Conference {
     endTime: string;     // HH:MM (dự kiến kết thúc)
     booker: string;      // người book lịch
     agenda?: string;     // nội dung
+    rehearsalDate?: string;  // YYYY-MM-DD — ngày tổng duyệt (đếm ngược ở Bảng chỉ huy)
+    venue?: string;          // địa điểm / hội trường
     speakers: Speaker[];
     seriesId?: string;   // thuộc Chuỗi hội nghị (doc 30). Vắng ⇒ sự kiện MỘT LẦN (mặc định).
     createdAt: string;   // ISO — auto
@@ -43,6 +45,7 @@ function normConf(c: unknown): Conference {
         id: str(o.id) || uid(),
         title: str(o.title), date: str(o.date), startTime: str(o.startTime), endTime: str(o.endTime),
         booker: str(o.booker), agenda: str(o.agenda),
+        rehearsalDate: str(o.rehearsalDate), venue: str(o.venue),
         speakers: Array.isArray(o.speakers) ? o.speakers.map(normSpeaker) : [],
         seriesId: str(o.seriesId) || undefined,   // vắng ⇒ một lần (lịch cũ nạp nguyên vẹn)
         createdAt: str(o.createdAt) || new Date().toISOString(),
@@ -79,7 +82,7 @@ export function removeConference(id: string): Conference[] {
 }
 
 export const newConference = (): Conference => ({
-    id: uid(), title: '', date: '', startTime: '', endTime: '', booker: '', agenda: '', speakers: [], createdAt: new Date().toISOString(),
+    id: uid(), title: '', date: '', startTime: '', endTime: '', booker: '', agenda: '', rehearsalDate: '', venue: '', speakers: [], createdAt: new Date().toISOString(),
 });
 
 export const newSpeaker = (): Speaker => ({ id: uid(), name: '', role: '', lang: '', note: '' });

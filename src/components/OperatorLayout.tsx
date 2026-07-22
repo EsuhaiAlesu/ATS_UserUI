@@ -34,9 +34,7 @@ const MENUS: Menu[] = [
     ] },
     { key: 'settings', label: 'Cài đặt', gear: true, match: ['/settings'], tools: [
         { label: 'Kết nối', icon: 'lan', desc: 'Máy chủ xử lý dịch', to: '/settings', hash: 'kn' },
-        { label: 'Sự kiện', icon: 'event', desc: 'Thông tin, cấu hình', to: '/settings', hash: 'sk' },
         { label: 'Phụ đề', icon: 'format_size', desc: 'Cỡ chữ & hiển thị', to: '/settings', hash: 'pd' },
-        { label: 'Giọng đọc', icon: 'record_voice_over', desc: 'Mặc định theo ngôn ngữ', to: '/settings', hash: 'gd' },
         { label: 'Tài khoản', icon: 'account_circle', desc: 'Thông tin đăng nhập', to: '/settings', hash: 'tk' },
         { label: 'Dữ liệu', icon: 'database', desc: 'Xuất & xóa dữ liệu', to: '/settings', hash: 'dl' },
     ] },

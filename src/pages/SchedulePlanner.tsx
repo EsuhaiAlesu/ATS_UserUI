@@ -209,6 +209,10 @@ const FormDrawer: React.FC<{
                             <div><label className="text-[13px] text-on-surface-variant block mb-1">Bắt đầu</label><input type="time" value={conf.startTime} onChange={(e) => onChange({ startTime: e.target.value })} className={INPUT} /></div>
                             <div><label className="text-[13px] text-on-surface-variant block mb-1">Kết thúc (dự kiến)</label><input type="time" value={conf.endTime} onChange={(e) => onChange({ endTime: e.target.value })} className={INPUT} /></div>
                         </div>
+                        <div className="grid grid-cols-2 gap-3">
+                            <div><label className="text-[13px] text-on-surface-variant block mb-1">Ngày tổng duyệt</label><input type="date" value={conf.rehearsalDate ?? ''} onChange={(e) => onChange({ rehearsalDate: e.target.value })} className={INPUT} /></div>
+                            <div><label className="text-[13px] text-on-surface-variant block mb-1">Địa điểm</label><input value={conf.venue ?? ''} onChange={(e) => onChange({ venue: e.target.value })} placeholder="Hội trường…" className={INPUT} /></div>
+                        </div>
                         <div>
                             <label className="text-[13px] text-on-surface-variant block mb-1">Người book lịch</label>
                             <input value={conf.booker} onChange={(e) => onChange({ booker: e.target.value })} placeholder="Tên người phụ trách" className={INPUT} />
