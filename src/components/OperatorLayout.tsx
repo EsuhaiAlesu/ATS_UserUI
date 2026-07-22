@@ -118,9 +118,9 @@ const OperatorLayout: React.FC = () => {
     return (
         <div className="h-screen flex flex-col overflow-clip text-on-background app-aurora">
             {/* ══════════ HEAD BAR ══════════ */}
-            <header className="relative !z-20 shrink-0 h-16 flex items-center px-4 pr-2.5 border-b border-outline-variant shell-rail font-jakarta">
+            <header className="relative !z-20 shrink-0 h-20 flex items-center px-4 pr-2.5 border-b border-outline-variant shell-rail font-jakarta">
                 {/* Thương hiệu — chữ Latin, dùng Sora; canh trái 16px thẳng cột với tiêu đề sidebar */}
-                <span className="font-sora font-bold text-[20px] tracking-[0.16em] leading-none text-on-surface select-none shrink-0" style={{ textShadow: '0 0 18px rgba(244,208,106,0.20)' }}>PROYAKU</span>
+                <span className="font-sora font-bold text-[25px] tracking-[0.16em] leading-none text-on-surface select-none shrink-0" style={{ textShadow: '0 0 18px rgba(244,208,106,0.20)' }}>PROYAKU</span>
                 {/* Menu chính — 3 tab full-height (Chuẩn bị · Báo cáo · Cài đặt), gạch chân vàng khi active (kiểu cũ).
                     "Dịch hội nghị" KHÔNG nằm ở đây — nó là pill riêng (kiểu tikme) đặt cạnh Sự kiện, xem bên dưới. */}
                 <nav aria-label="Điều hướng chính" className="h-full flex items-center gap-1 ml-8">
@@ -128,7 +128,7 @@ const OperatorLayout: React.FC = () => {
                         const on = mm.key === cur.key;
                         return (
                             <button key={mm.key} onClick={() => goMenu(mm)} aria-current={on ? 'page' : undefined}
-                                className={`relative h-full flex items-center px-4 text-[17px] font-medium leading-none transition-colors focus-visible:[outline-offset:-2px] ${on ? 'text-secondary' : 'text-on-surface-variant hover:text-on-surface'}`}>
+                                className={`relative h-full flex items-center px-4 text-[21px] font-medium leading-none transition-colors focus-visible:[outline-offset:-2px] ${on ? 'text-secondary' : 'text-on-surface-variant hover:text-on-surface'}`}>
                                 {mm.label}
                                 {on && <span aria-hidden="true" className="absolute inset-x-3 bottom-[-1px] h-[3px] rounded-t-full bg-secondary"></span>}
                             </button>
