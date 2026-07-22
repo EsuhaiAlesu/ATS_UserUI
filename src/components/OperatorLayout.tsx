@@ -151,7 +151,7 @@ const OperatorLayout: React.FC = () => {
                             ? 'text-white'
                             : 'text-on-surface-variant border-outline-variant bg-surface-container/50 hover:text-on-surface hover:border-outline hover:bg-surface-container'}`}>
                         <span className={`w-2 h-2 rounded-full shrink-0 ${opsActive ? 'bg-white' : 'bg-[#fb923c]'}`} aria-hidden="true"></span>
-                        <span className="text-[11px] font-extrabold uppercase tracking-wider leading-none">{opsMenu.label}</span>
+                        <span className="text-[21px] font-extrabold uppercase tracking-wider leading-none">{opsMenu.label}</span>
                         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className={opsActive ? '' : 'opacity-80'} aria-hidden="true"><path d="m9 18 6-6-6-6" /></svg>
                     </button>
                     <EventSwitcher />
