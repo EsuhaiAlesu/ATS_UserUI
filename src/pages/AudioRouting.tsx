@@ -518,6 +518,10 @@ const AudioRouting: React.FC = () => {
         } catch { setScreens([]); setScreenSupport('denied'); }
     }, []);
 
+    // TỰ ĐỘNG quét màn hình khi MỞ panel "Xuất phụ đề" (mở panel = thao tác người dùng → được phép xin quyền
+    // window-management). detectScreens đã có fallback: 1 màn → không xin quyền; đã cấp quyền → tự điền im lặng.
+    useEffect(() => { if (panel === 'wall') detectScreens(); }, [panel, detectScreens]);
+
     // Nhớ cửa sổ đã mở theo từng "màn" (id) — để lần bấm sau ĐƯA ĐÚNG VỊ TRÍ, vì window.open tái dùng cửa sổ
     // cùng tên và BỎ QUA chuỗi toạ độ (chỉ áp lúc TẠO MỚI). Không nhớ handle thì đổi màn gán rồi bấm lại sẽ vô hiệu.
     const wallWinsRef = useRef<Record<string, { win: Window; url: string }>>({});
@@ -848,6 +852,13 @@ const AudioRouting: React.FC = () => {
                                     </button>
                                 </div>
                                 <div className="flex flex-col gap-1.5">
+                                    {/* Nhãn cột — thấy rõ cấu trúc phân luồng: Vùng → Ngôn ngữ → Màn hình đích */}
+                                    <div className="flex items-center gap-2 px-2.5 font-label-caps text-[10px] text-on-surface-variant/55">
+                                        <span className="w-6 shrink-0" aria-hidden="true"></span>
+                                        <span className="w-14 shrink-0">Vùng</span>
+                                        <span className="flex-1 min-w-0">Ngôn ngữ</span>
+                                        <span className="w-24 shrink-0">Màn hình</span>
+                                    </div>
                                     {subOutputs.map((o, i) => (
                                         <div key={o.id} className={`flex items-center gap-2 rounded-lg border px-2.5 py-2 ${o.enabled ? 'border-outline-variant' : 'border-outline-variant/40 opacity-60'}`}>
                                             <button onClick={() => patchSubOutputs(subOutputs.map((x, j) => (j === i ? { ...x, enabled: !x.enabled } : x)))}
@@ -860,13 +871,15 @@ const AudioRouting: React.FC = () => {
                                                 className="flex-1 min-w-0 bg-surface border border-outline-variant rounded-lg px-2 py-1.5 text-sm text-on-surface focus:outline-none focus:border-secondary">
                                                 {SUB_MODES.map((m) => <option key={m.v} value={m.v}>{m.l}</option>)}
                                             </select>
-                                            {screens.length > 1 && (
-                                                <select value={o.screenIdx ?? ''} title="Gán vào màn hình" onChange={(e) => patchSubOutputs(subOutputs.map((x, j) => (j === i ? { ...x, screenIdx: e.target.value === '' ? undefined : Number(e.target.value) } : x)))}
-                                                    className="w-24 shrink-0 bg-surface border border-outline-variant rounded-lg px-2 py-1.5 text-sm text-on-surface focus:outline-none focus:border-secondary">
-                                                    <option value="">Tự chia</option>
-                                                    {screens.map((s, si) => <option key={si} value={si}>{(s.label || `Màn ${si + 1}`) + (s.isPrimary ? ' ★' : '')}</option>)}
-                                                </select>
-                                            )}
+                                            {/* Màn hình đích — LUÔN hiện để thấy phân luồng từng dòng. Chọn được khi quét thấy >1 màn;
+                                                còn lại disabled hiện "Tự chia" (chia đôi màn hiện tại) + tooltip hướng dẫn cắm/quét thêm. */}
+                                            <select value={o.screenIdx ?? ''} disabled={screens.length <= 1}
+                                                title={screens.length > 1 ? 'Chọn màn hình xuất dòng này' : 'Cắm thêm màn + bấm "Quét màn hình" để chọn — hiện đang tự chia'}
+                                                onChange={(e) => patchSubOutputs(subOutputs.map((x, j) => (j === i ? { ...x, screenIdx: e.target.value === '' ? undefined : Number(e.target.value) } : x)))}
+                                                className="w-24 shrink-0 bg-surface border border-outline-variant rounded-lg px-2 py-1.5 text-sm text-on-surface focus:outline-none focus:border-secondary disabled:opacity-50 disabled:cursor-not-allowed">
+                                                <option value="">Tự chia</option>
+                                                {screens.map((s, si) => <option key={si} value={si}>{(s.label || `Màn ${si + 1}`) + (s.isPrimary ? ' ★' : '')}</option>)}
+                                            </select>
                                         </div>
                                     ))}
                                 </div>
