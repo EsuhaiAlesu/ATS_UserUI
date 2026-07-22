@@ -137,16 +137,22 @@ const OperatorLayout: React.FC = () => {
                 </nav>
                 {/* Cụm GIỮA — pill "Dịch hội nghị" (kiểu tikme Omni Channel) đứng sát TRÁI, rồi tới Sự kiện */}
                 <div className="flex-1 min-w-0 flex items-center justify-center gap-3 px-4">
-                    {/* Dịch hội nghị — pill: ĐANG MỞ = gradient cam→vàng + chữ tối + glow; CHƯA VÀO = nền tối, viền mờ */}
+                    {/* Dịch hội nghị — pill KHỚP 99% "Omni Channel" của Tikme: ĐANG MỞ = gradient cam→hổ phách
+                        (#f97316 0/50% → #f59e0b) + viền cam 2px #fdba74 + glow cam + chấm trắng + chữ HOA extrabold
+                        11px letter-spacing + chevron mảnh; CHƯA VÀO = pill tối viền mờ + chấm cam (kiểu "My Page"). */}
                     <button onClick={() => goMenu(opsMenu)} aria-current={opsActive ? 'page' : undefined}
                         title="Dịch hội nghị — bàn điều khiển dịch trực tiếp"
-                        style={opsActive ? { background: 'linear-gradient(90deg, #f97316 0%, #f0a93a 52%, #f4d06a 100%)', boxShadow: '0 8px 22px -8px rgba(249,115,22,0.55)' } : undefined}
-                        className={`shrink-0 flex items-center gap-2 pl-3.5 pr-3 py-2 rounded-full text-[18px] font-semibold leading-none whitespace-nowrap transition-all focus-visible:[outline-offset:2px] ${opsActive
-                            ? 'text-on-secondary ring-1 ring-[#fdba74]/60'
-                            : 'text-on-surface-variant border border-outline-variant bg-surface-container/50 hover:text-on-surface hover:border-outline hover:bg-surface-container'}`}>
-                        <span className="material-symbols-outlined text-[20px]" aria-hidden="true">graphic_eq</span>
-                        {opsMenu.label}
-                        <span className="material-symbols-outlined text-[20px] opacity-80" aria-hidden="true">chevron_right</span>
+                        style={opsActive ? {
+                            backgroundImage: 'linear-gradient(to right, #f97316 0%, #f97316 50%, #f59e0b 100%)',
+                            borderColor: '#fdba74',
+                            boxShadow: '0 8px 24px -6px rgba(251, 146, 60, 0.75)',
+                        } : undefined}
+                        className={`shrink-0 flex items-center gap-2 rounded-full border-2 px-5 py-2 whitespace-nowrap transition-all focus-visible:[outline-offset:2px] ${opsActive
+                            ? 'text-white'
+                            : 'text-on-surface-variant border-outline-variant bg-surface-container/50 hover:text-on-surface hover:border-outline hover:bg-surface-container'}`}>
+                        <span className={`w-2 h-2 rounded-full shrink-0 ${opsActive ? 'bg-white' : 'bg-[#fb923c]'}`} aria-hidden="true"></span>
+                        <span className="text-[11px] font-extrabold uppercase tracking-wider leading-none">{opsMenu.label}</span>
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className={opsActive ? '' : 'opacity-80'} aria-hidden="true"><path d="m9 18 6-6-6-6" /></svg>
                     </button>
                     <EventSwitcher />
                 </div>
