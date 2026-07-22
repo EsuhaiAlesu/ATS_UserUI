@@ -325,6 +325,24 @@ export async function ingestPdf(file: File): Promise<IngestResult> {
     return res.json() as Promise<IngestResult>;
 }
 
+// ---------------------------------------------------------------- Voice import (nhập file giọng, doc 36)
+// Upload an audio sample so the backend registers a new (cloned) voice for `engine`; it then appears in
+// GET /tts/voices for that engine and is selectable like any other voice. UNIMPLEMENTED on the backend
+// yet (see docs/ux-roadmap/36) — the 404 branch degrades cleanly. Same multipart pattern as ingestPdf.
+export interface VoiceImportResult { ok?: boolean; id?: string | number; label?: string; engine?: string; error?: string }
+
+export async function importVoice(file: File, name: string, engine: string): Promise<VoiceImportResult> {
+    const fd = new FormData();
+    fd.append('file', file);
+    fd.append('name', name);
+    fd.append('engine', engine);
+    const res = await fetch(apiUrl('/tts/voice/import'), { method: 'POST', body: fd });
+    if (res.status === 404) throw new Error('Backend chưa có chức năng nhập giọng (endpoint /api/tts/voice/import).');
+    const ct = res.headers.get('content-type') ?? '';
+    if (!res.ok || !ct.includes('json')) throw new Error(`Nhập giọng lỗi (HTTP ${res.status}).`);
+    return res.json() as Promise<VoiceImportResult>;
+}
+
 // Minimal shape of POST /api/run's response (API.md §4 / RunResult).
 interface RunResult {
     nodes?: Record<string, { status?: string; error?: string | null; output?: unknown }>;

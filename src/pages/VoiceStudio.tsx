@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import {
-    getTtsVoices, previewTts, getVoiceScript, saveVoiceScript, recordVoice, learnVoice,
+    getTtsVoices, previewTts, getVoiceScript, saveVoiceScript, recordVoice, learnVoice, importVoice,
 } from '../lib/api';
 import type { TtsVoice } from '../lib/api';
 import { loadTtsPrefs, saveTtsPrefs, type VoicePick } from '../lib/ttsPrefs';
@@ -23,7 +23,8 @@ const VoiceLane: React.FC<{
     title: string;
     value?: VoicePick;
     onChange: (v: VoicePick | undefined) => void;
-}> = ({ lang, title, value, onChange }) => {
+    reloadKey?: number;   // bump để nạp lại danh sách giọng (sau khi nhập giọng mới)
+}> = ({ lang, title, value, onChange, reloadKey }) => {
     const [engine, setEngine] = useState(value?.engine ?? ENGINES[lang][0]);
     const [voices, setVoices] = useState<TtsVoice[]>([]);
     const [paramKey, setParamKey] = useState<string>(value?.key ?? '');
@@ -54,7 +55,7 @@ const VoiceLane: React.FC<{
             .catch((e) => { if (!cancelled) { setLoadError(String(e)); setVoices([]); } })
             .finally(() => { if (!cancelled) setLoading(false); });
         return () => { cancelled = true; };
-    }, [engine]);
+    }, [engine, reloadKey]);
 
     // Emit the current selection upward whenever it settles.
     useEffect(() => {
@@ -272,10 +273,72 @@ const PronunciationClinic: React.FC = () => {
     );
 };
 
+// ---------------------------------------------------------------- Nhập giọng từ file (doc 36)
+
+const IMPORT_ENGINES = ['gpt-sovits'];   // engine hỗ trợ nhân bản giọng từ file mẫu
+
+const VoiceImport: React.FC<{ onImported: () => void }> = ({ onImported }) => {
+    const [file, setFile] = useState<File | null>(null);
+    const [name, setName] = useState('');
+    const [engine, setEngine] = useState(IMPORT_ENGINES[0]);
+    const [busy, setBusy] = useState(false);
+    const [status, setStatus] = useState<{ kind: 'idle' | 'ok' | 'err'; msg: string }>({ kind: 'idle', msg: '' });
+
+    const doImport = async () => {
+        if (!file) { setStatus({ kind: 'err', msg: 'Chưa chọn file audio' }); return; }
+        if (!name.trim()) { setStatus({ kind: 'err', msg: 'Chưa đặt tên giọng' }); return; }
+        setBusy(true); setStatus({ kind: 'idle', msg: 'Đang nhập…' });
+        try {
+            const r = await importVoice(file, name.trim(), engine);
+            if (r.error) { setStatus({ kind: 'err', msg: r.error }); return; }
+            setStatus({ kind: 'ok', msg: `Đã nhập "${r.label ?? name.trim()}" — chọn ở khung Giọng phía trên (engine ${engine}).` });
+            setFile(null); setName('');
+            onImported();   // nạp lại danh sách giọng để thấy giọng mới
+        } catch (e) {
+            setStatus({ kind: 'err', msg: (e as Error).message });
+        } finally { setBusy(false); }
+    };
+
+    return (
+        <div className="space-y-3">
+            <div className="border border-outline-variant rounded-xl p-4 bg-surface text-on-surface-variant font-label-caps text-label-caps">
+                ⓘ Nhập 1 đoạn audio MẪU (giọng người) → backend nhân bản thành giọng máy → hiện trong danh sách “Giọng” ở trên để chọn. Cần backend bật chức năng này (chạy trên Mac Studio).
+            </div>
+            <div className="grid md:grid-cols-3 gap-4">
+                <div>
+                    <label className="font-label-caps text-label-caps text-on-surface-variant block mb-1">File audio (.wav/.mp3/.m4a)</label>
+                    <input type="file" accept="audio/*" onChange={(e) => setFile(e.target.files?.[0] ?? null)}
+                        className="w-full text-sm text-on-surface-variant file:mr-3 file:border file:border-outline-variant file:rounded-lg file:bg-surface-container file:text-on-surface-variant file:px-3 file:py-1.5 file:text-xs file:cursor-pointer" />
+                </div>
+                <div>
+                    <label className="font-label-caps text-label-caps text-on-surface-variant block mb-1">Tên giọng</label>
+                    <input value={name} onChange={(e) => setName(e.target.value)} placeholder="vd: Giọng khai mạc"
+                        className="field-lux transition-shadow w-full bg-surface text-on-surface border-b border-outline-variant py-1 px-0 text-sm focus:border-secondary" />
+                </div>
+                <div>
+                    <label className="font-label-caps text-label-caps text-on-surface-variant block mb-1">Engine (nhân bản)</label>
+                    <select value={engine} onChange={(e) => setEngine(e.target.value)}
+                        className="field-lux transition-shadow w-full bg-surface text-on-surface border-b border-outline-variant py-1 px-0 text-sm focus:border-secondary appearance-none cursor-pointer">
+                        {IMPORT_ENGINES.map((en) => <option key={en} value={en}>{en}</option>)}
+                    </select>
+                </div>
+            </div>
+            <div className="flex items-center gap-3">
+                <button onClick={doImport} disabled={busy || !file || !name.trim()}
+                    className="btn-lux inline-flex items-center gap-1.5 px-5 py-2 text-sm font-label-caps text-label-caps rounded-lg bg-secondary text-on-secondary hover:opacity-80 disabled:opacity-40">
+                    <span className="material-symbols-outlined text-[18px]" aria-hidden="true">upload</span>{busy ? 'Đang nhập…' : 'Nhập giọng'}
+                </button>
+                {status.msg && <span className={`font-label-caps text-label-caps ${status.kind === 'err' ? 'text-error' : status.kind === 'ok' ? 'text-secondary' : 'text-on-surface-variant'}`}>{status.msg}</span>}
+            </div>
+        </div>
+    );
+};
+
 // ---------------------------------------------------------------- Page
 
 const VoiceStudio: React.FC = () => {
     const [prefs, setPrefs] = useState(() => loadTtsPrefs());
+    const [reloadKey, setReloadKey] = useState(0);   // bump để nạp lại danh sách giọng sau khi nhập giọng mới
 
     // Persist any change to the TTS selection.
     useEffect(() => { saveTtsPrefs(prefs); }, [prefs]);
@@ -308,9 +371,9 @@ const VoiceStudio: React.FC = () => {
                     </div>
 
                     <div className="grid md:grid-cols-2 gap-4">
-                        <VoiceLane lang="vi" title="TIẾNG VIỆT (VN)" value={prefs.vi}
+                        <VoiceLane lang="vi" title="TIẾNG VIỆT (VN)" value={prefs.vi} reloadKey={reloadKey}
                             onChange={(v) => setPrefs((p) => ({ ...p, vi: v }))} />
-                        <VoiceLane lang="ja" title="日本語 (JA)" value={prefs.ja}
+                        <VoiceLane lang="ja" title="日本語 (JA)" value={prefs.ja} reloadKey={reloadKey}
                             onChange={(v) => setPrefs((p) => ({ ...p, ja: v }))} />
                     </div>
 
@@ -318,6 +381,11 @@ const VoiceStudio: React.FC = () => {
                         Lựa chọn được lưu tại máy; phiên trực tiếp sẽ gửi khối <code>tts</code> khi bật.
                         <span className="text-error"> (Shape TTS đa-ngôn-ngữ cần xác minh với backend — xem tài liệu 15.)</span>
                     </p>
+
+                    <div className="mt-6 pt-5 border-t border-outline-variant">
+                        <h3 className="font-label-caps text-label-caps text-on-surface mb-2">Nhập giọng từ file (nhân bản · doc 36)</h3>
+                        <VoiceImport onImported={() => setReloadKey((k) => k + 1)} />
+                    </div>
                 </section>
 
                 {/* Card 2 — Pronunciation Clinic */}
