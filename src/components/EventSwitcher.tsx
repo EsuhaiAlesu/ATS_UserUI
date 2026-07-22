@@ -26,7 +26,7 @@ const EventSwitcher: React.FC = () => {
                 className="group flex items-center gap-2.5 max-w-full rounded-lg px-3 py-1 hover:bg-surface-container/40 transition-colors">
                 <span className={`w-2.5 h-2.5 rounded-full shrink-0 ${live ? 'bg-secondary' : 'bg-on-surface-variant/40'}`} title={live ? 'Đang kích hoạt cho matcher' : 'Đang chọn (chưa kích hoạt)'}></span>
                 <span className="font-label-caps text-[11px] text-on-surface-variant/60 tracking-[0.18em] shrink-0">SỰ KIỆN</span>
-                <span className="text-[21px] font-bold leading-none truncate min-w-0 text-[#a3e635]">{label}</span>
+                <span className="text-[21px] font-bold leading-none truncate min-w-0 text-[#f97316]">{label}</span>
                 <span className="material-symbols-outlined text-[24px] text-on-surface-variant/70 shrink-0 group-hover:text-on-surface transition-colors" aria-hidden="true">expand_more</span>
             </button>
             {open && (
@@ -41,7 +41,7 @@ const EventSwitcher: React.FC = () => {
                                 className={`w-full flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-left transition-colors ${on ? 'bg-secondary/15' : 'hover:bg-surface-container'}`}>
                                 <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${isLive ? 'bg-secondary' : 'bg-on-surface-variant/30'}`}></span>
                                 <span className="min-w-0 flex-1">
-                                    <span className={`block text-sm truncate ${on ? 'text-secondary' : 'text-on-surface'}`}>{e.title.trim() || '(chưa đặt tên)'}</span>
+                                    <span className={`block text-sm truncate ${on ? 'text-[#a3e635] font-semibold' : 'text-on-surface'}`}>{e.title.trim() || '(chưa đặt tên)'}</span>
                                     {e.date && <span className="block text-[11px] text-on-surface-variant tabular-nums">{e.date}</span>}
                                 </span>
                                 {on && <span className="material-symbols-outlined text-[18px] text-secondary shrink-0" aria-hidden="true">check</span>}
