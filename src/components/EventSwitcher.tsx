@@ -26,7 +26,7 @@ const EventSwitcher: React.FC = () => {
                 className="group flex items-center gap-2.5 max-w-full rounded-lg px-3 py-1 hover:bg-surface-container/40 transition-colors">
                 <span className={`w-2.5 h-2.5 rounded-full shrink-0 ${live ? 'bg-secondary' : 'bg-on-surface-variant/40'}`} title={live ? 'Đang kích hoạt cho matcher' : 'Đang chọn (chưa kích hoạt)'}></span>
                 <span className="font-label-caps text-[11px] text-on-surface-variant/60 tracking-[0.18em] shrink-0">SỰ KIỆN</span>
-                <span className="text-[21px] font-bold leading-none truncate min-w-0 text-[#f97316]">{label}</span>
+                <span className="text-[21px] font-bold leading-none truncate min-w-0 text-[#a3e635]">{label}</span>
                 <span className="material-symbols-outlined text-[24px] text-on-surface-variant/70 shrink-0 group-hover:text-on-surface transition-colors" aria-hidden="true">expand_more</span>
             </button>
             {open && (
