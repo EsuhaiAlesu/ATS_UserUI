@@ -4,15 +4,18 @@
 // Contract: docs/ONLINE-LANE-CONTRACT.md (v0.2). NEVER invent endpoints/events/fields
 // beyond that file. Every network call goes through the `/online-api` proxy base path.
 //
-// Phase 1 hardening on top of the Phase 0 vertical slice:
-//   M2 — self-healing WS client (backoff reconnect + stall watchdog)
-//   M3 — sentence segmentation (merge finalized fragments; number-safe breaks)
-//   M4 — ghost-transcript guard (speech-evidence / repeat / long-silence)
+// Phases layered here:
+//   Phase 0 — token → WS(ASR) → subtitles → refine
+//   Phase 1 — M2 self-healing WS · M3 sentence segmentation · M4 ghost-transcript guard
+//   Phase 2 — M5 fast DRAFT tier (while speaking) · M6 accurate REFINE tier + session context
 
 import type { LaneController, LaneEvents, LaneLine, LaneStatus } from '../types';
 import { startPcm16Capture, type CaptureHandle, type CapturePacket } from './pcm16Capture';
-import { endsWithStrongSentenceBreak, findLastStrongSentenceBreak } from './transcriptSegmentation';
+import { endsWithStrongSentenceBreak, findFirstCommaClauseBreak, findLastStrongSentenceBreak } from './transcriptSegmentation';
 import { ASR_FINAL_MIN_VOICED_MS, ASR_PARTIAL_MIN_VOICED_MS, hasClearSpeechEvidence } from './asrSpeechEvidence';
+import { isStableDraftPrefix, joinLiveDraftSource, stripPromotedPrefix } from './liveDraftTranslation';
+import { DRAFT_RATE_WINDOW_MS, decideDraftAdmission, getAdaptiveShortUtteranceFlushDelay } from './livePipelinePolicy';
+import { estimateSourceSpeechPace } from './sourceSpeechPace';
 
 const ONLINE_BASE = '/online-api';
 const RECENT_FINALS_MAX = 6;
@@ -31,12 +34,25 @@ const WATCHDOG_INTERVAL_MS = 5_000;
 const SEGMENT_MAX_CHARS = 120; // longer finalized text -> cut at the last strong break
 const SEGMENT_MIN_CHARS = 18; // shorter fragments wait to merge with the next one
 const UTTERANCE_MIN_FLUSH_CHARS = 40; // finals shorter than this wait for a companion
-const STALE_SEGMENT_FLUSH_MS = 2_500; // ... but wait at most 2.5s, then flush anyway
 
 // M4 — ghost-transcript guard
 const VOICED_WINDOW_MS = 4_000; // sliding window over which voiced evidence is summed
 const REPEAT_GUARD_MIN_CHARS = 12; // finals this long that repeat verbatim are hallucinations
 const LONG_SILENCE_MS = 4_000; // a transcript after this long with no sound -> ghost
+
+// M5 — fast draft tier
+const DRAFT_DEBOUNCE_MS = 500; // interim text changed -> wait 500ms before considering a draft
+const DRAFT_MIN_CHARS = 20; // shorter source -> no draft yet
+const DRAFT_MIN_NEW_CHARS = 14; // must have grown >= 14 chars since the last draft call
+const DRAFT_PROMOTION_MS = 1_200; // a draft stable for 1.2s is "promoted" into the official line
+const COMMA_FINAL_MIN_CHARS = 2; // a clause ending at a comma boundary drafts immediately from 2 chars
+
+// M6 — accurate refine tier + session context
+const REFINE_IDLE_MS = 950; // after finalize, wait 950ms of quiet before refine
+const PUNCTUATION_REFINE_IDLE_MS = 360; // ... but only 360ms when the text already ends with strong punctuation
+const REFINE_RETRY_DELAY_MS = 800; // retry once after 800ms on network/5xx
+const SOURCE_SPEECH_GAP_MS = 1_200; // silent gaps longer than this are excluded from the pace window
+const FIRST_PARTIAL_LEAD_MS = 650; // Qwen emits its first partial later than real speech onset
 
 type StartOpts = {
   sourceLanguage: 'vi' | 'ja';
@@ -57,11 +73,26 @@ export interface OnlineDiagnostics {
   secondsSinceLastEvent: number;
   voicedMsRecent: number;
   droppedGhosts: number;
+  draftCalls: number;
+  draftSkipped: { duplicate: number; 'rate-limit': number; 'in-flight': number };
+  refineCalls: number;
+  refineRetries: number;
 }
 
 // Concrete online controller = the treaty + a diagnostics readout (Phase 4 consumes it).
 // This does NOT change src/lib/lanes/types.ts — the treaty stays untouched.
 export type OnlineLaneController = LaneController & { getDiagnostics(): OnlineDiagnostics };
+
+// Phase-3 TTS metadata parked per finalized line (not on the LaneLine treaty).
+interface TtsMeta {
+  ttsText?: string;
+  emotion?: string;
+  ttsSpeed?: number;
+}
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
 
 export function createOnlineLane(events: LaneEvents, config: OnlineLaneConfig = {}): OnlineLaneController {
   let running = false;
@@ -71,6 +102,10 @@ export function createOnlineLane(events: LaneEvents, config: OnlineLaneConfig = 
   let opts: StartOpts | null = null;
 
   let counter = 0;
+  // Bumped on every start() and teardown(); an in-flight draft/refine fetch captures the value
+  // at call time and refuses to emit if the session has since ended or restarted (lids restart
+  // at online-1 each session, so a bare lid check cannot catch a cross-session collision).
+  let sessionGen = 0;
 
   // M2 state
   let reconnectAttempts = 0;
@@ -91,6 +126,34 @@ export function createOnlineLane(events: LaneEvents, config: OnlineLaneConfig = 
 
   const recentFinals: string[] = [];
 
+  // M5 draft-tier state
+  let currentInterimSource = ''; // latest interim source shown (buffer + partial)
+  let lastInterimTarget = ''; // latest interim (draft) translation shown
+  let draftDebounceTimer: ReturnType<typeof setTimeout> | null = null;
+  let promotionTimer: ReturnType<typeof setTimeout> | null = null;
+  let promotedSource = ''; // head source locked as promoted (not re-translated)
+  let promotedTarget = ''; // its translation
+  let lastDraft: { source: string; target: string; fullSource: string } | null = null;
+  let lastDraftFullSourceLen = 0; // full interim-source length at the last draft call
+  const inFlightDraftSources = new Set<string>();
+  const draftWindow: number[] = []; // timestamps of draft calls (60s sliding window)
+  let draftSeq = 0;
+
+  // M6 refine-tier state
+  const pendingRefineTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  let latestEmotion: string | undefined;
+  const ttsMeta = new Map<string, TtsMeta>();
+  // per-segment pace timing
+  let segmentFirstPartialAt = 0;
+  let lastPartialAt = 0;
+  let segmentSilentGapsMs = 0;
+
+  // diagnostics counters
+  let draftCalls = 0;
+  const draftSkipped = { duplicate: 0, 'rate-limit': 0, 'in-flight': 0 };
+  let refineCalls = 0;
+  let refineRetries = 0;
+
   const setStatus = (s: LaneStatus, detail?: string) => events.onStatus(s, detail);
   const emitLine = (line: Omit<LaneLine, 'at'>) => events.onLine({ ...line, at: Date.now() });
 
@@ -100,6 +163,12 @@ export function createOnlineLane(events: LaneEvents, config: OnlineLaneConfig = 
     let sum = 0;
     for (const e of voicedWindow) sum += e.voicedMs;
     return sum;
+  }
+
+  function pruneDraftWindow(): number {
+    const cutoff = Date.now() - DRAFT_RATE_WINDOW_MS;
+    while (draftWindow.length && draftWindow[0] < cutoff) draftWindow.shift();
+    return draftWindow.length;
   }
 
   function joinSeg(a: string, b: string): string {
@@ -175,7 +244,155 @@ export function createOnlineLane(events: LaneEvents, config: OnlineLaneConfig = 
     }
   }
 
-  // ---- M3: segment buffer ----
+  // ---- timing helper for source pace ----
+
+  function noteSpeechTiming(): void {
+    const now = Date.now();
+    if (segmentFirstPartialAt === 0) {
+      segmentFirstPartialAt = now;
+    } else {
+      const gap = now - lastPartialAt;
+      if (gap > SOURCE_SPEECH_GAP_MS) segmentSilentGapsMs += gap; // exclude silent pauses from the pace window
+    }
+    lastPartialAt = now;
+  }
+
+  // ---- M5: draft tier ----
+
+  function isCommaFinal(src: string): boolean {
+    const t = src.trim();
+    if (t.length < COMMA_FINAL_MIN_CHARS) return false;
+    const last = t[t.length - 1];
+    if (last !== ',' && last !== '，' && last !== '、') return false;
+    return findFirstCommaClauseBreak(t, COMMA_FINAL_MIN_CHARS) > 0;
+  }
+
+  // Strip the promoted head so only the fresh tail is (re)translated. Returns null when the
+  // ASR revised the promoted prefix (promotion dropped) so the caller retranslates the full text.
+  function draftPendingTail(full: string): string {
+    if (!promotedSource) return full;
+    const res = stripPromotedPrefix(full, promotedSource);
+    if (!res.matched) {
+      promotedSource = '';
+      promotedTarget = '';
+      return full;
+    }
+    if (res.coveredByPromoted) return ''; // ASR regressed to a prefix already promoted
+    return res.text;
+  }
+
+  function scheduleDraft(): void {
+    if (isCommaFinal(currentInterimSource)) {
+      // Comma-final clauses jump the debounce and draft immediately (with priority).
+      if (draftDebounceTimer) {
+        clearTimeout(draftDebounceTimer);
+        draftDebounceTimer = null;
+      }
+      considerDraft(true);
+      return;
+    }
+    if (draftDebounceTimer) return; // throttle: at most one draft per debounce window
+    draftDebounceTimer = setTimeout(() => {
+      draftDebounceTimer = null;
+      considerDraft(false);
+    }, DRAFT_DEBOUNCE_MS);
+  }
+
+  function considerDraft(commaFinal: boolean): void {
+    if (!running || !segmentLid) return;
+    const full = currentInterimSource.trim();
+    if (!full) return;
+    if (!commaFinal) {
+      if (full.length < DRAFT_MIN_CHARS) return;
+      if (full.length - lastDraftFullSourceLen < DRAFT_MIN_NEW_CHARS) return;
+    }
+    const sentSource = draftPendingTail(full);
+    if (!sentSource) return; // nothing new to translate (covered by promoted head)
+    const decision = decideDraftAdmission({
+      commaFinal,
+      inFlightCount: inFlightDraftSources.size,
+      duplicateInFlight: inFlightDraftSources.has(sentSource),
+      requestsInWindow: pruneDraftWindow(),
+    });
+    if (!decision.allow) {
+      draftSkipped[decision.reason] += 1;
+      return;
+    }
+    void sendDraft(sentSource, full, segmentLid);
+  }
+
+  async function sendDraft(sentSource: string, fullAtSend: string, lid: string): Promise<void> {
+    const o = opts!;
+    const gen = sessionGen;
+    inFlightDraftSources.add(sentSource);
+    draftWindow.push(Date.now());
+    draftCalls += 1;
+    lastDraftFullSourceLen = fullAtSend.length;
+    try {
+      const res = await fetch(`${ONLINE_BASE}/refine-preview-translation`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        // Drafts stay fast + cheap: no recentFinals / sessionBrief.
+        body: JSON.stringify({
+          sourceText: sentSource,
+          sourceLanguage: o.sourceLanguage,
+          targetLanguage: o.targetLanguage,
+          refineStage: 'draft',
+          traceId: `${lid}-d${++draftSeq}`,
+          subtitleId: lid,
+        }),
+      });
+      if (!res.ok) throw new Error(`draft HTTP ${res.status}`);
+      const data = (await res.json()) as { translatedText?: string };
+      // Apply only if the SAME session + interim segment is still live and the source still
+      // extends what we submitted (otherwise the ASR revised backwards → discard, keep words).
+      if (gen !== sessionGen || lid !== segmentLid) return;
+      if (!isStableDraftPrefix(currentInterimSource, fullAtSend)) return;
+      const tailTarget = data.translatedText ?? '';
+      const shownTarget = joinLiveDraftSource(promotedTarget, tailTarget);
+      lastInterimTarget = shownTarget;
+      lastDraft = { source: sentSource, target: tailTarget, fullSource: fullAtSend };
+      emitLine({ lid, sourceText: currentInterimSource, targetText: shownTarget, interim: true, corrected: false });
+      schedulePromotion();
+    } catch {
+      // Drafts are best-effort; failures are silent (the refine tier is the source of truth).
+    } finally {
+      inFlightDraftSources.delete(sentSource);
+    }
+  }
+
+  function schedulePromotion(): void {
+    if (promotionTimer) clearTimeout(promotionTimer);
+    promotionTimer = setTimeout(() => {
+      promotionTimer = null;
+      if (!lastDraft) return;
+      // Promote only if the source portion has not changed for 1.2s.
+      if (!isStableDraftPrefix(currentInterimSource, lastDraft.fullSource)) return;
+      promotedSource = lastDraft.fullSource;
+      promotedTarget = joinLiveDraftSource(promotedTarget, lastDraft.target);
+      lastDraft = null; // folded into the promoted head; don't double-promote
+    }, DRAFT_PROMOTION_MS);
+  }
+
+  function resetDraftState(): void {
+    if (draftDebounceTimer) {
+      clearTimeout(draftDebounceTimer);
+      draftDebounceTimer = null;
+    }
+    if (promotionTimer) {
+      clearTimeout(promotionTimer);
+      promotionTimer = null;
+    }
+    promotedSource = '';
+    promotedTarget = '';
+    lastDraft = null;
+    lastDraftFullSourceLen = 0;
+    lastInterimTarget = '';
+    // In-flight drafts resolve and self-discard via the lid check; the 60s rate window is
+    // session-wide and intentionally NOT reset here.
+  }
+
+  // ---- events ----
 
   function handlePartial(msg: Record<string, unknown>): void {
     const text = typeof msg.text === 'string' ? msg.text : '';
@@ -183,9 +400,11 @@ export function createOnlineLane(events: LaneEvents, config: OnlineLaneConfig = 
     // M4: only display partials backed by clear speech evidence / recent sound.
     if (!hasClearSpeechEvidence(pruneVoiced(), ASR_PARTIAL_MIN_VOICED_MS)) return;
     if (Date.now() - lastLoudAt >= LONG_SILENCE_MS) return;
+    noteSpeechTiming();
     if (!segmentLid) segmentLid = `online-${++counter}`;
-    const shown = joinSeg(segmentBuffer, (text + stash).trim());
-    emitLine({ lid: segmentLid, sourceText: shown, targetText: '', interim: true, corrected: false });
+    currentInterimSource = joinSeg(segmentBuffer, (text + stash).trim());
+    emitLine({ lid: segmentLid, sourceText: currentInterimSource, targetText: lastInterimTarget, interim: true, corrected: false });
+    scheduleDraft();
   }
 
   function handleFinal(msg: Record<string, unknown>): void {
@@ -209,7 +428,8 @@ export function createOnlineLane(events: LaneEvents, config: OnlineLaneConfig = 
     // M3: append to the segment buffer; the finalized sentence is not yet its own line.
     segmentBuffer = joinSeg(segmentBuffer, transcript);
     if (!segmentLid) segmentLid = `online-${++counter}`;
-    emitLine({ lid: segmentLid, sourceText: segmentBuffer, targetText: '', interim: true, corrected: false });
+    currentInterimSource = segmentBuffer;
+    emitLine({ lid: segmentLid, sourceText: segmentBuffer, targetText: lastInterimTarget, interim: true, corrected: false });
 
     clearSegmentTimer();
     const buf = segmentBuffer.trim();
@@ -218,11 +438,11 @@ export function createOnlineLane(events: LaneEvents, config: OnlineLaneConfig = 
     if (strongBreak || longEnough) {
       flushSegment();
     } else {
-      // (c) wait at most 2.5s for a companion final, then flush anyway.
+      // M6: fillers wait ~2.5s; meaningful clauses flush in 0.85–1.5s.
       segmentTimer = setTimeout(() => {
         segmentTimer = null;
         flushSegment();
-      }, STALE_SEGMENT_FLUSH_MS);
+      }, getAdaptiveShortUtteranceFlushDelay({ text: buf, sessionTerms: opts?.terms }));
     }
   }
 
@@ -232,6 +452,8 @@ export function createOnlineLane(events: LaneEvents, config: OnlineLaneConfig = 
     if (!text) {
       segmentBuffer = '';
       segmentLid = null;
+      currentInterimSource = '';
+      resetDraftState();
       return;
     }
     let head = text;
@@ -248,23 +470,116 @@ export function createOnlineLane(events: LaneEvents, config: OnlineLaneConfig = 
       remainder = '';
     }
     const lid = segmentLid ?? `online-${++counter}`;
-    // Finalize the line the user watched grow; then translate it (plain refine as in Phase 0).
-    emitLine({ lid, sourceText: head, targetText: '', interim: false, corrected: false });
-    void refine(lid, head);
-    // Carry any post-cut remainder into a fresh interim line.
+
+    // Source pace over the actual speaking window (minus silent gaps, plus the ASR lead).
+    const rawDurationMs = segmentFirstPartialAt ? Date.now() - segmentFirstPartialAt : 0;
+    const durationMs = rawDurationMs > 0 ? Math.max(0, rawDurationMs - segmentSilentGapsMs) + FIRST_PARTIAL_LEAD_MS : 0;
+    const sourcePace = estimateSourceSpeechPace(head, durationMs)?.label;
+
+    // recentFinals order is captured at flush time (deterministic), not at refine time.
+    const priorFinals = recentFinals.slice(-RECENT_FINALS_MAX);
+    recentFinals.push(head);
+    if (recentFinals.length > RECENT_FINALS_MAX) {
+      recentFinals.splice(0, recentFinals.length - RECENT_FINALS_MAX);
+    }
+
+    // Finalize the SOURCE line; keep the draft translation (dim) until refine returns.
+    const draftFallback = lastInterimTarget;
+    emitLine({ lid, sourceText: head, targetText: draftFallback, interim: false, corrected: false });
+    scheduleRefine(lid, head, priorFinals, sourcePace, draftFallback);
+
+    // Reset per-segment draft + timing state (this segment is done).
+    resetDraftState();
+    segmentFirstPartialAt = 0;
+    lastPartialAt = 0;
+    segmentSilentGapsMs = 0;
+
+    // Carry any post-cut remainder into a fresh interim line with its own adaptive flush timer.
     segmentBuffer = remainder;
     if (remainder) {
       segmentLid = `online-${++counter}`;
+      currentInterimSource = remainder;
       emitLine({ lid: segmentLid, sourceText: remainder, targetText: '', interim: true, corrected: false });
-      // The remainder has no trailing strong break and is often < 40 chars, so it owns no
-      // flush trigger — arm the stale-flush timer (rule c) so it can't sit interim forever
-      // and get discarded on a pause/stop. (clearSegmentTimer() already ran at the top.)
       segmentTimer = setTimeout(() => {
         segmentTimer = null;
         flushSegment();
-      }, STALE_SEGMENT_FLUSH_MS);
+      }, getAdaptiveShortUtteranceFlushDelay({ text: remainder, sessionTerms: opts?.terms }));
     } else {
       segmentLid = null;
+      currentInterimSource = '';
+    }
+  }
+
+  // ---- M6: refine tier ----
+
+  function scheduleRefine(lid: string, head: string, priorFinals: string[], sourcePace: string | undefined, draftFallback: string): void {
+    const idleDelay = endsWithStrongSentenceBreak(head, true) ? PUNCTUATION_REFINE_IDLE_MS : REFINE_IDLE_MS;
+    const existing = pendingRefineTimers.get(lid);
+    if (existing) clearTimeout(existing);
+    const t = setTimeout(() => {
+      pendingRefineTimers.delete(lid);
+      void refine(lid, head, priorFinals, sourcePace, draftFallback);
+    }, idleDelay);
+    pendingRefineTimers.set(lid, t);
+  }
+
+  async function attemptRefine(body: string): Promise<{ ok: true; data: Record<string, unknown> } | { ok: false; retriable: boolean; message: string }> {
+    try {
+      const res = await fetch(`${ONLINE_BASE}/refine-preview-translation`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body,
+      });
+      if (!res.ok) return { ok: false, retriable: res.status >= 500, message: `refine HTTP ${res.status}` };
+      const data = (await res.json()) as Record<string, unknown>;
+      return { ok: true, data };
+    } catch (err) {
+      return { ok: false, retriable: true, message: err instanceof Error ? err.message : String(err) };
+    }
+  }
+
+  async function refine(lid: string, head: string, priorFinals: string[], sourcePace: string | undefined, draftFallback: string): Promise<void> {
+    const o = opts!;
+    const gen = sessionGen;
+    const body = JSON.stringify({
+      sourceText: head,
+      sourceLanguage: o.sourceLanguage,
+      targetLanguage: o.targetLanguage,
+      refineStage: 'refine',
+      recentFinals: priorFinals,
+      sessionBrief: o.brief,
+      sessionTerms: o.terms,
+      sourcePace,
+      sourceEmotion: latestEmotion,
+      traceId: `${lid}-r`,
+      subtitleId: lid,
+    });
+    refineCalls += 1;
+    let result = await attemptRefine(body);
+    if (!result.ok && result.retriable && running) {
+      refineRetries += 1;
+      await delay(REFINE_RETRY_DELAY_MS);
+      if (gen !== sessionGen) return;
+      result = await attemptRefine(body);
+    }
+    // Session ended (or restarted) while awaiting — never emit a stale line onto a reused lid.
+    if (gen !== sessionGen) return;
+    if (result.ok) {
+      const data = result.data as { sourceText?: string; translatedText?: string; ttsText?: string; emotion?: string; ttsSpeed?: number };
+      // Park Phase-3 TTS metadata (not on the LaneLine treaty).
+      ttsMeta.set(lid, { ttsText: data.ttsText, emotion: data.emotion, ttsSpeed: data.ttsSpeed });
+      // Always display the server's returned (ASR-corrected) sourceText, not the raw transcript.
+      emitLine({
+        lid,
+        sourceText: data.sourceText ?? head,
+        targetText: data.translatedText ?? draftFallback,
+        interim: false,
+        corrected: true,
+      });
+    } else {
+      // Session must survive: keep the finalized source line with its draft translation.
+      emitLine({ lid, sourceText: head, targetText: draftFallback, interim: false, corrected: false });
+      events.onError(`refine failed: ${result.message}`);
     }
   }
 
@@ -285,9 +600,11 @@ export function createOnlineLane(events: LaneEvents, config: OnlineLaneConfig = 
       case 'conversation.item.input_audio_transcription.completed':
         handleFinal(msg);
         break;
-      case 'asr.emotion':
-        // Captured by the contract; not consumed in Phase 1 (used by a later TTS phase).
+      case 'asr.emotion': {
+        const emo = typeof msg.emotion === 'string' ? msg.emotion : undefined;
+        if (emo) latestEmotion = emo;
         break;
+      }
       case 'error': {
         // Upstream error with internal model fallback — keep the connection unless WS closes.
         const err = msg.error;
@@ -300,45 +617,6 @@ export function createOnlineLane(events: LaneEvents, config: OnlineLaneConfig = 
       }
       default:
         break;
-    }
-  }
-
-  async function refine(lid: string, transcript: string): Promise<void> {
-    const o = opts!;
-    // Pass the PRIOR finalized sentences as context, then record this one (keep last 6).
-    const priorFinals = recentFinals.slice(-RECENT_FINALS_MAX);
-    recentFinals.push(transcript);
-    if (recentFinals.length > RECENT_FINALS_MAX) {
-      recentFinals.splice(0, recentFinals.length - RECENT_FINALS_MAX);
-    }
-    try {
-      const res = await fetch(`${ONLINE_BASE}/refine-preview-translation`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          sourceText: transcript,
-          sourceLanguage: o.sourceLanguage,
-          targetLanguage: o.targetLanguage,
-          recentFinals: priorFinals,
-          sessionTerms: o.terms,
-          sessionBrief: o.brief,
-          refineStage: 'refine',
-        }),
-      });
-      if (!res.ok) throw new Error(`refine failed (HTTP ${res.status})`);
-      const data = (await res.json()) as { sourceText?: string; translatedText?: string };
-      // Always display the returned (possibly ASR-corrected) sourceText, not the raw transcript.
-      emitLine({
-        lid,
-        sourceText: data.sourceText ?? transcript,
-        targetText: data.translatedText ?? '',
-        interim: false,
-        corrected: true,
-      });
-    } catch (err) {
-      // The session must survive a translation failure: keep the source line, no translation.
-      emitLine({ lid, sourceText: transcript, targetText: '', interim: false, corrected: false });
-      events.onError(`refine failed: ${err instanceof Error ? err.message : String(err)}`);
     }
   }
 
@@ -380,7 +658,7 @@ export function createOnlineLane(events: LaneEvents, config: OnlineLaneConfig = 
       events.onError('online lane: connection lost after retries');
       return;
     }
-    const delayMs = Math.min(RECONNECT_BASE_DELAY_MS * Math.pow(2, reconnectAttempts), RECONNECT_MAX_DELAY_MS);
+    const delayMs = Math.min(RECONNECT_BASE_DELAY_MS * Math.pow(2, reconnectAttempts), RECONNECT_MAX_DELAY_MS); // 600,1200,2400,4800,5000
     reconnectAttempts += 1;
     setStatus('reconnecting', `attempt ${reconnectAttempts}/${RECONNECT_MAX_ATTEMPTS}`);
     reconnectTimer = setTimeout(() => {
@@ -429,6 +707,7 @@ export function createOnlineLane(events: LaneEvents, config: OnlineLaneConfig = 
 
   function teardown(): void {
     running = false;
+    sessionGen += 1; // invalidate any in-flight draft/refine fetches from this session
     sessionReady = false;
     if (reconnectTimer) {
       clearTimeout(reconnectTimer);
@@ -436,6 +715,9 @@ export function createOnlineLane(events: LaneEvents, config: OnlineLaneConfig = 
     }
     stopWatchdog();
     clearSegmentTimer();
+    resetDraftState();
+    for (const t of pendingRefineTimers.values()) clearTimeout(t);
+    pendingRefineTimers.clear();
     if (ws) {
       const s = ws;
       ws = null;
@@ -456,7 +738,12 @@ export function createOnlineLane(events: LaneEvents, config: OnlineLaneConfig = 
     }
     segmentBuffer = '';
     segmentLid = null;
+    currentInterimSource = '';
     voicedWindow.length = 0;
+    inFlightDraftSources.clear();
+    segmentFirstPartialAt = 0;
+    lastPartialAt = 0;
+    segmentSilentGapsMs = 0;
     events.onLevel(0);
   }
 
@@ -464,6 +751,7 @@ export function createOnlineLane(events: LaneEvents, config: OnlineLaneConfig = 
     if (running) return; // already running — ignore duplicate Start
     opts = startOpts;
     running = true;
+    sessionGen += 1; // new session generation — stale fetches from any prior session are now ignored
     sessionReady = false;
     reconnectAttempts = 0;
     counter = 0;
@@ -473,6 +761,25 @@ export function createOnlineLane(events: LaneEvents, config: OnlineLaneConfig = 
     previousFinalTranscript = '';
     droppedGhosts = 0;
     recentFinals.length = 0;
+    // reset Phase-2 state + counters
+    resetDraftState();
+    currentInterimSource = '';
+    draftWindow.length = 0;
+    inFlightDraftSources.clear();
+    draftSeq = 0;
+    latestEmotion = undefined;
+    ttsMeta.clear();
+    for (const t of pendingRefineTimers.values()) clearTimeout(t);
+    pendingRefineTimers.clear();
+    segmentFirstPartialAt = 0;
+    lastPartialAt = 0;
+    segmentSilentGapsMs = 0;
+    draftCalls = 0;
+    draftSkipped.duplicate = 0;
+    draftSkipped['rate-limit'] = 0;
+    draftSkipped['in-flight'] = 0;
+    refineCalls = 0;
+    refineRetries = 0;
     const now = Date.now();
     lastEventAt = now;
     lastLoudAt = now; // grace: don't ghost-drop the first transcripts before any loud frame
@@ -503,6 +810,10 @@ export function createOnlineLane(events: LaneEvents, config: OnlineLaneConfig = 
       secondsSinceLastEvent: lastEventAt ? Math.max(0, (Date.now() - lastEventAt) / 1000) : 0,
       voicedMsRecent: Math.round(pruneVoiced()),
       droppedGhosts,
+      draftCalls,
+      draftSkipped: { ...draftSkipped },
+      refineCalls,
+      refineRetries,
     };
   }
 

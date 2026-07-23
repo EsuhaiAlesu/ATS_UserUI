@@ -204,6 +204,12 @@ const OnlineLab: React.FC = () => {
             <br />
             voicedMsRecent: {diag?.voicedMsRecent ?? 0}ms
             {'  ·  '}droppedGhosts: {diag?.droppedGhosts ?? 0}
+            <br />
+            draftCalls: {diag?.draftCalls ?? 0}
+            {'  ·  '}skip dup/rate/inflight: {diag?.draftSkipped.duplicate ?? 0}/{diag?.draftSkipped['rate-limit'] ?? 0}/{diag?.draftSkipped['in-flight'] ?? 0}
+            <br />
+            refineCalls: {diag?.refineCalls ?? 0}
+            {'  ·  '}refineRetries: {diag?.refineRetries ?? 0}
           </div>
 
           <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
@@ -267,8 +273,9 @@ const OnlineLab: React.FC = () => {
               <div style={{ fontSize: 15, fontStyle: l.interim ? 'italic' : 'normal', color: l.interim ? '#94a3b8' : '#e2e8f0' }}>
                 {l.sourceText || '…'}
               </div>
-              <div style={{ fontSize: 15, color: l.targetText ? '#7dd3fc' : '#475569' }}>
-                {l.targetText || (l.interim ? '' : '(đang dịch…)')}
+              {/* draft = dim italic; refine = bright + bold, replacing the draft in place */}
+              <div style={{ fontSize: 15, fontStyle: l.corrected ? 'normal' : 'italic', fontWeight: l.corrected ? 600 : 400, color: l.corrected ? '#7dd3fc' : '#64748b' }}>
+                {l.targetText || (l.interim ? '' : '(đang tinh chỉnh…)')}
               </div>
               <div style={{ fontSize: 11, color: '#64748b', marginTop: 2 }}>
                 {l.lid}
