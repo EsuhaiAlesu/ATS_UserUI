@@ -1,6 +1,8 @@
-# Online Lane Contract — v0.2 (2026-07-22)
+# Online Lane Contract — v0.3 (2026-07-23)
 
 Source of truth for the ONLINE lane (Esuhai Realtime Translation core). Do not invent endpoints, events, or fields beyond this file. Model names are server-internal (configured via server env) — the client never depends on them; externally only friendly endpoint names exist.
+
+> v0.3 changelog: documented `POST /online-api/usage-report` (§6) — it was specified in PROMPT-05 TASK 2 and is used by the Phase-4 client, but was missing from v0.2. Note: the token response's `asrWsPath` is currently informational — the client uses the fixed `WS /online-api/asr` path from §2 (reconcile before relying on `asrWsPath`).
 
 ## Session lifecycle
 
@@ -23,6 +25,7 @@ Source of truth for the ONLINE lane (Esuhai Realtime Translation core). Do not i
    - The returned `sourceText` may already be ASR-corrected using the session terms — always display the returned version, not the raw transcript.
 4. `POST /online-api/tts` body `{ text, language:'ja'|'vi', emotion?, speed?, traceId?, subtitleId? }` → response is an audio stream.
 5. `POST /online-api/save-session` body `{ filename, json, md }` → `{ saved:true, filename }`.
+6. `POST /online-api/usage-report` — free-form JSON body (the server just logs it for cost tracking; ~4000-char limit). The client sends it periodically (~every 5 min) and once on stop; it is best-effort (a 404/failure is silently ignored). Current body shape: `{ lane:'online', sessionStartedAt, finals, draftCalls, draftSkipped, refineCalls, refineRetries, ttsSentences, reconnects, droppedGhosts }`.
 
 ## What the core does NOT provide
 

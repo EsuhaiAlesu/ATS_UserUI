@@ -106,13 +106,6 @@ export type OnlineLaneController = LaneController & {
   saveSession(): Promise<SaveOutcome>;
 };
 
-// Phase-3 TTS metadata parked per finalized line (not on the LaneLine treaty).
-interface TtsMeta {
-  ttsText?: string;
-  emotion?: string;
-  ttsSpeed?: number;
-}
-
 function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -165,7 +158,6 @@ export function createOnlineLane(events: LaneEvents, config: OnlineLaneConfig = 
   // M6 refine-tier state
   const pendingRefineTimers = new Map<string, ReturnType<typeof setTimeout>>();
   let latestEmotion: string | undefined;
-  const ttsMeta = new Map<string, TtsMeta>();
   // per-segment pace timing
   let segmentFirstPartialAt = 0;
   let lastPartialAt = 0;
@@ -268,6 +260,7 @@ export function createOnlineLane(events: LaneEvents, config: OnlineLaneConfig = 
 
   async function doSave(): Promise<SaveOutcome> {
     const o = opts;
+    const gen = sessionGen;
     const versionAtSave = sessionLinesVersion;
     const exp = buildSessionExport(collectSessionLines(), {
       startedAt: sessionStartedAt || Date.now(),
@@ -276,9 +269,12 @@ export function createOnlineLane(events: LaneEvents, config: OnlineLaneConfig = 
       targetLanguage: o?.targetLanguage ?? 'ja',
     });
     const outcome = await saveSessionExport(exp);
-    lastSaveAt = Date.now();
-    lastSaveDownloaded = outcome.downloaded;
-    lastSavedVersion = versionAtSave;
+    // A save from a prior session must not stamp the new session's save-state (rare stop→start race).
+    if (gen === sessionGen) {
+      lastSaveAt = Date.now();
+      lastSaveDownloaded = outcome.downloaded;
+      lastSavedVersion = versionAtSave;
+    }
     return outcome;
   }
 
@@ -639,7 +635,9 @@ export function createOnlineLane(events: LaneEvents, config: OnlineLaneConfig = 
     }
 
     // Finalize the SOURCE line; keep the draft translation (dim) until refine returns.
-    const draftFallback = lastInterimTarget;
+    // On a >120 cut, the whole-line draft over-covers the head (it also translated the remainder),
+    // so don't reuse it as the head's provisional target — refine fills the head-only version.
+    const draftFallback = remainder ? '' : lastInterimTarget;
     emitLine({ lid, sourceText: head, targetText: draftFallback, interim: false, corrected: false });
     // Record NOW (provisional draft translation) so a Stop before refine resolves still keeps the
     // sentence in the transcript deliverable; refine upgrades this same lid in place when it returns.
@@ -724,8 +722,6 @@ export function createOnlineLane(events: LaneEvents, config: OnlineLaneConfig = 
     if (gen !== sessionGen) return;
     if (result.ok) {
       const data = result.data as { sourceText?: string; translatedText?: string; ttsText?: string; emotion?: string; ttsSpeed?: number };
-      // Park Phase-3 TTS metadata (not on the LaneLine treaty).
-      ttsMeta.set(lid, { ttsText: data.ttsText, emotion: data.emotion, ttsSpeed: data.ttsSpeed });
       // Always display the server's returned (ASR-corrected) sourceText, not the raw transcript.
       const finalSource = data.sourceText ?? head;
       const finalTarget = data.translatedText ?? draftFallback;
@@ -956,7 +952,6 @@ export function createOnlineLane(events: LaneEvents, config: OnlineLaneConfig = 
     inFlightDraftSources.clear();
     draftSeq = 0;
     latestEmotion = undefined;
-    ttsMeta.clear();
     for (const t of pendingRefineTimers.values()) clearTimeout(t);
     pendingRefineTimers.clear();
     segmentFirstPartialAt = 0;
@@ -1034,7 +1029,9 @@ export function createOnlineLane(events: LaneEvents, config: OnlineLaneConfig = 
     // report BEFORE teardown tears down the timers. (buildSessionExport reads sessionLines
     // synchronously; the POSTs are fire-and-forget.)
     if (running) {
-      if (segmentBuffer.trim()) flushSegment(); // record the residual sentence's source provisionally
+      // Flush the FULL residual (a >120-char buffer cuts into head+remainder; loop until empty so
+      // every residual sentence is recorded — each pass removes its head, so this terminates).
+      while (segmentBuffer.trim()) flushSegment();
       finalizeSession();
     }
     teardown();
