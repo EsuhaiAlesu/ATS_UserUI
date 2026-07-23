@@ -5,8 +5,8 @@
 // This page is the ONLY page allowed to import the online lane.
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import type { LaneController, LaneEvents, LaneLine, LaneStatus } from '../lib/lanes/types'
-import { createOnlineLane } from '../lib/lanes/online/onlineLane'
+import type { LaneEvents, LaneLine, LaneStatus } from '../lib/lanes/types'
+import { createOnlineLane, type OnlineDiagnostics, type OnlineLaneController } from '../lib/lanes/online/onlineLane'
 
 type Direction = 'vi2ja' | 'ja2vi'
 
@@ -25,6 +25,7 @@ const STATUS_COLOR: Record<LaneStatus, string> = {
 const OnlineLab: React.FC = () => {
   const [devices, setDevices] = useState<MediaDeviceInfo[]>([])
   const [deviceId, setDeviceId] = useState<string>('')
+  const [nearMicGate, setNearMicGate] = useState<boolean>(true)
   const [direction, setDirection] = useState<Direction>('vi2ja')
   const [terms, setTerms] = useState('')
   const [brief, setBrief] = useState('')
@@ -34,10 +35,13 @@ const OnlineLab: React.FC = () => {
   const [level, setLevel] = useState(0)
   const [error, setError] = useState('')
   const [lines, setLines] = useState<LaneLine[]>([])
+  const [diag, setDiag] = useState<OnlineDiagnostics | null>(null)
 
   const deviceIdRef = useRef<string>('')
   deviceIdRef.current = deviceId
-  const laneRef = useRef<LaneController | null>(null)
+  const nearMicGateRef = useRef<boolean>(true)
+  nearMicGateRef.current = nearMicGate
+  const laneRef = useRef<OnlineLaneController | null>(null)
 
   const running = ACTIVE_STATUSES.includes(status)
 
@@ -53,6 +57,14 @@ const OnlineLab: React.FC = () => {
   useEffect(() => {
     void refreshDevices()
   }, [refreshDevices])
+
+  // Poll the online lane's diagnostics (reconnectAttempts / lastEvent age / voiced / ghosts).
+  useEffect(() => {
+    const id = setInterval(() => {
+      setDiag(laneRef.current?.getDiagnostics() ?? null)
+    }, 500)
+    return () => clearInterval(id)
+  }, [])
 
   const upsertLine = useCallback((line: LaneLine) => {
     setLines((prev) => {
@@ -83,7 +95,10 @@ const OnlineLab: React.FC = () => {
     setError('')
     setLines([])
     if (!laneRef.current) {
-      laneRef.current = createOnlineLane(events, { getDeviceId: () => deviceIdRef.current || undefined })
+      laneRef.current = createOnlineLane(events, {
+        getDeviceId: () => deviceIdRef.current || undefined,
+        getNearMicGate: () => nearMicGateRef.current,
+      })
     }
     const [sourceLanguage, targetLanguage] = direction === 'vi2ja' ? (['vi', 'ja'] as const) : (['ja', 'vi'] as const)
     try {
@@ -140,6 +155,11 @@ const OnlineLab: React.FC = () => {
             </button>
           </div>
 
+          <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, color: '#e2e8f0', marginBottom: 12, cursor: running ? 'not-allowed' : 'pointer' }}>
+            <input type="checkbox" checked={nearMicGate} disabled={running} onChange={(e) => setNearMicGate(e.target.checked)} />
+            Noise gate (near-mic) — {nearMicGate ? 'BẬT' : 'TẮT'}
+          </label>
+
           <label style={{ display: 'block', fontSize: 12, color: '#94a3b8', marginBottom: 4 }}>Chiều dịch</label>
           <div style={{ display: 'flex', gap: 8 }}>
             {(['vi2ja', 'ja2vi'] as const).map((d) => (
@@ -165,7 +185,7 @@ const OnlineLab: React.FC = () => {
           </div>
         </div>
 
-        {/* Status + VU */}
+        {/* Status + VU + diagnostics */}
         <div style={box}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
             <span style={{ width: 10, height: 10, borderRadius: '50%', background: STATUS_COLOR[status], display: 'inline-block' }} />
@@ -176,6 +196,14 @@ const OnlineLab: React.FC = () => {
           <label style={{ display: 'block', fontSize: 12, color: '#94a3b8', marginBottom: 4 }}>Mức tín hiệu (VU)</label>
           <div style={{ height: 12, background: '#0f172a', borderRadius: 6, overflow: 'hidden', border: '1px solid #334155' }}>
             <div style={{ height: '100%', width: `${Math.round(level * 100)}%`, background: '#22c55e', transition: 'width 80ms linear' }} />
+          </div>
+
+          <div style={{ marginTop: 10, fontSize: 12, color: '#94a3b8', fontFamily: 'ui-monospace, monospace', lineHeight: 1.6 }}>
+            reconnectAttempts: {diag?.reconnectAttempts ?? 0}
+            {'  ·  '}sinceEvent: {diag ? diag.secondsSinceLastEvent.toFixed(1) : '0.0'}s
+            <br />
+            voicedMsRecent: {diag?.voicedMsRecent ?? 0}ms
+            {'  ·  '}droppedGhosts: {diag?.droppedGhosts ?? 0}
           </div>
 
           <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
