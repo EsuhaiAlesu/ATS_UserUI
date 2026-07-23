@@ -37,6 +37,11 @@ let onWarn: (message: string) => void = () => undefined;
 export function setTtsSinkId(id: string | undefined) { sinkId = id; }
 export function setTtsWarningHandler(handler: (message: string) => void) { onWarn = handler; }
 
+// Fired when a clip's audio actually begins playing (carries the sentence's subtitleId/lid) —
+// consumed by the Phase-4 latency tracker for the final→tts metric.
+let onPlaybackStart: (subtitleId?: string) => void = () => undefined;
+export function setTtsPlaybackStartHandler(handler: (subtitleId?: string) => void) { onPlaybackStart = handler; }
+
 /** Current number of sentences waiting to be spoken (for diagnostics). */
 export function getTtsQueueLength() { return queue.length; }
 
@@ -127,7 +132,7 @@ function releaseCurrentAudio() {
   finish?.();
 }
 
-function playBlob(blob: Blob, myGeneration: number) {
+function playBlob(blob: Blob, myGeneration: number, subtitleId?: string) {
   return new Promise<void>((resolve) => {
     if (generation !== myGeneration) {
       resolve();
@@ -163,6 +168,7 @@ function playBlob(blob: Blob, myGeneration: number) {
     // released element (acceptance: stop() mid-playback stops audio immediately, no leak).
     void routed.then(() => {
       if (done || generation !== myGeneration) return;
+      onPlaybackStart(subtitleId);
       return audio.play();
     }).catch(finish);
   });
@@ -190,7 +196,7 @@ function appendSourceBuffer(sourceBuffer: SourceBuffer, chunk: Uint8Array) {
   });
 }
 
-async function playResponse(response: Response, myGeneration: number) {
+async function playResponse(response: Response, myGeneration: number, subtitleId?: string) {
   const contentType = response.headers.get('content-type')?.split(';')[0]?.trim() || '';
   if (
     !response.body ||
@@ -198,7 +204,7 @@ async function playResponse(response: Response, myGeneration: number) {
     typeof MediaSource === 'undefined' ||
     !MediaSource.isTypeSupported('audio/mpeg')
   ) {
-    await playBlob(await response.blob(), myGeneration);
+    await playBlob(await response.blob(), myGeneration, subtitleId);
     return;
   }
 
@@ -255,6 +261,7 @@ async function playResponse(response: Response, myGeneration: number) {
               started = true;
               await routed;
               if (done || generation !== myGeneration) return; // stopped during setSinkId → don't un-pause
+              onPlaybackStart(subtitleId);
               await audio.play();
             }
           }
@@ -286,7 +293,7 @@ async function drainQueue() {
       const response = await item.fetchPromise;
       if (generation !== myGeneration) return;
       if (!response) continue;
-      await playResponse(response, myGeneration);
+      await playResponse(response, myGeneration, item.subtitleId);
     }
   } finally {
     if (generation === myGeneration) playing = false;

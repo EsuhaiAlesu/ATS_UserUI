@@ -16,7 +16,9 @@ import { ASR_FINAL_MIN_VOICED_MS, ASR_PARTIAL_MIN_VOICED_MS, hasClearSpeechEvide
 import { isStableDraftPrefix, joinLiveDraftSource, stripPromotedPrefix } from './liveDraftTranslation';
 import { DRAFT_RATE_WINDOW_MS, decideDraftAdmission, getAdaptiveShortUtteranceFlushDelay } from './livePipelinePolicy';
 import { estimateSourceSpeechPace } from './sourceSpeechPace';
-import { enqueueTtsSentence, getTtsQueueLength, resetTtsPlayback, stopTtsPlayback, subscribeTtsSpeaking } from './ttsPlayback';
+import { enqueueTtsSentence, getTtsQueueLength, resetTtsPlayback, setTtsPlaybackStartHandler, stopTtsPlayback, subscribeTtsSpeaking } from './ttsPlayback';
+import { buildSessionExport, saveSessionExport, type SaveOutcome, type SessionLine } from './sessionExport';
+import { createLatencyTracker, type LatencyReport } from './latencyTracker';
 
 const ONLINE_BASE = '/online-api';
 const RECENT_FINALS_MAX = 6;
@@ -59,6 +61,10 @@ const FIRST_PARTIAL_LEAD_MS = 650; // Qwen emits its first partial later than re
 export type TtsGateMode = 'auto' | 'always' | 'off';
 const TTS_GATE_NETWORK_TAIL_MS = 1_200; // 'always': extra un-gate delay after playback ends
 
+// M8 — session operations (Phase 4)
+const AUTO_SAVE_INTERVAL_MS = 30_000; // checkpoint the transcript every 30s if new lines exist
+const USAGE_REPORT_INTERVAL_MS = 300_000; // usage report every 5 min (and once on stop)
+
 type StartOpts = {
   sourceLanguage: 'vi' | 'ja';
   targetLanguage: 'vi' | 'ja';
@@ -87,11 +93,18 @@ export interface OnlineDiagnostics {
   ttsQueueLength: number;
   gateActive: boolean;
   gatedMs: number;
+  latency: LatencyReport;
+  lastUsageReportAt: number | null;
+  lastSaveAt: number | null;
+  lastSaveDownloaded: boolean;
 }
 
-// Concrete online controller = the treaty + a diagnostics readout (Phase 4 consumes it).
+// Concrete online controller = the treaty + a diagnostics readout + a manual transcript save.
 // This does NOT change src/lib/lanes/types.ts — the treaty stays untouched.
-export type OnlineLaneController = LaneController & { getDiagnostics(): OnlineDiagnostics };
+export type OnlineLaneController = LaneController & {
+  getDiagnostics(): OnlineDiagnostics;
+  saveSession(): Promise<SaveOutcome>;
+};
 
 // Phase-3 TTS metadata parked per finalized line (not on the LaneLine treaty).
 interface TtsMeta {
@@ -172,6 +185,25 @@ export function createOnlineLane(events: LaneEvents, config: OnlineLaneConfig = 
   let gatedMs = 0;
   let unsubscribeSpeaking: (() => void) | null = null;
 
+  // M8 session-ops state
+  const latency = createLatencyTracker((r) => {
+    // eslint-disable-next-line no-console
+    console.info(`[onlineLane][latency] ${JSON.stringify(r)}`);
+  });
+  const sessionLines = new Map<string, SessionLine>();
+  let sessionStartedAt = 0;
+  let sessionStartedISO = '';
+  let sessionLinesVersion = 0;
+  let lastSavedVersion = -1;
+  let autoSaveTimer: ReturnType<typeof setInterval> | null = null;
+  let usageReportTimer: ReturnType<typeof setInterval> | null = null;
+  let lastSaveAt: number | null = null;
+  let lastSaveDownloaded = false;
+  let lastUsageReportAt: number | null = null;
+  let finals = 0; // finalized sentences (usage report)
+  let ttsSentences = 0; // TTS sentences enqueued (usage report)
+  let reconnectsTotal = 0; // cumulative reconnect attempts (usage report)
+
   const setStatus = (s: LaneStatus, detail?: string) => events.onStatus(s, detail);
   const emitLine = (line: Omit<LaneLine, 'at'>) => events.onLine({ ...line, at: Date.now() });
 
@@ -219,6 +251,65 @@ export function createOnlineLane(events: LaneEvents, config: OnlineLaneConfig = 
     } else {
       gateActive = false;
     }
+  }
+
+  // ---- M8: session operations (transcript save + usage report) ----
+
+  function recordSessionLine(lid: string, at: number, sourceText: string, targetText: string): void {
+    const o = opts;
+    if (!o) return;
+    sessionLines.set(lid, { lid, at, sourceText, targetText, sourceLanguage: o.sourceLanguage, targetLanguage: o.targetLanguage });
+    sessionLinesVersion += 1;
+  }
+
+  function collectSessionLines(): SessionLine[] {
+    return Array.from(sessionLines.values()).sort((a, b) => a.at - b.at);
+  }
+
+  async function doSave(): Promise<SaveOutcome> {
+    const o = opts;
+    const versionAtSave = sessionLinesVersion;
+    const exp = buildSessionExport(collectSessionLines(), {
+      startedAt: sessionStartedAt || Date.now(),
+      endedAt: Date.now(),
+      sourceLanguage: o?.sourceLanguage ?? 'vi',
+      targetLanguage: o?.targetLanguage ?? 'ja',
+    });
+    const outcome = await saveSessionExport(exp);
+    lastSaveAt = Date.now();
+    lastSaveDownloaded = outcome.downloaded;
+    lastSavedVersion = versionAtSave;
+    return outcome;
+  }
+
+  async function sendUsageReport(): Promise<void> {
+    try {
+      await fetch(`${ONLINE_BASE}/usage-report`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          lane: 'online',
+          sessionStartedAt: sessionStartedISO,
+          finals,
+          draftCalls,
+          draftSkipped: { ...draftSkipped },
+          refineCalls,
+          refineRetries,
+          ttsSentences,
+          reconnects: reconnectsTotal,
+          droppedGhosts,
+        }),
+      });
+      lastUsageReportAt = Date.now();
+    } catch {
+      /* usage reporting is best-effort */
+    }
+  }
+
+  // Fire a final transcript save + usage report (synchronous build, fire-and-forget POST).
+  function finalizeSession(): void {
+    if (sessionLines.size > 0) void doSave();
+    void sendUsageReport();
   }
 
   function joinSeg(a: string, b: string): string {
@@ -412,6 +503,7 @@ export function createOnlineLane(events: LaneEvents, config: OnlineLaneConfig = 
       lastInterimTarget = shownTarget;
       lastDraft = { source: sentSource, target: tailTarget, fullSource: fullAtSend };
       emitLine({ lid, sourceText: currentInterimSource, targetText: shownTarget, interim: true, corrected: false });
+      latency.markDraftShown(lid, performance.now());
       schedulePromotion();
     } catch {
       // Drafts are best-effort; failures are silent (the refine tier is the source of truth).
@@ -461,6 +553,7 @@ export function createOnlineLane(events: LaneEvents, config: OnlineLaneConfig = 
     if (Date.now() - lastLoudAt >= LONG_SILENCE_MS) return;
     noteSpeechTiming();
     if (!segmentLid) segmentLid = `online-${++counter}`;
+    latency.markFirstPartial(segmentLid, performance.now());
     currentInterimSource = joinSeg(segmentBuffer, (text + stash).trim());
     emitLine({ lid: segmentLid, sourceText: currentInterimSource, targetText: lastInterimTarget, interim: true, corrected: false });
     scheduleDraft();
@@ -529,9 +622,12 @@ export function createOnlineLane(events: LaneEvents, config: OnlineLaneConfig = 
       remainder = '';
     }
     const lid = segmentLid ?? `online-${++counter}`;
+    const finalizedAt = Date.now();
+    finals += 1;
+    latency.markFinal(lid, performance.now());
 
     // Source pace over the actual speaking window (minus silent gaps, plus the ASR lead).
-    const rawDurationMs = segmentFirstPartialAt ? Date.now() - segmentFirstPartialAt : 0;
+    const rawDurationMs = segmentFirstPartialAt ? finalizedAt - segmentFirstPartialAt : 0;
     const durationMs = rawDurationMs > 0 ? Math.max(0, rawDurationMs - segmentSilentGapsMs) + FIRST_PARTIAL_LEAD_MS : 0;
     const sourcePace = estimateSourceSpeechPace(head, durationMs)?.label;
 
@@ -545,7 +641,10 @@ export function createOnlineLane(events: LaneEvents, config: OnlineLaneConfig = 
     // Finalize the SOURCE line; keep the draft translation (dim) until refine returns.
     const draftFallback = lastInterimTarget;
     emitLine({ lid, sourceText: head, targetText: draftFallback, interim: false, corrected: false });
-    scheduleRefine(lid, head, priorFinals, sourcePace, draftFallback);
+    // Record NOW (provisional draft translation) so a Stop before refine resolves still keeps the
+    // sentence in the transcript deliverable; refine upgrades this same lid in place when it returns.
+    recordSessionLine(lid, finalizedAt, head, draftFallback);
+    scheduleRefine(lid, head, priorFinals, sourcePace, draftFallback, finalizedAt);
 
     // Reset per-segment draft + timing state (this segment is done).
     resetDraftState();
@@ -571,13 +670,13 @@ export function createOnlineLane(events: LaneEvents, config: OnlineLaneConfig = 
 
   // ---- M6: refine tier ----
 
-  function scheduleRefine(lid: string, head: string, priorFinals: string[], sourcePace: string | undefined, draftFallback: string): void {
+  function scheduleRefine(lid: string, head: string, priorFinals: string[], sourcePace: string | undefined, draftFallback: string, finalizedAt: number): void {
     const idleDelay = endsWithStrongSentenceBreak(head, true) ? PUNCTUATION_REFINE_IDLE_MS : REFINE_IDLE_MS;
     const existing = pendingRefineTimers.get(lid);
     if (existing) clearTimeout(existing);
     const t = setTimeout(() => {
       pendingRefineTimers.delete(lid);
-      void refine(lid, head, priorFinals, sourcePace, draftFallback);
+      void refine(lid, head, priorFinals, sourcePace, draftFallback, finalizedAt);
     }, idleDelay);
     pendingRefineTimers.set(lid, t);
   }
@@ -597,7 +696,7 @@ export function createOnlineLane(events: LaneEvents, config: OnlineLaneConfig = 
     }
   }
 
-  async function refine(lid: string, head: string, priorFinals: string[], sourcePace: string | undefined, draftFallback: string): Promise<void> {
+  async function refine(lid: string, head: string, priorFinals: string[], sourcePace: string | undefined, draftFallback: string, finalizedAt: number): Promise<void> {
     const o = opts!;
     const gen = sessionGen;
     const body = JSON.stringify({
@@ -628,21 +727,23 @@ export function createOnlineLane(events: LaneEvents, config: OnlineLaneConfig = 
       // Park Phase-3 TTS metadata (not on the LaneLine treaty).
       ttsMeta.set(lid, { ttsText: data.ttsText, emotion: data.emotion, ttsSpeed: data.ttsSpeed });
       // Always display the server's returned (ASR-corrected) sourceText, not the raw transcript.
-      emitLine({
-        lid,
-        sourceText: data.sourceText ?? head,
-        targetText: data.translatedText ?? draftFallback,
-        interim: false,
-        corrected: true,
-      });
+      const finalSource = data.sourceText ?? head;
+      const finalTarget = data.translatedText ?? draftFallback;
+      emitLine({ lid, sourceText: finalSource, targetText: finalTarget, interim: false, corrected: true });
+      latency.markRefineShown(lid, performance.now());
+      recordSessionLine(lid, finalizedAt, finalSource, finalTarget); // M8 transcript
       // Phase 3: speak the refined translation (targetLanguage voice) on the selected device.
       if (config.getSpeakEnabled?.()) {
         const speakText = data.ttsText || data.translatedText || '';
-        if (speakText) enqueueTtsSentence(speakText, o.targetLanguage, data.emotion, data.ttsSpeed, lid);
+        if (speakText) {
+          enqueueTtsSentence(speakText, o.targetLanguage, data.emotion, data.ttsSpeed, lid);
+          ttsSentences += 1;
+        }
       }
     } else {
       // Session must survive: keep the finalized source line with its draft translation.
       emitLine({ lid, sourceText: head, targetText: draftFallback, interim: false, corrected: false });
+      recordSessionLine(lid, finalizedAt, head, draftFallback); // M8 transcript (refine failed)
       events.onError(`refine failed: ${result.message}`);
     }
   }
@@ -724,6 +825,7 @@ export function createOnlineLane(events: LaneEvents, config: OnlineLaneConfig = 
     }
     const delayMs = Math.min(RECONNECT_BASE_DELAY_MS * Math.pow(2, reconnectAttempts), RECONNECT_MAX_DELAY_MS); // 600,1200,2400,4800,5000
     reconnectAttempts += 1;
+    reconnectsTotal += 1; // cumulative (usage report)
     setStatus('reconnecting', `attempt ${reconnectAttempts}/${RECONNECT_MAX_ATTEMPTS}`);
     reconnectTimer = setTimeout(() => {
       reconnectTimer = null;
@@ -794,6 +896,16 @@ export function createOnlineLane(events: LaneEvents, config: OnlineLaneConfig = 
     stopTtsPlayback();
     ttsSpeaking = false;
     gateActive = false;
+    // Phase 4: stop the session-ops timers + release the playback-start hook.
+    setTtsPlaybackStartHandler(() => undefined);
+    if (autoSaveTimer) {
+      clearInterval(autoSaveTimer);
+      autoSaveTimer = null;
+    }
+    if (usageReportTimer) {
+      clearInterval(usageReportTimer);
+      usageReportTimer = null;
+    }
     if (ws) {
       const s = ws;
       ws = null;
@@ -876,15 +988,37 @@ export function createOnlineLane(events: LaneEvents, config: OnlineLaneConfig = 
     // session yet, so force the gate open; this session's real speaking state will re-drive it.
     ttsSpeaking = false;
     updateGate();
+    // Phase 4 session ops: reset counters/lines, (re)start the auto-save + usage-report timers.
+    sessionLines.clear();
+    sessionLinesVersion = 0;
+    lastSavedVersion = -1;
+    finals = 0;
+    ttsSentences = 0;
+    reconnectsTotal = 0;
+    lastSaveAt = null;
+    lastSaveDownloaded = false;
+    lastUsageReportAt = null;
+    latency.reset();
+    setTtsPlaybackStartHandler((subtitleId) => {
+      if (subtitleId) latency.markTtsStart(subtitleId, performance.now());
+    });
     const now = Date.now();
+    sessionStartedAt = now;
+    sessionStartedISO = new Date(now).toISOString();
+    if (autoSaveTimer) clearInterval(autoSaveTimer);
+    autoSaveTimer = setInterval(() => {
+      if (sessionLinesVersion !== lastSavedVersion && sessionLines.size > 0) void doSave();
+    }, AUTO_SAVE_INTERVAL_MS);
+    if (usageReportTimer) clearInterval(usageReportTimer);
+    usageReportTimer = setInterval(() => void sendUsageReport(), USAGE_REPORT_INTERVAL_MS);
     lastEventAt = now;
     lastLoudAt = now; // grace: don't ghost-drop the first transcripts before any loud frame
     setStatus('connecting');
     try {
       await fetchToken();
     } catch (err) {
-      running = false;
       const m = err instanceof Error ? err.message : String(err);
+      teardown(); // release the gate subscription + auto-save/usage timers + playback hook armed above
       setStatus('error', m);
       events.onError(m);
       throw err;
@@ -896,8 +1030,19 @@ export function createOnlineLane(events: LaneEvents, config: OnlineLaneConfig = 
   }
 
   async function stop(): Promise<void> {
+    // M8: capture the last (possibly un-flushed) sentence, then one final checkpoint + usage
+    // report BEFORE teardown tears down the timers. (buildSessionExport reads sessionLines
+    // synchronously; the POSTs are fire-and-forget.)
+    if (running) {
+      if (segmentBuffer.trim()) flushSegment(); // record the residual sentence's source provisionally
+      finalizeSession();
+    }
     teardown();
     setStatus('stopped');
+  }
+
+  async function saveSession(): Promise<SaveOutcome> {
+    return doSave();
   }
 
   function getDiagnostics(): OnlineDiagnostics {
@@ -913,8 +1058,12 @@ export function createOnlineLane(events: LaneEvents, config: OnlineLaneConfig = 
       ttsQueueLength: getTtsQueueLength(),
       gateActive,
       gatedMs: Math.round(gatedMs),
+      latency: latency.getReport(),
+      lastUsageReportAt,
+      lastSaveAt,
+      lastSaveDownloaded,
     };
   }
 
-  return { id: 'online', start, stop, getDiagnostics };
+  return { id: 'online', start, stop, getDiagnostics, saveSession };
 }

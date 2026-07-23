@@ -41,6 +41,7 @@ const OnlineLab: React.FC = () => {
   const [error, setError] = useState('')
   const [lines, setLines] = useState<LaneLine[]>([])
   const [diag, setDiag] = useState<OnlineDiagnostics | null>(null)
+  const [saveStatus, setSaveStatus] = useState('')
 
   const deviceIdRef = useRef<string>('')
   deviceIdRef.current = deviceId
@@ -131,6 +132,19 @@ const OnlineLab: React.FC = () => {
 
   const handleStop = useCallback(async () => {
     await laneRef.current?.stop()
+  }, [])
+
+  const handleSave = useCallback(async () => {
+    const lane = laneRef.current
+    if (!lane) {
+      setSaveStatus('Chưa có phiên nào để lưu')
+      return
+    }
+    setSaveStatus('Đang lưu…')
+    const r = await lane.saveSession()
+    const t = new Date()
+    const hh = `${String(t.getHours()).padStart(2, '0')}:${String(t.getMinutes()).padStart(2, '0')}:${String(t.getSeconds()).padStart(2, '0')}`
+    setSaveStatus(r.downloaded ? `Lưu server thất bại → đã tải ${r.filename} về máy` : `Đã lưu lúc ${hh} · ${r.filename}`)
   }, [])
 
   // Stop the lane if the page unmounts while a session is live.
@@ -230,6 +244,12 @@ const OnlineLab: React.FC = () => {
             ttsQueue: {diag?.ttsQueueLength ?? 0}
             {'  ·  '}gateActive: {diag?.gateActive ? 'YES' : 'no'}
             {'  ·  '}gatedMs: {diag?.gatedMs ?? 0}
+            <br />
+            draft p50/p90: {diag?.latency.draftP50 ?? '–'}/{diag?.latency.draftP90 ?? '–'}ms
+            {'  ·  '}refine p50/p90: {diag?.latency.refineP50 ?? '–'}/{diag?.latency.refineP90 ?? '–'}ms
+            <br />
+            tts p50/p90: {diag?.latency.ttsP50 ?? '–'}/{diag?.latency.ttsP90 ?? '–'}ms
+            {'  ·  '}usageReport: {diag?.lastUsageReportAt ? new Date(diag.lastUsageReportAt).toLocaleTimeString() : '–'}
           </div>
 
           <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
@@ -331,7 +351,15 @@ const OnlineLab: React.FC = () => {
 
       {/* Line list */}
       <div style={box}>
-        <div style={{ fontSize: 12, color: '#94a3b8', marginBottom: 8 }}>Phụ đề ({lines.length})</div>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap', marginBottom: 8 }}>
+          <span style={{ fontSize: 12, color: '#94a3b8' }}>Phụ đề ({lines.length})</span>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            {saveStatus && <span style={{ fontSize: 12, color: '#94a3b8' }}>{saveStatus}</span>}
+            <button type="button" onClick={() => void handleSave()} style={{ padding: '6px 12px', borderRadius: 6, border: '1px solid #334155', background: '#1e293b', color: '#e2e8f0', fontWeight: 600 }}>
+              Lưu transcript
+            </button>
+          </div>
+        </div>
         {lines.length === 0 && <div style={{ fontSize: 13, color: '#64748b' }}>Chưa có dòng nào. Nhấn "Bắt đầu" và nói vào micro.</div>}
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
           {lines.map((l) => (
