@@ -3,11 +3,22 @@ import react from '@vitejs/plugin-react'
 
 // Forward REST + WebSocket calls to the HanDichThuat backend (docs/API.md).
 // Override the target with ATS_BACKEND when the backend runs elsewhere.
+//
+// ONLINE lane (docs/ONLINE-LANE-CONTRACT.md): the Esuhai Realtime Translation core
+// natively serves `/api` too, so the online lane gets its own `/online-api` prefix
+// which is rewritten back to `/api` on the online core only. Never route the online
+// lane through the `/api` entry above — that one belongs to HanDichThuat.
 const apiProxy = {
   '/api': {
     target: process.env.ATS_BACKEND ?? 'http://127.0.0.1:8080',
     changeOrigin: true,
     ws: true,
+  },
+  '/online-api': {
+    target: process.env.ONLINE_BACKEND ?? 'http://127.0.0.1:8788',
+    changeOrigin: true,
+    ws: true,
+    rewrite: (p: string) => p.replace(/^\/online-api/, '/api'),
   },
 }
 

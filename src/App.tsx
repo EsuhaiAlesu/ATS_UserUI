@@ -12,6 +12,7 @@ import IncidentReport from './pages/IncidentReport'
 import SchedulePlanner from './pages/SchedulePlanner'
 import SpeakerMemory from './pages/SpeakerMemory'
 import DocumentsLibrary from './pages/DocumentsLibrary'
+import OnlineLab from './pages/OnlineLab'
 import OperatorLayout from './components/OperatorLayout'
 import SplashScreen from './components/SplashScreen'
 import Toaster from './components/Toaster'
@@ -58,6 +59,9 @@ const App: React.FC = () => {
             {/* Audience / ceremonial surfaces are full-screen — no operator chrome. */}
             <Route path="/reveal" element={<RevealMoment />} />
             <Route path="/stream" element={<BilingualStream />} />
+
+            {/* ONLINE lane dev bench (docs/ONLINE-LANE-CONTRACT.md) — standalone, NO navbar link. */}
+            <Route path="/online-lab" element={<OnlineLab />} />
 
             <Route path="*" element={<Navigate to="/prep" replace />} />
           </Routes>
