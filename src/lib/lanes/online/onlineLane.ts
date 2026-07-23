@@ -16,6 +16,7 @@ import { ASR_FINAL_MIN_VOICED_MS, ASR_PARTIAL_MIN_VOICED_MS, hasClearSpeechEvide
 import { isStableDraftPrefix, joinLiveDraftSource, stripPromotedPrefix } from './liveDraftTranslation';
 import { DRAFT_RATE_WINDOW_MS, decideDraftAdmission, getAdaptiveShortUtteranceFlushDelay } from './livePipelinePolicy';
 import { estimateSourceSpeechPace } from './sourceSpeechPace';
+import { enqueueTtsSentence, getTtsQueueLength, resetTtsPlayback, stopTtsPlayback, subscribeTtsSpeaking } from './ttsPlayback';
 
 const ONLINE_BASE = '/online-api';
 const RECENT_FINALS_MAX = 6;
@@ -54,18 +55,24 @@ const REFINE_RETRY_DELAY_MS = 800; // retry once after 800ms on network/5xx
 const SOURCE_SPEECH_GAP_MS = 1_200; // silent gaps longer than this are excluded from the pace window
 const FIRST_PARTIAL_LEAD_MS = 650; // Qwen emits its first partial later than real speech onset
 
+// M7 — half-duplex anti-feedback gate (Phase 3)
+export type TtsGateMode = 'auto' | 'always' | 'off';
+const TTS_GATE_NETWORK_TAIL_MS = 1_200; // 'always': extra un-gate delay after playback ends
+
 type StartOpts = {
   sourceLanguage: 'vi' | 'ja';
   targetLanguage: 'vi' | 'ja';
   terms?: string;
   brief?: string;
+  ttsGate?: TtsGateMode;
 };
 
 export interface OnlineLaneConfig {
   // The shared LaneController.start() signature (the treaty) carries no device/gate options,
-  // so the host page supplies them here; both are read at capture-start time.
+  // so the host page supplies them here; all are read live at the relevant moment.
   getDeviceId?: () => string | undefined;
   getNearMicGate?: () => boolean;
+  getSpeakEnabled?: () => boolean; // Phase 3: speak refined translations via TTS
 }
 
 export interface OnlineDiagnostics {
@@ -77,6 +84,9 @@ export interface OnlineDiagnostics {
   draftSkipped: { duplicate: number; 'rate-limit': number; 'in-flight': number };
   refineCalls: number;
   refineRetries: number;
+  ttsQueueLength: number;
+  gateActive: boolean;
+  gatedMs: number;
 }
 
 // Concrete online controller = the treaty + a diagnostics readout (Phase 4 consumes it).
@@ -154,6 +164,14 @@ export function createOnlineLane(events: LaneEvents, config: OnlineLaneConfig = 
   let refineCalls = 0;
   let refineRetries = 0;
 
+  // M7 half-duplex gate state
+  let ttsGateMode: TtsGateMode = 'auto';
+  let ttsSpeaking = false;
+  let gateActive = false;
+  let gateExtraTimer: ReturnType<typeof setTimeout> | null = null;
+  let gatedMs = 0;
+  let unsubscribeSpeaking: (() => void) | null = null;
+
   const setStatus = (s: LaneStatus, detail?: string) => events.onStatus(s, detail);
   const emitLine = (line: Omit<LaneLine, 'at'>) => events.onLine({ ...line, at: Date.now() });
 
@@ -169,6 +187,38 @@ export function createOnlineLane(events: LaneEvents, config: OnlineLaneConfig = 
     const cutoff = Date.now() - DRAFT_RATE_WINDOW_MS;
     while (draftWindow.length && draftWindow[0] < cutoff) draftWindow.shift();
     return draftWindow.length;
+  }
+
+  // Recompute the half-duplex gate from the TTS speaking state + the chosen mode.
+  function updateGate(): void {
+    if (ttsGateMode === 'off') {
+      gateActive = false;
+      if (gateExtraTimer) {
+        clearTimeout(gateExtraTimer);
+        gateExtraTimer = null;
+      }
+      return;
+    }
+    if (ttsSpeaking) {
+      gateActive = true;
+      if (gateExtraTimer) {
+        clearTimeout(gateExtraTimer);
+        gateExtraTimer = null;
+      }
+      return;
+    }
+    // Speaking ended. 'auto' relies on the TTS module's 450ms tail; 'always' holds the gate
+    // an extra 1200ms to cover a voice looped back through an online meeting (RTT + far-end delay).
+    if (ttsGateMode === 'always') {
+      if (gateActive && !gateExtraTimer) {
+        gateExtraTimer = setTimeout(() => {
+          gateExtraTimer = null;
+          gateActive = false;
+        }, TTS_GATE_NETWORK_TAIL_MS);
+      }
+    } else {
+      gateActive = false;
+    }
   }
 
   function joinSeg(a: string, b: string): string {
@@ -218,11 +268,20 @@ export function createOnlineLane(events: LaneEvents, config: OnlineLaneConfig = 
       const handle = await startPcm16Capture(
         config.getDeviceId?.(),
         (packet: CapturePacket) => {
-          voicedWindow.push({ at: Date.now(), voicedMs: packet.voicedMs });
+          let pcm = packet.pcm;
+          let voicedMs = packet.voicedMs;
+          if (gateActive) {
+            // Half-duplex: while the app's own voice is audible, replace outgoing frames with
+            // equal-length silence (preserve server-VAD timing) so TTS never loops into the ASR.
+            gatedMs += packet.pcm.byteLength / 2 / 16; // samples / 16 = ms @16kHz
+            pcm = new ArrayBuffer(packet.pcm.byteLength);
+            voicedMs = 0;
+          }
+          voicedWindow.push({ at: Date.now(), voicedMs });
           pruneVoiced();
           // Only send audio while the WS is OPEN and the upstream session is ready.
           // Audio produced while not OPEN is discarded here — no unbounded buffering.
-          if (ws && ws.readyState === WebSocket.OPEN && sessionReady) ws.send(packet.pcm);
+          if (ws && ws.readyState === WebSocket.OPEN && sessionReady) ws.send(pcm);
         },
         (v: number) => {
           events.onLevel(v);
@@ -576,6 +635,11 @@ export function createOnlineLane(events: LaneEvents, config: OnlineLaneConfig = 
         interim: false,
         corrected: true,
       });
+      // Phase 3: speak the refined translation (targetLanguage voice) on the selected device.
+      if (config.getSpeakEnabled?.()) {
+        const speakText = data.ttsText || data.translatedText || '';
+        if (speakText) enqueueTtsSentence(speakText, o.targetLanguage, data.emotion, data.ttsSpeed, lid);
+      }
     } else {
       // Session must survive: keep the finalized source line with its draft translation.
       emitLine({ lid, sourceText: head, targetText: draftFallback, interim: false, corrected: false });
@@ -718,6 +782,18 @@ export function createOnlineLane(events: LaneEvents, config: OnlineLaneConfig = 
     resetDraftState();
     for (const t of pendingRefineTimers.values()) clearTimeout(t);
     pendingRefineTimers.clear();
+    // Phase 3: stop playing our own voice + release the speaking subscription + open the gate.
+    if (unsubscribeSpeaking) {
+      unsubscribeSpeaking();
+      unsubscribeSpeaking = null;
+    }
+    if (gateExtraTimer) {
+      clearTimeout(gateExtraTimer);
+      gateExtraTimer = null;
+    }
+    stopTtsPlayback();
+    ttsSpeaking = false;
+    gateActive = false;
     if (ws) {
       const s = ws;
       ws = null;
@@ -780,6 +856,26 @@ export function createOnlineLane(events: LaneEvents, config: OnlineLaneConfig = 
     draftSkipped['in-flight'] = 0;
     refineCalls = 0;
     refineRetries = 0;
+    // Phase 3 gate + TTS setup
+    ttsGateMode = startOpts.ttsGate ?? 'auto';
+    gatedMs = 0;
+    gateActive = false;
+    ttsSpeaking = false;
+    if (gateExtraTimer) {
+      clearTimeout(gateExtraTimer);
+      gateExtraTimer = null;
+    }
+    resetTtsPlayback(); // clear any leftover queue + re-arm the one-shot warning
+    unsubscribeSpeaking?.();
+    unsubscribeSpeaking = subscribeTtsSpeaking((s) => {
+      ttsSpeaking = s;
+      updateGate();
+    });
+    // subscribeTtsSpeaking fires synchronously with the module's current value, which can be a
+    // STALE `speaking=true` left by a just-stopped session's 450ms tail. No TTS has played in THIS
+    // session yet, so force the gate open; this session's real speaking state will re-drive it.
+    ttsSpeaking = false;
+    updateGate();
     const now = Date.now();
     lastEventAt = now;
     lastLoudAt = now; // grace: don't ghost-drop the first transcripts before any loud frame
@@ -814,6 +910,9 @@ export function createOnlineLane(events: LaneEvents, config: OnlineLaneConfig = 
       draftSkipped: { ...draftSkipped },
       refineCalls,
       refineRetries,
+      ttsQueueLength: getTtsQueueLength(),
+      gateActive,
+      gatedMs: Math.round(gatedMs),
     };
   }
 

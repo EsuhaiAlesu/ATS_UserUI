@@ -6,7 +6,8 @@
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { LaneEvents, LaneLine, LaneStatus } from '../lib/lanes/types'
-import { createOnlineLane, type OnlineDiagnostics, type OnlineLaneController } from '../lib/lanes/online/onlineLane'
+import { createOnlineLane, type OnlineDiagnostics, type OnlineLaneController, type TtsGateMode } from '../lib/lanes/online/onlineLane'
+import { setTtsSinkId, setTtsWarningHandler } from '../lib/lanes/online/ttsPlayback'
 
 type Direction = 'vi2ja' | 'ja2vi'
 
@@ -29,6 +30,10 @@ const OnlineLab: React.FC = () => {
   const [direction, setDirection] = useState<Direction>('vi2ja')
   const [terms, setTerms] = useState('')
   const [brief, setBrief] = useState('')
+  const [outputDevices, setOutputDevices] = useState<MediaDeviceInfo[]>([])
+  const [outputDeviceId, setOutputDeviceId] = useState<string>('')
+  const [speakEnabled, setSpeakEnabled] = useState<boolean>(true)
+  const [gateMode, setGateMode] = useState<TtsGateMode>('auto')
 
   const [status, setStatus] = useState<LaneStatus>('idle')
   const [statusDetail, setStatusDetail] = useState('')
@@ -41,6 +46,8 @@ const OnlineLab: React.FC = () => {
   deviceIdRef.current = deviceId
   const nearMicGateRef = useRef<boolean>(true)
   nearMicGateRef.current = nearMicGate
+  const speakEnabledRef = useRef<boolean>(true)
+  speakEnabledRef.current = speakEnabled
   const laneRef = useRef<OnlineLaneController | null>(null)
 
   const running = ACTIVE_STATUSES.includes(status)
@@ -49,6 +56,7 @@ const OnlineLab: React.FC = () => {
     try {
       const list = await navigator.mediaDevices.enumerateDevices()
       setDevices(list.filter((d) => d.kind === 'audioinput'))
+      setOutputDevices(list.filter((d) => d.kind === 'audiooutput'))
     } catch {
       /* enumerateDevices unsupported / blocked — leave list empty (default mic still works) */
     }
@@ -64,6 +72,12 @@ const OnlineLab: React.FC = () => {
       setDiag(laneRef.current?.getDiagnostics() ?? null)
     }, 500)
     return () => clearInterval(id)
+  }, [])
+
+  // The TTS module warns once (e.g. engine unreachable) — surface it in the error area.
+  useEffect(() => {
+    setTtsWarningHandler((m) => setError(m))
+    return () => setTtsWarningHandler(() => undefined)
   }, [])
 
   const upsertLine = useCallback((line: LaneLine) => {
@@ -98,6 +112,7 @@ const OnlineLab: React.FC = () => {
       laneRef.current = createOnlineLane(events, {
         getDeviceId: () => deviceIdRef.current || undefined,
         getNearMicGate: () => nearMicGateRef.current,
+        getSpeakEnabled: () => speakEnabledRef.current,
       })
     }
     const [sourceLanguage, targetLanguage] = direction === 'vi2ja' ? (['vi', 'ja'] as const) : (['ja', 'vi'] as const)
@@ -107,11 +122,12 @@ const OnlineLab: React.FC = () => {
         targetLanguage,
         terms: terms.trim() || undefined,
         brief: brief.trim() || undefined,
+        ttsGate: gateMode,
       })
     } catch {
       /* the failure is already surfaced via onError/onStatus; keep the page alive */
     }
-  }, [events, direction, terms, brief])
+  }, [events, direction, terms, brief, gateMode])
 
   const handleStop = useCallback(async () => {
     await laneRef.current?.stop()
@@ -210,6 +226,10 @@ const OnlineLab: React.FC = () => {
             <br />
             refineCalls: {diag?.refineCalls ?? 0}
             {'  ·  '}refineRetries: {diag?.refineRetries ?? 0}
+            <br />
+            ttsQueue: {diag?.ttsQueueLength ?? 0}
+            {'  ·  '}gateActive: {diag?.gateActive ? 'YES' : 'no'}
+            {'  ·  '}gatedMs: {diag?.gatedMs ?? 0}
           </div>
 
           <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
@@ -230,6 +250,52 @@ const OnlineLab: React.FC = () => {
               Dừng
             </button>
           </div>
+        </div>
+      </div>
+
+      {/* Voice output (TTS) */}
+      <div style={{ ...box, marginBottom: 16 }}>
+        <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 16 }}>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, color: '#e2e8f0', cursor: 'pointer' }}>
+            <input type="checkbox" checked={speakEnabled} onChange={(e) => setSpeakEnabled(e.target.checked)} />
+            🔊 Đọc bản dịch — {speakEnabled ? 'BẬT' : 'TẮT'}
+          </label>
+
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <span style={{ fontSize: 12, color: '#94a3b8' }}>Thiết bị ra</span>
+            <select
+              value={outputDeviceId}
+              onChange={(e) => {
+                setOutputDeviceId(e.target.value)
+                setTtsSinkId(e.target.value || undefined)
+              }}
+              style={{ padding: 6, background: '#0f172a', color: '#e2e8f0', border: '1px solid #334155', borderRadius: 6, minWidth: 180 }}
+            >
+              <option value="">Mặc định hệ thống</option>
+              {outputDevices.map((d, i) => (
+                <option key={d.deviceId || i} value={d.deviceId}>
+                  {d.label || `Loa ${i + 1}`}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <span style={{ fontSize: 12, color: '#94a3b8' }}>Chống dội (gate)</span>
+            <select
+              value={gateMode}
+              onChange={(e) => setGateMode(e.target.value as TtsGateMode)}
+              disabled={running}
+              style={{ padding: 6, background: '#0f172a', color: '#e2e8f0', border: '1px solid #334155', borderRadius: 6, opacity: running ? 0.6 : 1 }}
+            >
+              <option value="auto">auto (loa ngoài)</option>
+              <option value="always">always (họp online)</option>
+              <option value="off">off (tai nghe)</option>
+            </select>
+          </div>
+        </div>
+        <div style={{ fontSize: 11, color: '#64748b', marginTop: 8 }}>
+          Đổi thiết bị ra áp dụng từ câu kế tiếp. Chế độ gate chốt khi Bắt đầu (đổi lúc đang chạy không áp).
         </div>
       </div>
 

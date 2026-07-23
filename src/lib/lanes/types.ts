@@ -23,6 +23,8 @@ export interface LaneEvents {
 
 export interface LaneController {
   readonly id: LaneId;
-  start(opts: { sourceLanguage: 'vi' | 'ja'; targetLanguage: 'vi' | 'ja'; terms?: string; brief?: string }): Promise<void>;
+  // `ttsGate` (Phase 3) is ADDITIVE + OPTIONAL: the online lane's half-duplex anti-feedback
+  // gate mode. Offline-lane controllers ignore it. Adding it here is backward-compatible.
+  start(opts: { sourceLanguage: 'vi' | 'ja'; targetLanguage: 'vi' | 'ja'; terms?: string; brief?: string; ttsGate?: 'auto' | 'always' | 'off' }): Promise<void>;
   stop(): Promise<void>;
 }
