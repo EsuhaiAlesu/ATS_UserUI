@@ -230,6 +230,7 @@ const OnlineLab: React.FC = () => {
 
           <div style={{ marginTop: 10, fontSize: 12, color: '#94a3b8', fontFamily: 'ui-monospace, monospace', lineHeight: 1.6 }}>
             reconnectAttempts: {diag?.reconnectAttempts ?? 0}
+            {'  ·  '}silentReconnects: {diag?.silentReconnects ?? 0}
             {'  ·  '}sinceEvent: {diag ? diag.secondsSinceLastEvent.toFixed(1) : '0.0'}s
             <br />
             voicedMsRecent: {diag?.voicedMsRecent ?? 0}ms

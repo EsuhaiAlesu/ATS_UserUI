@@ -33,3 +33,14 @@ Source of truth for the ONLINE lane (Esuhai Realtime Translation core). Do not i
 - No `warming` steps, no per-stage `timing` events, no `on_script`/`name_fix`/`context` events.
 - Mic capture happens in the **browser** (getUserMedia), not on the backend.
 - ASR term correction runs inside the refine endpoint — it is not a separate API.
+
+## Deployment (FIX-06)
+
+The online backend is served **in-process by this repo's own production server** (`server.js` mounts
+`server/online-api.mjs`) at `/online-api/*` — HTTP routes + the `WS /online-api/asr` upgrade, same
+origin. There is **no external core and no proxy**: one deploy (Railway now, gala Mac mini later)
+serves the SPA and the online backend together. In dev, `vite` proxies `/online-api` to the local
+Node server (`ws:true`, no rewrite). The `/online-api/*` routes reuse the app's login gate.
+Configuration is env-driven server-side (ASR/refine/TTS vendor keys + models); no secret or model
+identifier ever appears in the client bundle. Endpoint paths, events, and payloads are unchanged —
+contract stays **v0.3**.

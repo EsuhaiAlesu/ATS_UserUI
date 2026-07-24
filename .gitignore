@@ -22,3 +22,6 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# ONLINE lane saved transcripts (server writes here)
+translated_history/

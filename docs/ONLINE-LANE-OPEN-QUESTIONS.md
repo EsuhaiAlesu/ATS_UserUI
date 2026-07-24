@@ -1,71 +1,59 @@
 # Online Lane — Open questions & pending decisions
 
 The 5-phase online lane (Phases 0–4) is implemented, per-phase reviewed, and committed
-(`173d3d8` → `fcaa4c6`). Isolation + treaty are clean. This file tracks the decisions still
-owed to the product owner — previously they lived only in chat reports and were untracked.
+(`173d3d8` → `fcaa4c6`, polish `8cd9e85`). **FIX-06 (PROMPT-06) delivered the core team's official
+rulings and ported the online backend into this repo's production server.** Isolation + treaty are clean.
 
-Status legend: ❓ = awaiting a ruling · ✅ = decided.
+Status legend: ❓ = awaiting a ruling · ✅ = decided/done · 🕒 = deferred (agreed).
 
-## A. Blocking for real use (needs the backend team / owner)
+## A. Backend & serving
 
-1. ❓ **Online core (Node :8788) does not exist yet.** The whole lane is code-review + unit-test
-   only — no pipeline/gate/TTS/save/latency behavior has EVER run end-to-end. This is the #1
-   blocker for the online lane. Stand up (even a stub honoring `ONLINE-LANE-CONTRACT.md` v0.3),
-   then run one full VI→JA + JA→VI pass through `/online-lab`.
-2. ❓ **Production serving.** `npm start` (`server.js`) does NOT proxy `/online-api` — only
-   `vite dev` / `vite preview` do. Decide one production command (preview, or add a reverse proxy
-   to `server.js`, or front with Caddy/nginx). Same gap pre-exists for the offline `/api`.
-3. ❓ **Is the online lane meant to be gala-usable, or a research bench for now?** Today it is only
-   reachable via the hidden `/online-lab` dev bench (no navbar link) — this is exactly what the
-   specs chartered. A real operator surface (mic/output/direction/terms/brief, VU, status, error
-   banner, subtitle routing to `/stream`) is entirely un-built. If gala-usable → that UI is new work.
-4. ❓ **Auth + cloud-cost controls.** The browser→core hops carry no auth token; only client-side
-   cap is drafts ≤30/min (refine/tts/ASR minutes are uncapped). Confirm LAN isolation, or add an
-   auth token to the token response + a per-session budget/kill-switch.
+1. ✅ **Online core (Node backend).** RESOLVED by FIX-06: the backend was ported into THIS repo's
+   production server (`server/online-api.mjs`, mounted by `server.js` at `/online-api/*` HTTP + WS).
+   One Railway deploy = UI + online backend; the same server runs on the gala Mac mini. No external
+   core, no proxy. Env-driven (keys/models set by the operator in Railway; see PROMPT-06 TASK 1).
+2. ✅ **Production `/online-api` serving.** SUPERSEDED by A1: `server.js` now serves `/online-api/*`
+   in-process (same origin). The vite dev proxy points at the local Node server (`:3000`, `ws:true`,
+   no rewrite). Prod has no proxy.
+3. ✅ **Gala-usable vs research bench.** DECIDED: keep `/online-lab` HIDDEN (no menu/navbar link).
+   The real operator UI is a later, owner-designed phase.
+4. ✅ **Auth + cost controls.** DECIDED: the new `/online-api/*` routes (and the WS upgrade) reuse
+   the app's existing login gate (`server.js` `isAuthed`); when `AUTH_PASSWORD` is unset the gate is
+   off (open). Client draft admission (≤30/min) + usage reports are the accepted cost controls for now.
+   Post-gala hardening item: a per-session cloud budget / kill-switch (see C15).
 
-## B. Interpretation choices made while implementing (confirm or override)
+## B. Interpretation choices (confirmed by the core team)
 
-Each was a reasonable reading of the spec; flagging so they are on record.
+5. ✅ **`ttsGate`** added to the treaty `start()` opts as an ADDITIVE optional field. The only treaty
+   change across all phases.
+6. ✅ **Diagnostics + `saveSession()`** live on `OnlineLaneController` (a superset of the treaty).
+7. ✅ **Refine idle = fixed post-flush delay** (950/360 ms), not reset by later partials — ACCEPTED
+   (behaviorally equivalent; a finalized lid receives no further partials).
+8. ✅ **Draft promotion translates only the fresh tail** after promotion — ACCEPTED (verified
+   identical to the core; refine re-translates the full sentence).
+9. ✅ **Provisional-at-flush transcript, upgraded in place** — ACCEPTED (complete-in-count beats
+   complete-in-quality for a live transcript).
+10. ✅ **`onLevel` is peak-based** (loud threshold 0.09 ≈ peak 12/127) — ACCEPTED (matches the core).
+11. ✅ **Two disclosed `ttsPlayback.ts` deviations** (stop-guard on the deferred `play()`; the
+    playback-start hook) — ACCEPTED (both are real fixes).
 
-5. ✅ (implemented) **`ttsGate`** added to the treaty `start()` opts as an ADDITIVE optional field
-   (PROMPT-04 authorized this). The only treaty change across all phases.
-6. ✅ (implemented) **Diagnostics + `saveSession()`** live on `OnlineLaneController` (a superset of
-   the treaty), not on the treaty itself.
-7. ❓ **Refine idle = fixed 950 ms (360 ms if strong punctuation) after flush**, not reset by later
-   partials. A finalized lid receives no further partials by construction, so this is behaviorally
-   equivalent to "950 ms of quiet"; comment wording matches the behavior.
-8. ❓ **Draft promotion sends only the fresh tail** to the draft endpoint (per "the promoted head is
-   not re-translated"); the tail is drafted without the head's context (refine re-translates the
-   whole sentence). Confirm this trade-off for the cheap draft tier.
-9. ❓ **Provisional-at-flush transcript.** Each finalized line is recorded at flush time with its
-   *draft* translation and upgraded in place when refine returns — so a save mid-refine (incl. the
-   final save on Stop) may carry draft-quality translations. Trade-off: keep the sentence vs. drop
-   it. The transcript is complete-in-count, not always complete-in-refined-quality.
-10. ❓ **`onLevel` is peak-based** (so `AUDIO_LOUD_LEVEL_THRESHOLD=0.09` ≈ "peak 12/127"), vs the
-    Phase-0 `rms*4`. Affects the VU bar sensitivity + loud-detection.
-11. ❓ **`ttsPlayback.ts` deviates from its "frozen reference"** in two disclosed ways: (a) a
-    stop()-guard before the deferred `play()` (fixes a real post-stop audio leak), (b) a
-    playback-start hook for the latency metric. Both additive; no happy-path change.
+## C. Post-gala hardening
 
-## C. Post-gala hardening (deferred, agreed)
+12. ✅ **Committed automated tests.** DONE in FIX-06 TASK 2: `vitest` runner + `tests/*.test.ts`
+    (30 tests over the deterministic modules); `npm test` passes from a clean checkout.
+13. 🕒 **TypeScript `strict`** is OFF project-wide (deferred, "sau gala").
+14. 🕒 **Device hot-swap** (unplug mic/output mid-event) — not detected/surfaced; no `devicechange`
+    listener.
+15. 🕒 **Network-loss auto-resume + per-session cloud budget/kill-switch** — the reconnect caps at 5
+    attempts then errors; the lab's restart wipes the visible transcript (data is safe via auto-save +
+    download fallback). No `navigator.onLine` auto-resume; refine/tts/ASR minutes are uncapped.
+16. 🕒 **VI↔JA only** + Chromium assumption (setSinkId / MediaSource / AudioWorklet); no capability
+    preflight in the (dev-bench) UI.
 
-12. ❓ **Committed automated tests.** The pure modules were checked with ~46 throwaway scratchpad
-    tests (not committed) — commit counts are therefore not reproducible. Recommend a `vitest`
-    runner + real unit tests for the 6 deterministic modules (thresholds, filename format,
-    `|` escaping, numeric-separator non-splitting, p50/p90).
-13. ❓ **TypeScript `strict`** is OFF project-wide (deliberately deferred, "sau gala").
-    `strictNullChecks` would harden the reconnect/stop race paths.
-14. ❓ **Device hot-swap** (unplug mic/output mid-event) is not detected/surfaced; no
-    `devicechange` listener. Standard for a live rig.
-15. ❓ **Network-loss recovery** gives up after 5 attempts; the lab's restart wipes the visible
-    transcript (data itself is safe via auto-save + download fallback). No `navigator.onLine`
-    auto-resume.
-16. ❓ **VI↔JA only** + Chromium assumption (setSinkId / MediaSource / AudioWorklet). Confirm the
-    pair + pin the browser; optionally add a one-time capability preflight in the operator UI.
+## D. Notes
 
-## D. Notes with no action needed
-
-- The 45 s stall watchdog fires on a genuine ≥45 s speech pause (spec-compliant) → a spurious
-  reconnect + error toast. Could be softened later (suppress the toast on silence-driven reconnect).
-- Token response `asrWsPath` is informational; the client uses the fixed `WS /online-api/asr`.
-  Reconciled in `ONLINE-LANE-CONTRACT.md` v0.3.
+- ✅ **45 s silent-pause reconnect toast** — SOFTENED in FIX-06 TASK 3: a 45 s stall with no recent
+  voice reconnects quietly (`console.info` + `silentReconnects` diagnostic, no error toast). The
+  35 s loud path and exhausted-attempts still toast.
+- Token response `asrWsPath` is documented in the contract; the client uses the fixed
+  `WS /online-api/asr` path (server returns `asrWsPath: '/online-api/asr'`).

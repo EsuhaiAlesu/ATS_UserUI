@@ -90,6 +90,7 @@ export interface OnlineDiagnostics {
   draftSkipped: { duplicate: number; 'rate-limit': number; 'in-flight': number };
   refineCalls: number;
   refineRetries: number;
+  silentReconnects: number;
   ttsQueueLength: number;
   gateActive: boolean;
   gatedMs: number;
@@ -195,6 +196,7 @@ export function createOnlineLane(events: LaneEvents, config: OnlineLaneConfig = 
   let finals = 0; // finalized sentences (usage report)
   let ttsSentences = 0; // TTS sentences enqueued (usage report)
   let reconnectsTotal = 0; // cumulative reconnect attempts (usage report)
+  let silentReconnects = 0; // silence-driven reconnects that did NOT show an error toast (TASK 3)
 
   const setStatus = (s: LaneStatus, detail?: string) => events.onStatus(s, detail);
   const emitLine = (line: Omit<LaneLine, 'at'>) => events.onLine({ ...line, at: Date.now() });
@@ -829,7 +831,7 @@ export function createOnlineLane(events: LaneEvents, config: OnlineLaneConfig = 
     }, delayMs);
   }
 
-  function forceReconnect(reason: string): void {
+  function forceReconnect(reason: string, silent: boolean): void {
     if (!ws) return;
     const s = ws;
     ws = null;
@@ -840,7 +842,14 @@ export function createOnlineLane(events: LaneEvents, config: OnlineLaneConfig = 
     } catch {
       /* ignore */
     }
-    events.onError(`online lane stalled (${reason}) → reconnecting`);
+    if (silent) {
+      // Genuine long pause (no recent voice): reconnect quietly — don't alarm the operator on stage.
+      silentReconnects += 1;
+      // eslint-disable-next-line no-console
+      console.info(`[onlineLane] silent reconnect (${reason})`);
+    } else {
+      events.onError(`online lane stalled (${reason}) → reconnecting`);
+    }
     scheduleReconnect();
   }
 
@@ -853,9 +862,10 @@ export function createOnlineLane(events: LaneEvents, config: OnlineLaneConfig = 
       // A transcription session emits nothing during real silence, so silence and a wedged
       // upstream look identical from events alone — the local level monitor disambiguates.
       if (sinceEvent > STALL_RECONNECT_MS) {
-        forceReconnect('45s no events');
+        // 45s with no events: if there was also no recent voice, it's a genuine pause → be quiet.
+        forceReconnect('45s no events', pruneVoiced() < 1);
       } else if (lastLoudAt > lastEventAt && sinceEvent > STALL_LOUD_RECONNECT_MS) {
-        forceReconnect('35s no events with sound present');
+        forceReconnect('35s no events with sound present', false);
       }
     }, WATCHDOG_INTERVAL_MS);
   }
@@ -990,6 +1000,7 @@ export function createOnlineLane(events: LaneEvents, config: OnlineLaneConfig = 
     finals = 0;
     ttsSentences = 0;
     reconnectsTotal = 0;
+    silentReconnects = 0;
     lastSaveAt = null;
     lastSaveDownloaded = false;
     lastUsageReportAt = null;
@@ -1052,6 +1063,7 @@ export function createOnlineLane(events: LaneEvents, config: OnlineLaneConfig = 
       draftSkipped: { ...draftSkipped },
       refineCalls,
       refineRetries,
+      silentReconnects,
       ttsQueueLength: getTtsQueueLength(),
       gateActive,
       gatedMs: Math.round(gatedMs),

@@ -15,10 +15,12 @@ const apiProxy = {
     ws: true,
   },
   '/online-api': {
-    target: process.env.ONLINE_BACKEND ?? 'http://127.0.0.1:8788',
+    // FIX-06: the online backend is now served IN-PROCESS by server.js at /online-api/* (HTTP + WS).
+    // Dev = `node server.js` on :3000; vite proxies /online-api here with NO rewrite (was → :8788 + /api).
+    // Prod = same origin, no proxy at all.
+    target: process.env.ONLINE_BACKEND ?? 'http://127.0.0.1:3000',
     changeOrigin: true,
     ws: true,
-    rewrite: (p: string) => p.replace(/^\/online-api/, '/api'),
   },
 }
 

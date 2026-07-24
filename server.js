@@ -16,6 +16,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
+import { installOnlineApi } from './server/online-api.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DIST = path.join(__dirname, 'dist');
@@ -143,7 +144,9 @@ function serveStatic(req, res) {
     });
 }
 
-const server = http.createServer((req, res) => {
+let handleOnlineApi = null;
+
+const server = http.createServer(async (req, res) => {
     const url = (req.url || '/').split('?')[0];
     const secureCookie = 'HttpOnly; Path=/; SameSite=Lax; Max-Age=43200; Secure';
 
@@ -174,8 +177,16 @@ const server = http.createServer((req, res) => {
     if (!isAuthed(req)) {
         return send(res, 200, loginPage(false), { 'Content-Type': 'text/html; charset=utf-8' });
     }
+    // --- ONLINE lane backend: same origin, HTTP /online-api/* (+ WS /online-api/asr via upgrade) ---
+    // Runs AFTER the auth gate (so it inherits the same login) and BEFORE the SPA fallback.
+    if (handleOnlineApi && (await handleOnlineApi(req, res))) return;
     return serveStatic(req, res);
 });
+
+// Mount the ONLINE lane backend on THIS same HTTP server (routes + WS upgrade), reusing the auth
+// gate. Zero client changes: the client already calls /online-api on this same origin. In dev,
+// vite proxies /online-api here (ws:true, no rewrite). Offline /api/* is untouched.
+handleOnlineApi = installOnlineApi(server, { requireAuth: isAuthed });
 
 server.listen(PORT, '0.0.0.0', () => {
     console.log(`PROYAKU server on :${PORT} — login gate ${GATE_ON ? 'ON' : 'OFF (set AUTH_PASSWORD on Railway to enable)'}`);
