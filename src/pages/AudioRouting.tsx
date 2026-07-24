@@ -1090,26 +1090,31 @@ const OfflineConsole: React.FC = () => {
 
 const ONLINE_MODE_KEY = 'proyaku_conference_mode';
 
-// Floating segmented toggle (top-right). Disabled while a session is live (never two captures).
+// Prominent floating segmented control (top-right, labelled). Disabled while a session is live
+// (never two captures). Visible in BOTH modes so the operator can always switch lanes.
 const ModePill: React.FC<{ mode: 'offline' | 'online'; disabled: boolean; onChange: (m: 'offline' | 'online') => void }> = ({ mode, disabled, onChange }) => (
     <div
-        className="absolute top-3 right-4 z-50 flex items-center gap-1 rounded-full border border-outline-variant bg-surface-container-lowest/95 backdrop-blur px-1 py-1 shadow-lg"
+        className="absolute top-3 right-4 z-50 flex items-center gap-2 rounded-full border border-outline-variant bg-surface-container-lowest shadow-xl pl-3 pr-1.5 py-1.5"
         title={disabled ? 'Dừng phiên hiện tại để đổi chế độ' : 'Chọn luồng dịch: OFFLINE (máy chủ nội bộ) hoặc ONLINE (đám mây)'}
     >
-        <span className="material-symbols-outlined text-[16px] text-on-surface-variant ml-1.5" aria-hidden="true">hub</span>
-        {(['offline', 'online'] as const).map((m) => (
-            <button
-                key={m}
-                type="button"
-                disabled={disabled}
-                onClick={() => onChange(m)}
-                className={`px-3 py-1 rounded-full font-label-caps text-label-caps transition-colors ${
-                    mode === m ? (m === 'online' ? 'bg-secondary text-on-secondary' : 'bg-primary text-on-primary') : 'text-on-surface-variant hover:text-on-surface'
-                } ${disabled ? 'opacity-50 cursor-not-allowed' : ''}`}
-            >
-                {m === 'offline' ? 'OFFLINE' : 'ONLINE'}
-            </button>
-        ))}
+        <span className="material-symbols-outlined text-[18px] text-secondary" aria-hidden="true">hub</span>
+        <span className="font-label-caps text-label-caps text-on-surface-variant select-none">Luồng dịch</span>
+        <div className="flex items-center gap-0.5 bg-surface rounded-full p-0.5">
+            {(['offline', 'online'] as const).map((m) => (
+                <button
+                    key={m}
+                    type="button"
+                    disabled={disabled}
+                    onClick={() => onChange(m)}
+                    title={m === 'online' ? 'ONLINE — dịch qua dịch vụ đám mây (cần nhập khóa trong Cài đặt)' : 'OFFLINE — dịch qua máy chủ nội bộ (mặc định)'}
+                    className={`px-3.5 py-1.5 rounded-full text-sm font-bold transition-colors ${
+                        mode === m ? (m === 'online' ? 'bg-secondary text-on-secondary shadow' : 'bg-primary text-on-primary shadow') : 'text-on-surface-variant hover:text-on-surface'
+                    } ${disabled ? 'opacity-50 cursor-not-allowed' : ''}`}
+                >
+                    {m === 'offline' ? 'OFFLINE' : 'ONLINE'}
+                </button>
+            ))}
+        </div>
     </div>
 );
 
