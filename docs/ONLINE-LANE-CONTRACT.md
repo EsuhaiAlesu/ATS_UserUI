@@ -44,3 +44,20 @@ Node server (`ws:true`, no rewrite). The `/online-api/*` routes reuse the app's 
 Configuration is env-driven server-side (ASR/refine/TTS vendor keys + models); no secret or model
 identifier ever appears in the client bundle. Endpoint paths, events, and payloads are unchanged —
 contract stays **v0.3**.
+
+## Runtime key configuration (app-side management, FIX-07)
+
+App-management endpoints layered ON TOP of the pipeline contract (the pipeline endpoints/events above
+are unchanged). They let the operator enter the six vendor values through the app's Settings UI;
+values are stored server-side (`server/online-config.mjs`, runtime value → env fallback) and are
+write-only — never returned, echoed, or logged. The client speaks opaque **slugs**, not env names, so
+no vendor env name reaches the bundle. Slugs: `asr_endpoint`, `asr_key`, `refine_key`, `tts_key`,
+`tts_voice_ja`, `tts_voice_vi`.
+
+- `GET /online-api/config-status` → `{ keys: { <slug>: boolean, … }, ready: boolean }`. A slug is
+  `true` when EITHER a runtime value or an env var provides it; `ready` = all six provided. Never a value.
+- `POST /online-api/config-keys` body = partial `{ <slug>: string }`: a non-empty string sets, an
+  explicit `""` clears the runtime value (env fallback then applies), an unknown slug → 400. Response =
+  the same shape as `config-status`. Never echoes/logs values (logs only the changed slug names).
+
+Both are behind the same auth gate as the rest of `/online-api/*`.

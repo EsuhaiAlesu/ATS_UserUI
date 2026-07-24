@@ -25,3 +25,4 @@ dist-ssr
 
 # ONLINE lane saved transcripts (server writes here)
 translated_history/
+online-keys.json

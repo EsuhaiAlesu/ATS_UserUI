@@ -15,6 +15,7 @@
 import { WebSocketServer, WebSocket } from 'ws';
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import { getOnlineConfig, getConfigStatus, setOnlineConfig } from './online-config.mjs';
 
 const env = (name, fallback = '') => (process.env[name] ?? fallback).trim();
 const num = (name, fallback) => {
@@ -22,19 +23,22 @@ const num = (name, fallback) => {
   return Number.isFinite(value) ? value : fallback;
 };
 
-const ASR_WS_BASE = env('QWEN3_ASR_WS_BASE').replace(/\/+$/, '');
-const ASR_API_KEY = env('QWEN3_ASR_API_KEY');
+// FIX-07: the six vendor VALUES are read at CALL TIME via getOnlineConfig (runtime Settings value →
+// env fallback), so keys entered in the app after boot take effect without a restart. The optional
+// tuning envs below (models/timeouts/VAD/output format) keep their boot-time env-with-default const.
+const asrWsBase = () => getOnlineConfig('QWEN3_ASR_WS_BASE').replace(/\/+$/, '');
+const asrApiKey = () => getOnlineConfig('QWEN3_ASR_API_KEY');
 const ASR_MODEL = env('QWEN3_ASR_MODEL', 'qwen3-asr-flash-realtime-2026-02-10');
 const ASR_VAD_THRESHOLD = num('QWEN3_ASR_VAD_THRESHOLD', 0.45);
 const ASR_VAD_SILENCE_MS = num('QWEN3_ASR_VAD_SILENCE_MS', 800);
 
-const OPENAI_API_KEY = env('OPENAI_API_KEY');
+const openaiApiKey = () => getOnlineConfig('OPENAI_API_KEY');
 const REFINE_MODEL = env('OPENAI_PREVIEW_REFINE_MODEL', 'gpt-4.1');
 const REFINE_TIMEOUT_MS = num('PREVIEW_REFINE_TIMEOUT_MS', 10_000);
 
-const ELEVENLABS_API_KEY = env('ELEVENLABS_API_KEY');
-const JA_VOICE_ID = env('ELEVENLABS_VOICE_ID');
-const VI_VOICE_ID = env('VI_ELEVENLABS_VOICE_ID');
+const elevenApiKey = () => getOnlineConfig('ELEVENLABS_API_KEY');
+const jaVoiceId = () => getOnlineConfig('ELEVENLABS_VOICE_ID');
+const viVoiceId = () => getOnlineConfig('VI_ELEVENLABS_VOICE_ID');
 const ELEVENLABS_MODEL_ID = env('ELEVENLABS_MODEL_ID', 'eleven_flash_v2_5');
 const ELEVENLABS_OUTPUT_FORMAT = env('ELEVENLABS_OUTPUT_FORMAT', 'mp3_22050_32');
 const ELEVENLABS_TIMEOUT_MS = num('ELEVENLABS_TIMEOUT_MS', 15_000);
@@ -252,13 +256,14 @@ function extractResponseText(data) {
 }
 
 async function refineWithLlm(params) {
-  if (!OPENAI_API_KEY) throw new Error('OPENAI_API_KEY is not configured.');
+  const apiKey = openaiApiKey();
+  if (!apiKey) throw new Error('OPENAI_API_KEY is not configured.');
   const prompt = buildRefinePrompt(params);
   const requestOnce = async () => {
     const response = await withTimeout(
       fetch('https://api.openai.com/v1/responses', {
         method: 'POST',
-        headers: { Authorization: `Bearer ${OPENAI_API_KEY}`, 'Content-Type': 'application/json' },
+        headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
         body: JSON.stringify({
           model: REFINE_MODEL,
           input: prompt,
@@ -337,7 +342,7 @@ async function synthesizeSpeech(text, language, voiceId, emotion, speed, res) {
   const response = await withTimeout(
     fetch(`https://api.elevenlabs.io/v1/text-to-speech/${encodeURIComponent(voiceId)}/stream?output_format=${encodeURIComponent(ELEVENLABS_OUTPUT_FORMAT)}`, {
       method: 'POST',
-      headers: { 'xi-api-key': ELEVENLABS_API_KEY, 'Content-Type': 'application/json' },
+      headers: { 'xi-api-key': elevenApiKey(), 'Content-Type': 'application/json' },
       body: JSON.stringify({
         text: stripAudioTags(text),
         model_id: ELEVENLABS_MODEL_ID,
@@ -423,7 +428,9 @@ export function installOnlineApi(server, { requireAuth } = {}) {
     // Session-scoped biasing terms arrive in the WS URL (≤ 2000 chars).
     const corpusText = limitText(url.searchParams.get('corpus') || url.searchParams.get('hotwords'), 2_000);
 
-    if (!ASR_WS_BASE || !ASR_API_KEY) {
+    const wsBase = asrWsBase();
+    const apiKey = asrApiKey();
+    if (!wsBase || !apiKey) {
       client.send(JSON.stringify({ type: 'error', error: { message: 'Realtime ASR is not configured.' } }));
       client.close(1011, 'ASR not configured');
       return;
@@ -431,8 +438,8 @@ export function installOnlineApi(server, { requireAuth } = {}) {
 
     logLine('asr.session', { language, corpusChars: corpusText.length });
     const upstream = new WebSocket(
-      `${ASR_WS_BASE}/api-ws/v1/realtime?model=${encodeURIComponent(ASR_MODEL)}`,
-      { headers: { Authorization: `Bearer ${ASR_API_KEY}`, 'OpenAI-Beta': 'realtime=v1' } },
+      `${wsBase}/api-ws/v1/realtime?model=${encodeURIComponent(ASR_MODEL)}`,
+      { headers: { Authorization: `Bearer ${apiKey}`, 'OpenAI-Beta': 'realtime=v1' } },
     );
     let upstreamReady = false;
     const pendingFrames = [];
@@ -503,8 +510,25 @@ export function installOnlineApi(server, { requireAuth } = {}) {
     }
 
     try {
+      // FIX-07 app-management endpoints (write-only key config) — never return/echo/log values.
+      if (pathname === '/online-api/config-status' && req.method === 'GET') {
+        sendJson(res, 200, getConfigStatus());
+        return true;
+      }
+      if (pathname === '/online-api/config-keys' && req.method === 'POST') {
+        const body = await readJsonBody(req, 64 * 1024);
+        const result = setOnlineConfig(body);
+        if (result.error) {
+          sendJson(res, 400, { error: result.error });
+          return true;
+        }
+        logLine('config.updated', { changed: result.changed }); // NAMES only — never values
+        sendJson(res, 200, getConfigStatus());
+        return true;
+      }
+
       if (pathname === '/online-api/realtime-preview-token' && req.method === 'POST') {
-        if (!ASR_WS_BASE || !ASR_API_KEY) {
+        if (!asrWsBase() || !asrApiKey()) {
           sendJson(res, 500, { error: 'Realtime ASR is not configured.' });
           return true;
         }
@@ -565,8 +589,8 @@ export function installOnlineApi(server, { requireAuth } = {}) {
             sendJson(res, 400, { error: 'text is required.' });
             return true;
           }
-          const voiceId = language === 'vi' ? VI_VOICE_ID : JA_VOICE_ID;
-          if (!ELEVENLABS_API_KEY || !voiceId) {
+          const voiceId = language === 'vi' ? viVoiceId() : jaVoiceId();
+          if (!elevenApiKey() || !voiceId) {
             sendJson(res, 503, { error: `TTS is not configured for language "${language}".` });
             return true;
           }

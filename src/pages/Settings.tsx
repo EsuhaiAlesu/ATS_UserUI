@@ -6,6 +6,7 @@ import {
     loadSettings, saveSettings, exportLocalData, clearLocalData,
 } from '../lib/settings';
 import { toast } from '../lib/toast';
+import { OnlineKeysSettings } from '../lib/lanes/online';
 
 // Central Settings page (Giai đoạn 1) — consolidates the scattered per-feature config into one
 // professional place: Kết nối · Sự kiện · Hiển thị · Giọng đọc · Tài khoản · Dữ liệu · Giới thiệu.
@@ -114,6 +115,11 @@ const Settings: React.FC = () => {
                             </button>
                             {testStatus && <span className={`text-sm ${testStatus.startsWith('✓') ? 'text-secondary' : testStatus.startsWith('✗') ? 'text-error' : 'text-on-surface-variant'}`}>{testStatus}</span>}
                         </div>
+                    </Section>
+
+                    {/* CHẾ ĐỘ ONLINE — KHÓA API (FIX-07) */}
+                    <Section id="ok" icon="vpn_key" title="Chế độ ONLINE — Khóa API" desc="Khóa dịch vụ cho luồng ONLINE (nhận dạng giọng · dịch · đọc giọng). Lưu trên máy chủ, chỉ ghi.">
+                        <OnlineKeysSettings />
                     </Section>
 
                     {/* HIỂN THỊ */}

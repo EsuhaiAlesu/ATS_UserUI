@@ -14,6 +14,8 @@ import { getSchedules } from '../lib/schedule';
 import { getSpeakers, findSpeakerByName } from '../lib/speakers';
 import { useActiveEvent } from '../lib/ActiveEventContext';
 import { computeReadiness, TIER_LABEL } from '../lib/readiness';
+// FIX-07: ONLINE mode integration — a sanctioned facade-root import (live-screen mode switch).
+import { OnlinePanel, fetchOnlineConfigStatus } from '../lib/lanes/online';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Operator console as a clean video-meeting cockpit (Zoom/Teams pattern):
@@ -165,7 +167,9 @@ const loadSubOutputs = (): SubOutput[] => {
     return DEFAULT_SUB_OUTPUTS;
 };
 
-const AudioRouting: React.FC = () => {
+// The existing OFFLINE conference console — unchanged. The default export below wraps it with the
+// ONLINE/OFFLINE mode switch (FIX-07). When OFFLINE is selected this renders exactly as before.
+const OfflineConsole: React.FC = () => {
     const session = useLiveSession();
     const { eventId, event } = useActiveEvent();
     const nav = useNavigate();
@@ -1078,6 +1082,102 @@ const AudioRouting: React.FC = () => {
                     </aside>
                 </>
             )}
+        </div>
+    );
+};
+
+// ══════════ FIX-07: ONLINE / OFFLINE mode switch on the live conference screen ══════════
+
+const ONLINE_MODE_KEY = 'proyaku_conference_mode';
+
+// Floating segmented toggle (top-right). Disabled while a session is live (never two captures).
+const ModePill: React.FC<{ mode: 'offline' | 'online'; disabled: boolean; onChange: (m: 'offline' | 'online') => void }> = ({ mode, disabled, onChange }) => (
+    <div
+        className="absolute top-3 right-4 z-50 flex items-center gap-1 rounded-full border border-outline-variant bg-surface-container-lowest/95 backdrop-blur px-1 py-1 shadow-lg"
+        title={disabled ? 'Dừng phiên hiện tại để đổi chế độ' : 'Chọn luồng dịch: OFFLINE (máy chủ nội bộ) hoặc ONLINE (đám mây)'}
+    >
+        <span className="material-symbols-outlined text-[16px] text-on-surface-variant ml-1.5" aria-hidden="true">hub</span>
+        {(['offline', 'online'] as const).map((m) => (
+            <button
+                key={m}
+                type="button"
+                disabled={disabled}
+                onClick={() => onChange(m)}
+                className={`px-3 py-1 rounded-full font-label-caps text-label-caps transition-colors ${
+                    mode === m ? (m === 'online' ? 'bg-secondary text-on-secondary' : 'bg-primary text-on-primary') : 'text-on-surface-variant hover:text-on-surface'
+                } ${disabled ? 'opacity-50 cursor-not-allowed' : ''}`}
+            >
+                {m === 'offline' ? 'OFFLINE' : 'ONLINE'}
+            </button>
+        ))}
+    </div>
+);
+
+const MissingKeysModal: React.FC<{ onClose: () => void; onGoSettings: () => void }> = ({ onClose, onGoSettings }) => (
+    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 p-4" onClick={onClose}>
+        <div className="card-lux bg-surface-container border border-outline-variant rounded-xl p-6 max-w-sm w-full" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center gap-2.5 mb-2">
+                <span className="material-symbols-outlined text-error" aria-hidden="true">key_off</span>
+                <h3 className="font-headline-sm text-headline-sm text-on-surface">Chưa cấu hình khóa ONLINE</h3>
+            </div>
+            <p className="text-sm text-on-surface-variant">Luồng ONLINE cần đủ 6 khóa dịch vụ (nhận dạng giọng · dịch · đọc giọng). Vui lòng nhập khóa trong Cài đặt trước khi bắt đầu.</p>
+            <div className="flex justify-end gap-2 mt-5">
+                <button onClick={onClose} className="inline-flex items-center gap-2 px-4 py-2 rounded-full font-label-caps text-label-caps border border-outline-variant text-on-surface-variant hover:text-on-surface">Đóng</button>
+                <button onClick={onGoSettings} className="inline-flex items-center gap-2 px-4 py-2 rounded-full font-label-caps text-label-caps btn-lux bg-secondary text-on-secondary hover:opacity-80">
+                    <span className="material-symbols-outlined text-[18px]" aria-hidden="true">settings</span>Mở Cài đặt
+                </button>
+            </div>
+        </div>
+    </div>
+);
+
+// The ONLINE branch: the shared OnlinePanel + a missing-key gate on Start (popup → Settings).
+const OnlineConferenceMode: React.FC<{ onRunningChange: (running: boolean) => void }> = ({ onRunningChange }) => {
+    const navigate = useNavigate();
+    const [showKeyModal, setShowKeyModal] = useState(false);
+    const gateStart = async (): Promise<boolean> => {
+        try {
+            const s = await fetchOnlineConfigStatus();
+            if (!s.ready) { setShowKeyModal(true); return false; }
+            return true;
+        } catch {
+            setShowKeyModal(true);
+            return false;
+        }
+    };
+    return (
+        <div className="h-full overflow-y-auto text-on-background">
+            <div className="max-w-4xl mx-auto px-6 py-8">
+                <div className="mb-4">
+                    <h1 className="font-headline text-headline text-on-surface">Dịch hội nghị — Chế độ ONLINE</h1>
+                    <p className="text-sm text-on-surface-variant mt-1">Dịch thời gian thực qua dịch vụ đám mây (nhận dạng · dịch 2 tầng · đọc giọng). Cấu hình khóa trong Cài đặt.</p>
+                </div>
+                <OnlinePanel onBeforeStart={gateStart} onRunningChange={onRunningChange} />
+            </div>
+            {showKeyModal && <MissingKeysModal onClose={() => setShowKeyModal(false)} onGoSettings={() => navigate('/settings#ok')} />}
+        </div>
+    );
+};
+
+// Default export: mode switch over the (unchanged) OFFLINE console. Default = OFFLINE (zero regression).
+const AudioRouting: React.FC = () => {
+    const session = useLiveSession();
+    const offlineLive = isSessionActive(session.status);
+    const [mode, setMode] = useState<'offline' | 'online'>(() => (localStorage.getItem(ONLINE_MODE_KEY) === 'online' ? 'online' : 'offline'));
+    const [onlineRunning, setOnlineRunning] = useState(false);
+    // Never two captures: block a mode change while EITHER lane is live (user must Stop first).
+    const selectorDisabled = mode === 'online' ? onlineRunning : offlineLive;
+    const changeMode = (m: 'offline' | 'online') => {
+        if (selectorDisabled || m === mode) return;
+        setMode(m);
+        try { localStorage.setItem(ONLINE_MODE_KEY, m); } catch { /* ignore */ }
+    };
+    return (
+        <div className="h-full w-full relative">
+            {/* Switching to OFFLINE unmounts the online panel → its useOnlineLane cleanup releases the mic
+                fully before the offline lane can claim it (and vice-versa). */}
+            {mode === 'offline' ? <OfflineConsole /> : <OnlineConferenceMode onRunningChange={setOnlineRunning} />}
+            <ModePill mode={mode} disabled={selectorDisabled} onChange={changeMode} />
         </div>
     );
 };

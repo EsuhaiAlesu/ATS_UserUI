@@ -116,6 +116,7 @@ export function createOnlineLane(events: LaneEvents, config: OnlineLaneConfig = 
   let sessionReady = false; // session.created received → safe to stream audio
   let ws: WebSocket | null = null;
   let capture: CaptureHandle | null = null;
+  let capturingInFlight = false; // a getUserMedia is pending (capture is assigned only after it resolves)
   let opts: StartOpts | null = null;
 
   let counter = 0;
@@ -352,7 +353,12 @@ export function createOnlineLane(events: LaneEvents, config: OnlineLaneConfig = 
   }
 
   async function ensureCapture(): Promise<void> {
-    if (capture) return; // already capturing (e.g. across a reconnect)
+    // `capture` is assigned only AFTER getUserMedia resolves, so a second session.created (e.g. a
+    // reconnect) during that await would open a SECOND mic and orphan the first. The in-flight
+    // sentinel + the gen check below make ensureCapture single-flight and session-scoped.
+    if (capture || capturingInFlight) return;
+    capturingInFlight = true;
+    const gen = sessionGen;
     try {
       const handle = await startPcm16Capture(
         config.getDeviceId?.(),
@@ -378,8 +384,9 @@ export function createOnlineLane(events: LaneEvents, config: OnlineLaneConfig = 
         },
         { nearMicGate: config.getNearMicGate?.() ?? true },
       );
-      // stop() may have fired while the mic-permission prompt was open — never leave a hot mic.
-      if (!running) {
+      // stop()/restart may have fired, or a duplicate capture may have won, while the mic-permission
+      // prompt was open — never leave a hot mic, a stale-session mic, or a second mic.
+      if (!running || gen !== sessionGen || capture) {
         handle.stop();
         return;
       }
@@ -389,6 +396,8 @@ export function createOnlineLane(events: LaneEvents, config: OnlineLaneConfig = 
       teardown();
       setStatus('error', m);
       events.onError(m);
+    } finally {
+      capturingInFlight = false;
     }
   }
 
@@ -930,6 +939,8 @@ export function createOnlineLane(events: LaneEvents, config: OnlineLaneConfig = 
       }
       capture = null;
     }
+    capturingInFlight = false; // unblock a fresh session's ensureCapture (a pending getUserMedia's
+    // own gen check will stop its now-stale handle when it resolves).
     segmentBuffer = '';
     segmentLid = null;
     currentInterimSource = '';
