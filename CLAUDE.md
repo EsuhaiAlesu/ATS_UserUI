@@ -14,3 +14,4 @@ Rules:
 3. The shared interface file `src/lib/lanes/types.ts` is the treaty between the two lanes — only change it with explicit user confirmation, and always state the impact on both lanes.
 4. The online lane ALWAYS calls its backend through the `/online-api` base path (proxy). Relative `/api/*` paths belong to HanDichThuat — never call the online core via `/api`.
 5. Every response touching the online lane must state: files changed, why, and whether any offline-lane file was touched (the default answer must be NO).
+7. Any change to `package.json` must be followed by `rm -rf node_modules && npm ci` on a clean tree before pushing. Production (Railway) builds with `npm ci`, which fails hard on lockfile drift — `npm install` succeeding locally is NOT proof the deploy will work.
