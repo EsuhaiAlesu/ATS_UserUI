@@ -13,7 +13,8 @@ import { OnlineKeysSettings } from '../lib/lanes/online';
 // Session-contextual device/model pickers stay in the /audio drawer on purpose (chosen per session).
 
 const APP_VERSION = '1.0 · 2026-07';
-const INPUT = 'w-full bg-surface text-on-surface border border-outline-variant rounded-DEFAULT py-2 px-3 text-sm focus:ring-0 focus:border-secondary field-lux transition-shadow';
+// text-base on mobile (≥16px) so iOS does not zoom on focus; text-sm from sm up keeps the desktop look.
+const INPUT = 'w-full bg-surface text-on-surface border border-outline-variant rounded-DEFAULT py-2 px-3 text-base sm:text-sm focus:ring-0 focus:border-secondary field-lux transition-shadow';
 const BTN = 'inline-flex items-center gap-2 px-4 py-2 rounded-full font-label-caps text-label-caps transition-colors';
 
 const Section: React.FC<{ id?: string; icon: string; title: string; desc?: string; children: React.ReactNode }> = ({ id, icon, title, desc, children }) => (

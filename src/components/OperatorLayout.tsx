@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { useLiveSession, isSessionActive } from '../lib/LiveSessionContext';
 import type { LiveStatus } from '../lib/LiveSessionContext';
@@ -84,6 +84,39 @@ const OperatorLayout: React.FC = () => {
         try { localStorage.setItem('proyaku_rail_collapsed', collapsed ? '1' : '0'); } catch { /* ignore quota/private-mode */ }
     }, [collapsed]);
 
+    // Mobile navigation drawer (below xl the desktop rail + top nav are hidden). Unmounted while
+    // closed, so nothing inside it is tabbable; while open it traps focus and closes on Escape.
+    const [drawerOpen, setDrawerOpen] = useState(false);
+    const drawerRef = useRef<HTMLDivElement>(null);
+    // The control that opened the drawer (the hamburger) — focus returns to it on close (WCAG 2.4.3).
+    const openerRef = useRef<HTMLElement | null>(null);
+    useEffect(() => { setDrawerOpen(false); }, [loc.pathname, loc.hash]); // any navigation closes it
+    useEffect(() => {
+        if (!drawerOpen) return;
+        const el = drawerRef.current;
+        if (!el) return;
+        const focusables = () => Array.from(
+            el.querySelectorAll<HTMLElement>('button, a[href], [tabindex]:not([tabindex="-1"])'),
+        ).filter((f) => !f.hasAttribute('disabled'));
+        focusables()[0]?.focus();
+        const onKey = (e: KeyboardEvent) => {
+            if (e.key === 'Escape') { e.preventDefault(); setDrawerOpen(false); return; }
+            if (e.key !== 'Tab') return;
+            const f = focusables();
+            if (f.length === 0) return;
+            const first = f[0], last = f[f.length - 1];
+            if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+            else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+        };
+        document.addEventListener('keydown', onKey);
+        // On close, move focus back to the opener (still mounted in the header) instead of letting the
+        // browser drop it to <body> when the drawer subtree unmounts.
+        return () => {
+            document.removeEventListener('keydown', onKey);
+            openerRef.current?.focus?.();
+        };
+    }, [drawerOpen]);
+
     // Confirm before leaving a live/warming session or with unsaved edits. Emergency Stop is never guarded.
     const confirmLeave = (): boolean => {
         if (isSessionActive(session.status) && !window.confirm('Phiên đang chạy — rời trang?')) return false;
@@ -114,14 +147,23 @@ const OperatorLayout: React.FC = () => {
     };
 
     return (
+        <>
         <div className="h-screen flex flex-col overflow-clip text-on-background app-aurora">
             {/* ══════════ HEAD BAR ══════════ */}
-            <header className="relative !z-20 shrink-0 h-20 flex items-center px-4 pr-2.5 border-b border-outline-variant shell-rail font-jakarta">
-                {/* Thương hiệu — chữ Latin, dùng Sora; canh trái 16px thẳng cột với tiêu đề sidebar */}
-                <span className="font-sora font-bold text-[25px] tracking-[0.16em] leading-none text-on-surface select-none shrink-0" style={{ textShadow: '0 0 18px rgba(244,208,106,0.20)' }}>PROYAKU</span>
+            <header className="relative !z-20 shrink-0 h-14 xl:h-20 flex items-center gap-1 px-3 xl:px-4 xl:pr-2.5 border-b border-outline-variant shell-rail font-jakarta">
+                {/* Hamburger — dưới lg (điện thoại + tablet): mở ngăn điều hướng thay cho sidebar/nav desktop.
+                    Ngưỡng lg (không md) vì header desktop đầy đủ (nav 21px + pill + Sự kiện) chỉ đủ chỗ từ ~1024px. */}
+                <button type="button" onClick={(e) => { openerRef.current = e.currentTarget; setDrawerOpen(true); }} aria-label="Mở menu điều hướng"
+                    aria-expanded={drawerOpen} aria-controls="proyaku-mobile-drawer"
+                    className="xl:hidden shrink-0 w-10 h-10 flex items-center justify-center rounded-lg text-on-surface-variant hover:text-on-surface hover:bg-surface-container transition-colors">
+                    <span className="material-symbols-outlined" aria-hidden="true">menu</span>
+                </button>
+                {/* Thương hiệu — chữ Latin, dùng Sora; canh trái thẳng cột với tiêu đề sidebar */}
+                <span className="font-sora font-bold text-[18px] xl:text-[25px] tracking-[0.12em] xl:tracking-[0.16em] leading-none text-on-surface select-none shrink-0" style={{ textShadow: '0 0 18px rgba(244,208,106,0.20)' }}>PROYAKU</span>
                 {/* Menu chính — 3 tab full-height (Chuẩn bị · Báo cáo · Cài đặt), gạch chân vàng khi active (kiểu cũ).
+                    Ẩn dưới lg → đưa vào ngăn điều hướng (hamburger).
                     "Dịch hội nghị" KHÔNG nằm ở đây — nó là pill riêng (kiểu tikme) đặt cạnh Sự kiện, xem bên dưới. */}
-                <nav aria-label="Điều hướng chính" className="h-full flex items-center gap-1 ml-8">
+                <nav aria-label="Điều hướng chính" className="hidden xl:flex h-full items-center gap-1 ml-8">
                     {MENUS.filter((mm) => mm.key !== 'ops').map((mm) => {
                         const on = mm.key === cur.key;
                         return (
@@ -145,25 +187,26 @@ const OperatorLayout: React.FC = () => {
                             borderColor: '#fdba74',
                             boxShadow: '0 8px 24px -6px rgba(251, 146, 60, 0.75)',
                         } : undefined}
-                        className={`shrink-0 flex items-center gap-2 rounded-full border-2 px-5 py-2 whitespace-nowrap transition-all focus-visible:[outline-offset:2px] ${opsActive
+                        className={`shrink-0 hidden xl:flex items-center gap-2 rounded-full border-2 px-5 py-2 whitespace-nowrap transition-all focus-visible:[outline-offset:2px] ${opsActive
                             ? 'text-white'
                             : 'text-on-surface-variant border-outline-variant bg-surface-container/50 hover:text-on-surface hover:border-outline hover:bg-surface-container'}`}>
                         <span className={`w-2 h-2 rounded-full shrink-0 ${opsActive ? 'bg-white' : 'bg-[#fb923c]'}`} aria-hidden="true"></span>
                         <span className="text-[15px] font-extrabold uppercase tracking-wider leading-none">{opsMenu.label}</span>
                         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className={opsActive ? '' : 'opacity-80'} aria-hidden="true"><path d="m9 18 6-6-6-6" /></svg>
                     </button>
-                    <EventSwitcher />
+                    <div className="hidden xl:block"><EventSwitcher /></div>
                 </div>
                 {/* Đèn trạng thái — chỉ dùng màu, không viền */}
-                <div role="status" aria-live="polite" aria-label={`Trạng thái: ${m.text}`} className="flex items-center gap-2 mr-2">
+                <div role="status" aria-live="polite" aria-label={`Trạng thái: ${m.text}`} className="flex items-center gap-2 mr-1 md:mr-2 shrink-0">
                     <span className={`w-2.5 h-2.5 rounded-full ${m.dot}`} aria-hidden="true"></span>
-                    <span className={`text-[11px] font-semibold tracking-[0.1em] leading-none ${m.cls}`}>{m.text}</span>
+                    {/* Chữ trạng thái ẩn dưới sm (chấm màu vẫn là chỉ báo trạng thái) để header không tràn trên điện thoại */}
+                    <span className={`hidden sm:inline text-[11px] font-semibold tracking-[0.1em] leading-none ${m.cls}`}>{m.text}</span>
                 </div>
-                {/* Dừng khẩn cấp — control duy nhất màu đỏ, luôn sẵn sàng */}
+                {/* Dừng khẩn cấp — control duy nhất màu đỏ, luôn sẵn sàng; dưới sm chỉ hiện icon (nhãn ẩn) */}
                 <button onClick={() => session.stop()} title="Dừng phiên ngay (khẩn cấp)" aria-label="Dừng phiên khẩn cấp"
-                    className="flex items-center gap-1.5 h-9 px-3 rounded-lg border border-error text-error hover:bg-error hover:text-on-error transition-colors">
+                    className="shrink-0 flex items-center gap-1.5 h-9 px-2.5 md:px-3 rounded-lg border border-error text-error hover:bg-error hover:text-on-error transition-colors">
                     <span className="material-symbols-outlined text-[20px]" aria-hidden="true">pan_tool</span>
-                    <span className="text-[11px] font-semibold tracking-[0.06em] leading-none">DỪNG</span>
+                    <span className="hidden sm:inline text-[11px] font-semibold tracking-[0.06em] leading-none">DỪNG</span>
                 </button>
             </header>
 
@@ -172,7 +215,7 @@ const OperatorLayout: React.FC = () => {
                 {/* Menu "Dịch hội nghị" (/audio) tự có thanh điều khiển riêng làm side menu → KHÔNG hiện
                     sidebar ngữ cảnh của shell ở đây (tránh 2 thanh trùng nhau). Headbar vẫn giữ nguyên. */}
                 {cur.key !== 'ops' && (
-                <aside className={`hidden md:flex flex-col shrink-0 border-r border-outline-variant shell-rail rail-aside font-jakarta overflow-hidden ${collapsed ? 'w-16' : 'w-[248px]'}`}>
+                <aside className={`hidden xl:flex flex-col shrink-0 border-r border-outline-variant shell-rail rail-aside font-jakarta overflow-hidden ${collapsed ? 'w-16' : 'w-[248px]'}`}>
                     {collapsed
                         ? <div className="mx-auto my-3 h-px w-6 bg-outline-variant" aria-hidden="true"></div>
                         : <div className="px-4 pt-4 pb-2 font-label-caps text-label-caps text-on-surface-variant/60 truncate">{cur.label}</div>}
@@ -216,11 +259,66 @@ const OperatorLayout: React.FC = () => {
                 </aside>
                 )}
 
-                <div className="flex-1 min-w-0 overflow-hidden flex flex-col">
+                {/* Dưới lg nội dung CUỘN dọc (không bị cắt ở màn thấp); từ lg giữ nguyên như cũ. */}
+                <div className="flex-1 min-w-0 overflow-y-auto xl:overflow-hidden flex flex-col">
                     <Outlet />
                 </div>
             </div>
         </div>
+
+            {/* ══════════ NGĂN ĐIỀU HƯỚNG MOBILE (chỉ <md) — sibling của shell (KHÔNG là con .app-aurora,
+                nếu không rule `.app-aurora > * { position:relative; z-index:1 }` sẽ đè `fixed`) ══════════ */}
+            {drawerOpen && (
+                <div className="xl:hidden fixed inset-0 z-[80]" role="dialog" aria-modal="true" aria-label="Menu điều hướng">
+                    <div className="absolute inset-0 bg-black/60" onClick={() => setDrawerOpen(false)} aria-hidden="true"></div>
+                    <div id="proyaku-mobile-drawer" ref={drawerRef} tabIndex={-1}
+                        className="absolute inset-y-0 left-0 w-[86%] max-w-[320px] bg-surface-container-lowest border-r border-outline-variant shadow-2xl flex flex-col overflow-y-auto font-jakarta focus:outline-none">
+                        <div className="shrink-0 flex items-center justify-between px-4 h-14 border-b border-outline-variant">
+                            <span className="font-sora font-bold text-[18px] tracking-[0.12em] text-on-surface">PROYAKU</span>
+                            <button type="button" onClick={() => setDrawerOpen(false)} aria-label="Đóng menu"
+                                className="w-10 h-10 flex items-center justify-center rounded-lg text-on-surface-variant hover:text-on-surface hover:bg-surface-container">
+                                <span className="material-symbols-outlined" aria-hidden="true">close</span>
+                            </button>
+                        </div>
+                        <div className="shrink-0 px-3 py-3 border-b border-outline-variant"><EventSwitcher /></div>
+                        {/* Menu chính (kể cả Dịch hội nghị) */}
+                        <nav aria-label="Điều hướng chính" className="shrink-0 p-2 space-y-0.5 border-b border-outline-variant">
+                            {MENUS.map((mm) => {
+                                const on = mm.key === cur.key;
+                                const mi = mm.key === 'ops' ? 'graphic_eq' : mm.key === 'prep' ? 'checklist' : mm.key === 'report' ? 'monitor_heart' : 'settings';
+                                return (
+                                    <button key={mm.key} onClick={() => { setDrawerOpen(false); goMenu(mm); }} aria-current={on ? 'page' : undefined}
+                                        className={`w-full flex items-center gap-3 px-3 py-3 rounded-lg text-left text-[16px] font-medium transition-colors ${on ? 'bg-secondary/15 text-secondary' : 'text-on-surface-variant hover:text-on-surface hover:bg-surface-container'}`}>
+                                        <span className="material-symbols-outlined text-[20px] shrink-0" aria-hidden="true">{mi}</span>
+                                        {mm.label}
+                                    </button>
+                                );
+                            })}
+                        </nav>
+                        {/* Công cụ của mục hiện tại */}
+                        <nav aria-label={`Công cụ ${cur.label}`} className="p-2 space-y-0.5 flex-1">
+                            <div className="px-3 pt-2 pb-1 font-label-caps text-label-caps text-on-surface-variant/60">{cur.label}</div>
+                            {cur.tools.map((t) => {
+                                const on = toolActive(t);
+                                return (
+                                    <button key={t.label} onClick={() => { setDrawerOpen(false); openTool(t); }} disabled={t.soon}
+                                        aria-current={on ? 'page' : undefined}
+                                        aria-label={t.label + (t.external ? ' (mở tab mới)' : '')}
+                                        className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-left transition-colors ${t.soon ? 'text-on-surface-variant/35 cursor-not-allowed' : on ? 'bg-secondary/15 text-secondary' : 'text-on-surface-variant hover:text-on-surface hover:bg-surface-container'}`}>
+                                        <span className="material-symbols-outlined text-[20px] shrink-0" aria-hidden="true">{t.icon}</span>
+                                        <span className="flex-1 min-w-0 flex items-center gap-1.5">
+                                            <span className="text-[15px] font-medium truncate">{t.label}</span>
+                                            {t.external && <span className="material-symbols-outlined text-[15px] opacity-50 shrink-0">open_in_new</span>}
+                                            {t.soon && <span className="font-label-caps text-[9px] px-1.5 py-0.5 rounded-full border border-outline-variant text-on-surface-variant/50 shrink-0">sắp có</span>}
+                                        </span>
+                                    </button>
+                                );
+                            })}
+                        </nav>
+                    </div>
+                </div>
+            )}
+        </>
     );
 };
 

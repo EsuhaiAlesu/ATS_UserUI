@@ -1090,23 +1090,26 @@ const OfflineConsole: React.FC = () => {
 
 const ONLINE_MODE_KEY = 'proyaku_conference_mode';
 
-// Prominent floating segmented control (top-right, labelled). Disabled while a session is live
-// (never two captures). Visible in BOTH modes so the operator can always switch lanes.
+// Labelled segmented control for the translation lane. Disabled while a session is live (never two
+// captures). Visible in BOTH modes. Responsive: below md it sits in normal flow as a full-width top
+// bar (never overlapping content); at md+ it floats top-right. ONLINE is the current default.
 const ModePill: React.FC<{ mode: 'offline' | 'online'; disabled: boolean; onChange: (m: 'offline' | 'online') => void }> = ({ mode, disabled, onChange }) => (
     <div
-        className="absolute top-3 right-4 z-50 flex items-center gap-2 rounded-full border border-outline-variant bg-surface-container-lowest shadow-xl pl-3 pr-1.5 py-1.5"
+        className="z-50 flex items-center gap-2 border-outline-variant bg-surface-container-lowest shadow-xl max-xl:w-full max-xl:justify-between max-xl:border-b max-xl:px-3 max-xl:py-2 xl:absolute xl:top-3 xl:right-4 xl:rounded-full xl:border xl:pl-3 xl:pr-1.5 xl:py-1.5"
         title={disabled ? 'Dừng phiên hiện tại để đổi chế độ' : 'Chọn luồng dịch: OFFLINE (máy chủ nội bộ) hoặc ONLINE (đám mây)'}
     >
-        <span className="material-symbols-outlined text-[18px] text-secondary" aria-hidden="true">hub</span>
-        <span className="font-label-caps text-label-caps text-on-surface-variant select-none">Luồng dịch</span>
-        <div className="flex items-center gap-0.5 bg-surface rounded-full p-0.5">
+        <div className="flex items-center gap-2 min-w-0">
+            <span className="material-symbols-outlined text-[18px] text-secondary shrink-0" aria-hidden="true">hub</span>
+            <span className="font-label-caps text-label-caps text-on-surface-variant select-none truncate">Luồng dịch</span>
+        </div>
+        <div className="flex items-center gap-0.5 bg-surface rounded-full p-0.5 shrink-0">
             {(['offline', 'online'] as const).map((m) => (
                 <button
                     key={m}
                     type="button"
                     disabled={disabled}
                     onClick={() => onChange(m)}
-                    title={m === 'online' ? 'ONLINE — dịch qua dịch vụ đám mây (cần nhập khóa trong Cài đặt)' : 'OFFLINE — dịch qua máy chủ nội bộ (mặc định)'}
+                    title={m === 'online' ? 'ONLINE — dịch qua dịch vụ đám mây · mặc định (cần nhập khóa trong Cài đặt)' : 'OFFLINE — dịch qua máy chủ nội bộ (chưa nối vào bản deploy này)'}
                     className={`px-3.5 py-1.5 rounded-full text-sm font-bold transition-colors ${
                         mode === m ? (m === 'online' ? 'bg-secondary text-on-secondary shadow' : 'bg-primary text-on-primary shadow') : 'text-on-surface-variant hover:text-on-surface'
                     } ${disabled ? 'opacity-50 cursor-not-allowed' : ''}`}
@@ -1164,11 +1167,14 @@ const OnlineConferenceMode: React.FC<{ onRunningChange: (running: boolean) => vo
     );
 };
 
-// Default export: mode switch over the (unchanged) OFFLINE console. Default = OFFLINE (zero regression).
+// Default export: mode switch over the (unchanged) OFFLINE console.
+// Default = ONLINE — the self-hosted OFFLINE backend is not wired into this deployment yet, so a fresh
+// browser should open the lane that actually works. A stored user choice always wins, in BOTH directions.
 const AudioRouting: React.FC = () => {
     const session = useLiveSession();
     const offlineLive = isSessionActive(session.status);
-    const [mode, setMode] = useState<'offline' | 'online'>(() => (localStorage.getItem(ONLINE_MODE_KEY) === 'online' ? 'online' : 'offline'));
+    // Only an explicit stored 'offline' selects OFFLINE; unset / 'online' → ONLINE (the new default).
+    const [mode, setMode] = useState<'offline' | 'online'>(() => (localStorage.getItem(ONLINE_MODE_KEY) === 'offline' ? 'offline' : 'online'));
     const [onlineRunning, setOnlineRunning] = useState(false);
     // Never two captures: block a mode change while EITHER lane is live (user must Stop first).
     const selectorDisabled = mode === 'online' ? onlineRunning : offlineLive;
@@ -1178,11 +1184,15 @@ const AudioRouting: React.FC = () => {
         try { localStorage.setItem(ONLINE_MODE_KEY, m); } catch { /* ignore */ }
     };
     return (
-        <div className="h-full w-full relative">
+        <div className="h-full w-full relative flex flex-col">
+            {/* ModePill kept FIRST: below md it is the normal-flow top bar; at md+ it is md:absolute
+                (out of flow) and the content below takes the full height. */}
+            <ModePill mode={mode} disabled={selectorDisabled} onChange={changeMode} />
             {/* Switching to OFFLINE unmounts the online panel → its useOnlineLane cleanup releases the mic
                 fully before the offline lane can claim it (and vice-versa). */}
-            {mode === 'offline' ? <OfflineConsole /> : <OnlineConferenceMode onRunningChange={setOnlineRunning} />}
-            <ModePill mode={mode} disabled={selectorDisabled} onChange={changeMode} />
+            <div className="flex-1 min-h-0">
+                {mode === 'offline' ? <OfflineConsole /> : <OnlineConferenceMode onRunningChange={setOnlineRunning} />}
+            </div>
         </div>
     );
 };

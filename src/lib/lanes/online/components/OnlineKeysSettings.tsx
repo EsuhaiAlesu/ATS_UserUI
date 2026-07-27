@@ -8,7 +8,8 @@ import React, { useCallback, useEffect, useState } from 'react'
 import { ONLINE_KEY_FIELDS, fetchOnlineConfigStatus, saveOnlineConfigKeys, type OnlineConfigStatus } from '../index'
 import { toast } from '../../../toast'
 
-const INPUT = 'w-full bg-surface text-on-surface border border-outline-variant rounded-DEFAULT py-2 px-3 text-sm focus:ring-0 focus:border-secondary field-lux transition-shadow'
+// text-base on mobile (≥16px) so iOS does not zoom on focus; text-sm from sm up keeps the desktop look.
+const INPUT = 'w-full bg-surface text-on-surface border border-outline-variant rounded-DEFAULT py-2 px-3 text-base sm:text-sm focus:ring-0 focus:border-secondary field-lux transition-shadow'
 const BTN = 'inline-flex items-center gap-2 px-4 py-2 rounded-full font-label-caps text-label-caps transition-colors'
 
 const OnlineKeysSettings: React.FC = () => {
@@ -67,7 +68,7 @@ const OnlineKeysSettings: React.FC = () => {
         const set = status?.keys?.[f.name]
         return (
           <div key={f.name}>
-            <label className="font-label-caps text-label-caps text-on-surface-variant block mb-1.5 flex items-center justify-between gap-2">
+            <label htmlFor={`onlinekey-${f.name}`} className="font-label-caps text-label-caps text-on-surface-variant mb-1.5 flex flex-wrap items-center justify-between gap-x-2 gap-y-0.5">
               <span>{f.label}</span>
               <span className={`inline-flex items-center gap-1 ${set ? 'text-secondary' : 'text-on-surface-variant'}`}>
                 <span className="material-symbols-outlined text-[16px]" aria-hidden="true">{set ? 'check_circle' : 'radio_button_unchecked'}</span>
@@ -75,6 +76,7 @@ const OnlineKeysSettings: React.FC = () => {
               </span>
             </label>
             <input
+              id={`onlinekey-${f.name}`}
               type="password"
               autoComplete="off"
               autoCorrect="off"
