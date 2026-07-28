@@ -14,8 +14,8 @@ import { getSchedules } from '../lib/schedule';
 import { getSpeakers, findSpeakerByName } from '../lib/speakers';
 import { useActiveEvent } from '../lib/ActiveEventContext';
 import { computeReadiness, TIER_LABEL } from '../lib/readiness';
-// FIX-07: ONLINE mode integration — a sanctioned facade-root import (live-screen mode switch).
-import { OnlinePanel, fetchOnlineConfigStatus } from '../lib/lanes/online';
+// FIX-07 / PROMPT-09: ONLINE mode integration — a sanctioned facade-root import (live-screen mode switch).
+import { OnlineConsole } from '../lib/lanes/online';
 import { useConferenceMode } from '../lib/ConferenceModeContext';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1087,70 +1087,25 @@ const OfflineConsole: React.FC = () => {
     );
 };
 
-// ══════════ ONLINE / OFFLINE console — the lane switch now lives in the HEAD BAR ══════════
-// The segmented "Luồng dịch" pill that used to float on this page was removed: OperatorLayout renders
-// the switch in the head-bar right cluster, and this page reads the chosen lane from the neutral
-// ConferenceModeContext. (Prompt-09 TASK 2 — moved to stop it overlapping the settings drawer.)
+// ══════════ ONLINE / OFFLINE console ══════════
+// The lane switch moved to the HEAD BAR (OperatorLayout + ConferenceModeContext). The ONLINE lane now
+// renders through OnlineConsole (facade root) — its OWN console shell, its OWN MissingKeysModal, and its
+// OWN busy/stop reporting to the context. Nothing ONLINE-specific lives in this file anymore beyond the
+// wrapper below; OnlinePanel stays in the lane for the /online-lab bench.
 
-const MissingKeysModal: React.FC<{ onClose: () => void; onGoSettings: () => void }> = ({ onClose, onGoSettings }) => (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 p-4" onClick={onClose}>
-        <div className="card-lux bg-surface-container border border-outline-variant rounded-xl p-6 max-w-sm w-full" onClick={(e) => e.stopPropagation()}>
-            <div className="flex items-center gap-2.5 mb-2">
-                <span className="material-symbols-outlined text-error" aria-hidden="true">key_off</span>
-                <h3 className="font-headline-sm text-headline-sm text-on-surface">Chưa cấu hình khóa ONLINE</h3>
-            </div>
-            <p className="text-sm text-on-surface-variant">Luồng ONLINE cần đủ 6 khóa dịch vụ (nhận dạng giọng · dịch · đọc giọng). Vui lòng nhập khóa trong Cài đặt trước khi bắt đầu.</p>
-            <div className="flex justify-end gap-2 mt-5">
-                <button onClick={onClose} className="inline-flex items-center gap-2 px-4 py-2 rounded-full font-label-caps text-label-caps border border-outline-variant text-on-surface-variant hover:text-on-surface">Đóng</button>
-                <button onClick={onGoSettings} className="inline-flex items-center gap-2 px-4 py-2 rounded-full font-label-caps text-label-caps btn-lux bg-secondary text-on-secondary hover:opacity-80">
-                    <span className="material-symbols-outlined text-[18px]" aria-hidden="true">settings</span>Mở Cài đặt
-                </button>
-            </div>
-        </div>
-    </div>
-);
-
-// The ONLINE branch: the shared OnlinePanel + a missing-key gate on Start (popup → Settings).
-const OnlineConferenceMode: React.FC<{ onRunningChange: (running: boolean) => void }> = ({ onRunningChange }) => {
-    const navigate = useNavigate();
-    const [showKeyModal, setShowKeyModal] = useState(false);
-    const gateStart = async (): Promise<boolean> => {
-        try {
-            const s = await fetchOnlineConfigStatus();
-            if (!s.ready) { setShowKeyModal(true); return false; }
-            return true;
-        } catch {
-            setShowKeyModal(true);
-            return false;
-        }
-    };
-    return (
-        <div className="h-full overflow-y-auto text-on-background">
-            <div className="max-w-4xl mx-auto px-6 py-8">
-                <div className="mb-4">
-                    <h1 className="font-headline text-headline text-on-surface">Dịch hội nghị — Chế độ ONLINE</h1>
-                    <p className="text-sm text-on-surface-variant mt-1">Dịch thời gian thực qua dịch vụ đám mây (nhận dạng · dịch 2 tầng · đọc giọng). Cấu hình khóa trong Cài đặt.</p>
-                </div>
-                <OnlinePanel onBeforeStart={gateStart} onRunningChange={onRunningChange} />
-            </div>
-            {showKeyModal && <MissingKeysModal onClose={() => setShowKeyModal(false)} onGoSettings={() => navigate('/settings#ok')} />}
-        </div>
-    );
-};
-
-// Default export: render the OFFLINE console or the ONLINE branch per the neutral ConferenceModeContext
+// Default export: render the OFFLINE console or the ONLINE console per the neutral ConferenceModeContext
 // (the head-bar switch owns the choice now). Default = ONLINE — the self-hosted OFFLINE backend is not
 // wired into this deployment yet, so a fresh browser opens the lane that works; a stored choice wins.
 // The OFFLINE console (OfflineConsole) is UNCHANGED. This wrapper also registers the OFFLINE stop and
-// reports its running state to the context, so the head-bar DỪNG can stop the offline lane from anywhere
-// — without touching OfflineConsole itself.
+// reports its running state to the context (OnlineConsole self-reports its own), so the head-bar DỪNG can
+// stop the offline lane from anywhere — without touching OfflineConsole itself.
 const AudioRouting: React.FC = () => {
     const session = useLiveSession();
     const offlineLive = isSessionActive(session.status);
     const { mode, setBusy, registerStop } = useConferenceMode();
 
     // Report OFFLINE running to the context (disables the head-bar switch; drives cluster visibility).
-    // The ONLINE branch reports its own running via onRunningChange below.
+    // The ONLINE console (OnlineConsole) reports its own running + registers its own stop while mounted.
     useEffect(() => {
         if (mode === 'offline') setBusy(offlineLive);
     }, [mode, offlineLive, setBusy]);
@@ -1167,7 +1122,7 @@ const AudioRouting: React.FC = () => {
             {/* Switching lanes unmounts the other one → useOnlineLane cleanup releases the mic fully before
                 the other lane can claim it (never two captures). */}
             <div className="flex-1 min-h-0">
-                {mode === 'offline' ? <OfflineConsole /> : <OnlineConferenceMode onRunningChange={setBusy} />}
+                {mode === 'offline' ? <OfflineConsole /> : <OnlineConsole />}
             </div>
         </div>
     );

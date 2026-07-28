@@ -272,7 +272,9 @@ export function useOnlineLane(): UseOnlineLane {
 }
 
 // Shared UI, re-exported so the sanctioned integration points import ONLY from this facade root:
-//   OnlinePanel        — the ONLINE console (used by /online-lab + the live-screen ONLINE mode)
+//   OnlineConsole      — the ONLINE lane inside the full operator console shell (live-screen ONLINE mode)
+//   OnlinePanel        — the compact ONLINE panel (the /online-lab bench)
 //   OnlineKeysSettings — the Settings key section (TASK 3)
+export { default as OnlineConsole } from './components/OnlineConsole'
 export { default as OnlinePanel } from './components/OnlinePanel'
 export { default as OnlineKeysSettings } from './components/OnlineKeysSettings'
