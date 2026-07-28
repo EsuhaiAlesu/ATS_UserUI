@@ -96,6 +96,13 @@ Chạy MỌI mục khô tại chỗ trên build `1576f03`. Tất cả PASS → k
 - **Bundle grep:** 0 env-name/model-id/host/`xi-api-key` ✓. **Vitest:** 96/96 (14 file) ✓. **`/online-lab`:** render OnlinePanel đầy đủ (Micro·gate·Chiều dịch·VU·chẩn đoán·Bắt đầu) ✓.
 - **Shape endpoint (node server thật):** `config-status` = `{keys:{6 slug bool}, required:["refine_key","tts_key","tts_voice_ja","tts_voice_vi"], ready:false}` (slug đục, 0 value) ✓ · `voices` chưa-khoá = `{error:"TTS voice service is not configured."}` (shape sạch, 0 voice id) ✓.
 
+## PHASE 9 — Deploy + smoke-test live (phần tự động của Em; live-walk cần Thầy)
+- **Rollback point** (commit đang live TRƯỚC khi đẩy): `d2eedfe` (PROMPT-08 STAGE 2, asset `index-Cks_aJVu.js`). **Đẩy:** `d2eedfe..1353e6b develop→develop` (fast-forward, 10 commit). Railway **auto-deploy nhanh** — ngay lần poll đầu live đã phục vụ build mới, KHÔNG cần Redeploy tay.
+- **Build+boot OK:** live phục vụ asset `index-DgbjNU45.js` (build Phase 7), `GET / → 200`, routes `/console`·`/wall`·`/audio`·`/online-lab` đều 200, SPA shell nạp đúng bundle + `#root`.
+- **4 solo-check:** ① `/console` nạp + head-bar 2 lane (render kiểm trên build byte-identical cục bộ — screenshot live kẹt vì policy-check công cụ gián đoạn, KHÔNG phải lỗi site). ② `config-status` HTTPS = `{keys:{6 slug}, required:["refine_key","tts_key","tts_voice_ja","tts_voice_vi"], ready:false}` — đúng list, **0 value**. ③ OFFLINE lane 0-diff toàn cuộc + render trên build này (backend HanDichThuat chạy Mac Studio, không thuộc deploy — suy biến "BACKEND OFFLINE" như thường). ④ `voices` = shape lỗi sạch, **0 voice id**.
+- **CHẶN ONLINE — cần Thầy:** `config-status` live cho thấy **cả 6 khoá = false** → Thầy PHẢI đặt 4 biến môi trường Railway (`OPENAI_API_KEY`·`ELEVENLABS_API_KEY`·`ELEVENLABS_VOICE_ID`·`VI_ELEVENLABS_VOICE_ID`) — đặt env, KHÔNG qua form (12.7). Em không đặt/không nhận giá trị.
+- **Còn lại = live-walk owed list** (mục SỐNG bên dưới) do Thầy đi với mic + hội trường thật → về Em vá 1 lượt (I₁…Iₙ, mỗi lỗi 1 commit, kèm nguyên văn lỗi).
+
 ## DANH SÁCH CÒN NỢ (owed — CHỜ Phase 9 SỐNG: câu nói thật + khoá Railway thật + mic thật). *Mục owed KHÔNG phải mục đã pass.*
 **Cần phiên chạy / câu nói thật:**
 - Hai chiều VI/JA: mỗi câu dịch sang tiếng kia, vào ĐÚNG cột console, không nhảy cột sau khi chốt.
