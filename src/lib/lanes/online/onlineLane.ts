@@ -71,6 +71,7 @@ const USAGE_REPORT_INTERVAL_MS = 300_000; // usage report every 5 min (and once 
 // everything still says "connected". Audio is 8192 bytes / 256 ms ≈ 32 KB/s, so:
 const SEND_BACKLOG_WARN_BYTES = 256 * 1024; // ≈ 8s of audio queued → surface it to the operator
 const SEND_BACKLOG_RECONNECT_BYTES = 768 * 1024; // ≈ 24s → the uplink is unusable, reconnect the ladder
+const BACKLOG_TOAST_THROTTLE_MS = 60_000; // at most one backlog-reconnect toast per minute (the diag row stays live)
 
 // TASK 11.4 — the ONE Stop exception to VAD commit: on Dừng, send a single commit and wait briefly for
 // the trailing final, then await the outstanding refine so the last sentence gets its finished
@@ -232,6 +233,7 @@ export function createOnlineLane(events: LaneEvents, config: OnlineLaneConfig = 
   let lastSaveDownloaded = false;
   let lastSaveOk = true; // TASK 12.3: false once a save (auto or manual) fails — surfaced in diagnostics
   let sendBacklogBytes = 0; // TASK 12.5: the browser's WS send buffer at the last audio frame
+  let lastBacklogToastAt = 0; // TASK 12.5: throttle the backlog-reconnect toast (reviewer B4)
   let lastUsageReportAt: number | null = null;
   let finals = 0; // finalized sentences (usage report)
   let ttsSentences = 0; // TTS sentences enqueued (usage report)
@@ -432,7 +434,14 @@ export function createOnlineLane(events: LaneEvents, config: OnlineLaneConfig = 
             // Only surface a backlog worth acting on (≥ WARN ≈ 8s of audio); below that it is noise.
             sendBacklogBytes = backlog >= SEND_BACKLOG_WARN_BYTES ? backlog : 0;
             if (backlog > SEND_BACKLOG_RECONNECT_BYTES) {
-              forceReconnect('send backlog too high (uplink cannot keep up)', false);
+              // Reconnect, but THROTTLE the operator-facing toast: a persistently weak uplink would
+              // otherwise flash a red toast every ~24s for the whole ceremony (a healthy reconnect resets
+              // the attempt count, so it never latches). The always-visible diagnostics backlog row keeps
+              // telling the truth in between — so a throttled toast loses no information.
+              const now = Date.now();
+              const quiet = now - lastBacklogToastAt < BACKLOG_TOAST_THROTTLE_MS;
+              if (!quiet) lastBacklogToastAt = now;
+              forceReconnect('send backlog too high (uplink cannot keep up)', quiet);
             } else {
               ws.send(codec ? codec.encodeAudio(pcm) : pcm);
             }
@@ -457,7 +466,10 @@ export function createOnlineLane(events: LaneEvents, config: OnlineLaneConfig = 
       setStatus('error', m);
       events.onError(m);
     } finally {
-      capturingInFlight = false;
+      // Only clear the shared in-flight flag for the CURRENT session. A stale invocation whose
+      // getUserMedia resolves AFTER a fast stop→start must not clobber the new session's guard —
+      // otherwise a second session.created could slip a SECOND mic open (reviewer B, TASK 11.3 race).
+      if (gen === sessionGen) capturingInFlight = false;
     }
   }
 
@@ -1059,6 +1071,7 @@ export function createOnlineLane(events: LaneEvents, config: OnlineLaneConfig = 
     segmentFirstPartialAt = 0;
     lastPartialAt = 0;
     segmentSilentGapsMs = 0;
+    sendBacklogBytes = 0; // don't leave a stale high backlog in diagnostics after the ladder gives up (B3)
     events.onLevel(0);
   }
 
@@ -1131,6 +1144,7 @@ export function createOnlineLane(events: LaneEvents, config: OnlineLaneConfig = 
     lastSaveDownloaded = false;
     lastSaveOk = true;
     sendBacklogBytes = 0;
+    lastBacklogToastAt = 0;
     lastUsageReportAt = null;
     latency.reset();
     setTtsPlaybackStartHandler((subtitleId) => {

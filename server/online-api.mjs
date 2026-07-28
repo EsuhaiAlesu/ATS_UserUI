@@ -686,8 +686,13 @@ export function installOnlineApi(server, { requireAuth } = {}) {
 
     upstream.on('error', (error) => {
       logLine('asr.upstream_error', { message: String(error?.message ?? 'upstream error').slice(0, 300) });
+      // Defense-in-depth (reviewer B1): don't rely on a guaranteed 'close' following 'error' to free the
+      // timers and the client socket. Clear both timers here and close the client so a `ws` build that
+      // ever emits 'error' without a trailing 'close' cannot leak the connect timer or a half-open socket.
+      clearTimers();
       if (client.readyState === WebSocket.OPEN) {
         client.send(JSON.stringify({ type: 'error', error: { message: 'ASR upstream connection failed.' } }));
+        client.close(1011, 'ASR upstream error');
       }
     });
 
