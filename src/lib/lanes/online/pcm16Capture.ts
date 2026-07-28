@@ -86,21 +86,22 @@ class Pcm16Tap extends AudioWorkletProcessor {
       this.levelWindowSamples = 0;
     }
 
-    // --- near-mic noise gate (per quantum); gated frames become silence, NOT dropped ---
-    let gateOpen = true;
-    if (this.nearMicGateEnabled) {
-      const isSilent = rms < 0.012 && peak < 0.035 && rms < this.noiseRms * 3.2;
-      if (isSilent) {
-        this.noiseRms = this.noiseRms * 0.95 + rms * 0.05;
-        this.hangoverSamples -= n;
-        if (this.hangoverSamples < 0) this.hangoverSamples = 0;
-      } else {
-        this.hangoverSamples = this.hangoverSamplesMax;
-      }
-      gateOpen = this.hangoverSamples > 0;
+    // --- speech-activity detection runs ALWAYS (measure voiced), independent of whether we CUT ---
+    // Splitting measuring from gating: turning the near-mic gate off must NOT silently disable the M4
+    // hallucination guard, which counts voiced ms (11.3). The recogniser runs its own VAD — our gate must
+    // not fight it, so cutting is opt-in and measuring is unconditional.
+    const isSilent = rms < 0.012 && peak < 0.035 && rms < this.noiseRms * 3.2;
+    if (isSilent) {
+      this.noiseRms = this.noiseRms * 0.95 + rms * 0.05;
+      this.hangoverSamples -= n;
+      if (this.hangoverSamples < 0) this.hangoverSamples = 0;
+    } else {
+      this.hangoverSamples = this.hangoverSamplesMax;
     }
+    const voiced = this.hangoverSamples > 0;          // speech evidence — measured regardless of the gate
+    const cut = this.nearMicGateEnabled && !voiced;   // only cut samples when the operator asked for it
 
-    // --- stateful linear resample to 16kHz, apply gate, accumulate, count voiced ---
+    // --- stateful linear resample to 16kHz, apply cut, accumulate, count voiced ---
     for (let i = 0; i < n; i++) {
       const cur = ch[i];
       this.resampleAccumulator += this.ratioInc;
@@ -108,10 +109,10 @@ class Pcm16Tap extends AudioWorkletProcessor {
         this.resampleAccumulator -= 1;
         const frac = 1 - this.resampleAccumulator;
         let interp = this.lastSample + (cur - this.lastSample) * frac;
-        if (!gateOpen) interp = 0;
+        if (cut) interp = 0;
         const clamped = interp < -1 ? -1 : (interp > 1 ? 1 : interp);
         this.outBuffer[this.outCount++] = clamped < 0 ? clamped * 0x8000 : clamped * 0x7fff;
-        if (gateOpen) this.voicedCount++;
+        if (voiced) this.voicedCount++;
         if (this.outCount >= 4096) this.flushPacket();
       }
       this.lastSample = cur;
@@ -130,6 +131,7 @@ export interface CapturePacket {
 
 export interface CaptureHandle {
   stop(): void;
+  sampleRate: number; // the AudioContext rate actually achieved (diagnostics — 16000 when honoured)
 }
 
 export async function startPcm16Capture(
@@ -138,58 +140,65 @@ export async function startPcm16Capture(
   onLevel: (v: number) => void,
   options?: { nearMicGate?: boolean },
 ): Promise<CaptureHandle> {
-  // Our gate runs AFTER the browser's own processing, so keep the browser DSP on.
+  // The operator's chosen microphone, never the browser default (`exact` — with `ideal`, Windows
+  // switching its default device mid-event silently switches the mic under us). Mono; keep browser DSP.
   const stream = await navigator.mediaDevices.getUserMedia({
     audio: {
       ...(deviceId ? { deviceId: { exact: deviceId } } : {}),
+      channelCount: 1,
       echoCancellation: true,
       noiseSuppression: true,
       autoGainControl: true,
     },
   });
-  // Default-rate context: the worklet resamples to 16k internally (keeps resampler state).
-  const ctx = new AudioContext();
-  if (ctx.state === 'suspended') {
-    try {
-      await ctx.resume();
-    } catch {
-      /* ignore — createMediaStreamSource still pulls once audio flows */
+  // Everything after getUserMedia can throw (the worklet load throws on some machines). If it does, GIVE
+  // THE MICROPHONE BACK before re-throwing (11.3) — otherwise the recording light stays on and the tab
+  // holds the device until the page is reloaded mid-event.
+  let ctx: AudioContext | null = null;
+  try {
+    // Ask for a 16kHz context so the browser's proper anti-aliased resampler does 48k→16k, not the
+    // worklet's cheap linear one (which folds >8kHz content back into the speech band). Fall back to the
+    // default rate if the platform refuses.
+    try { ctx = new AudioContext({ sampleRate: 16000 }); } catch { ctx = new AudioContext(); }
+    if (ctx.state === 'suspended') {
+      try { await ctx.resume(); } catch { /* createMediaStreamSource still pulls once audio flows */ }
     }
+    const url = URL.createObjectURL(new Blob([WORKLET_SRC], { type: 'text/javascript' }));
+    try { await ctx.audioWorklet.addModule(url); } finally { URL.revokeObjectURL(url); }
+    const src = ctx.createMediaStreamSource(stream);
+    const node = new AudioWorkletNode(ctx, 'pcm16-tap', {
+      numberOfInputs: 1,
+      numberOfOutputs: 1,
+      outputChannelCount: [1],
+    });
+    node.port.onmessage = (e: MessageEvent) => {
+      const d = e.data as { type?: string; pcm?: ArrayBuffer; voicedMs?: number; value?: number } | null;
+      if (!d) return;
+      if (d.type === 'packet' && d.pcm) onPacket({ pcm: d.pcm, voicedMs: d.voicedMs ?? 0 });
+      else if (d.type === 'level') onLevel(d.value ?? 0);
+    };
+    node.port.postMessage({
+      type: 'configure',
+      inputSampleRate: ctx.sampleRate,
+      outputSampleRate: 16000,
+      nearMicGateEnabled: options?.nearMicGate ?? true,
+    });
+    src.connect(node);
+    node.connect(ctx.destination); // worklet writes no output → silence; keeps the graph pulling.
+    const context = ctx;
+    return {
+      sampleRate: context.sampleRate,
+      stop() {
+        node.port.onmessage = null;
+        try { src.disconnect(); node.disconnect(); } catch { /* ignore */ }
+        stream.getTracks().forEach((t) => t.stop());
+        void context.close();
+      },
+    };
+  } catch (err) {
+    // Release the hardware (and close the context if it was created) before the error propagates.
+    stream.getTracks().forEach((t) => t.stop());
+    if (ctx) { try { void ctx.close(); } catch { /* already closing */ } }
+    throw err;
   }
-  const url = URL.createObjectURL(new Blob([WORKLET_SRC], { type: 'text/javascript' }));
-  await ctx.audioWorklet.addModule(url);
-  URL.revokeObjectURL(url);
-  const src = ctx.createMediaStreamSource(stream);
-  const node = new AudioWorkletNode(ctx, 'pcm16-tap', {
-    numberOfInputs: 1,
-    numberOfOutputs: 1,
-    outputChannelCount: [1],
-  });
-  node.port.onmessage = (e: MessageEvent) => {
-    const d = e.data as { type?: string; pcm?: ArrayBuffer; voicedMs?: number; value?: number } | null;
-    if (!d) return;
-    if (d.type === 'packet' && d.pcm) onPacket({ pcm: d.pcm, voicedMs: d.voicedMs ?? 0 });
-    else if (d.type === 'level') onLevel(d.value ?? 0);
-  };
-  node.port.postMessage({
-    type: 'configure',
-    inputSampleRate: ctx.sampleRate,
-    outputSampleRate: 16000,
-    nearMicGateEnabled: options?.nearMicGate ?? true,
-  });
-  src.connect(node);
-  node.connect(ctx.destination); // worklet writes no output → silence; keeps the graph pulling.
-  return {
-    stop() {
-      node.port.onmessage = null;
-      try {
-        src.disconnect();
-        node.disconnect();
-      } catch {
-        /* ignore */
-      }
-      stream.getTracks().forEach((t) => t.stop());
-      void ctx.close();
-    },
-  };
 }

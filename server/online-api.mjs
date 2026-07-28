@@ -15,7 +15,7 @@
 import { WebSocketServer, WebSocket } from 'ws';
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import { getOnlineConfig, getConfigStatus, setOnlineConfig } from './online-config.mjs';
+import { getOnlineConfig, getConfigStatus, setOnlineConfig, ONLINE_KEY_SLUGS } from './online-config.mjs';
 import { createHash } from 'node:crypto';
 
 const env = (name, fallback = '') => (process.env[name] ?? fallback).trim();
@@ -44,6 +44,32 @@ const ELEVENLABS_MODEL_ID = env('ELEVENLABS_MODEL_ID', 'eleven_flash_v2_5');
 const ELEVENLABS_OUTPUT_FORMAT = env('ELEVENLABS_OUTPUT_FORMAT', 'mp3_22050_32');
 const ELEVENLABS_TIMEOUT_MS = num('ELEVENLABS_TIMEOUT_MS', 15_000);
 const TTS_VOICE_CATALOG_TTL_MS = num('TTS_VOICE_CATALOG_TTL_MS', 5 * 60 * 1000);
+
+// TASK 11: direct-dial recogniser (Scribe v2 Realtime). All env()-driven so the event can be tuned
+// without a redeploy. `ONLINE_ASR_PROVIDER=qwen3` restores the old proxy path (rollback, 11.6). The
+// browser dials the vendor directly with a single-use token; NONE of these leaves the server except the
+// finished, opaque `asrWsUrl` in the token response (11.9). Reuses ELEVENLABS_API_KEY (no new key).
+const ONLINE_ASR_PROVIDER = env('ONLINE_ASR_PROVIDER', 'scribe');
+const SCRIBE_MODEL_ID = env('SCRIBE_MODEL_ID', 'scribe_v2_realtime');
+const SCRIBE_WS_BASE = env('SCRIBE_WS_BASE', 'wss://api.elevenlabs.io').replace(/\/+$/, '');
+const SCRIBE_WS_PATH = env('SCRIBE_WS_PATH', '/v1/speech-to-text/realtime'); // env-tunable if the vendor path differs
+const SCRIBE_TOKEN_URL = env('SCRIBE_TOKEN_URL', 'https://api.elevenlabs.io/v1/single-use-token/realtime_scribe');
+const SCRIBE_VAD_SILENCE_SECS = num('SCRIBE_VAD_SILENCE_SECS', 1.5);
+const SCRIBE_VAD_THRESHOLD = num('SCRIBE_VAD_THRESHOLD', 0.4);
+const SCRIBE_MIN_SPEECH_MS = num('SCRIBE_MIN_SPEECH_MS', 100);
+const SCRIBE_MIN_SILENCE_MS = num('SCRIBE_MIN_SILENCE_MS', 100);
+const SCRIBE_FILTER_BACKGROUND = env('SCRIBE_FILTER_BACKGROUND', ''); // empty = do not send (demo parity); fallback only — the console switch (11.13) outranks it
+const SCRIBE_NO_VERBATIM = env('SCRIBE_NO_VERBATIM', ''); // empty = send nothing; 'true' → recogniser drops fillers/disfluencies
+const SCRIBE_SEND_LANGUAGE_CODE = env('SCRIBE_SEND_LANGUAGE_CODE', 'false');
+const SCRIBE_TOKEN_TTL_MS = 15 * 60 * 1000;
+const SCRIBE_KEYTERM_MAX_LEN = 20;
+const SCRIBE_KEYTERM_MAX = 30;
+
+// Which key slugs the CURRENT configuration actually needs (TASK 11.10): the direct path spends the TTS
+// vendor's key, so the two proxied-ASR slugs are not required; the qwen3 rollback needs all six.
+const ONLINE_REQUIRED_SLUGS = ONLINE_ASR_PROVIDER === 'qwen3'
+  ? ONLINE_KEY_SLUGS.slice()
+  : ONLINE_KEY_SLUGS.filter((s) => s !== 'asr_endpoint' && s !== 'asr_key');
 
 const HISTORY_DIR = env('ONLINE_HISTORY_DIR', './translated_history');
 const MAX_TEXT_CHARS = 12_000;
@@ -173,8 +199,9 @@ function readTextField(object, keys, depth = 0) {
 function parseRefineContent(content) {
   const parsed = parseJsonObject(content);
   if (parsed) {
+    // TASK 11.12: source_corrected is no longer read — we tolerate it on the way in (an old-shaped model
+    // answer can never reach the screen) but never surface it. Only the translation is taken.
     return {
-      sourceCorrected: readTextField(parsed, ['source_corrected', 'sourceCorrected', 'sourceText']),
       targetFinal: readTextField(parsed, ['target_final', 'targetFinal', 'translatedText']),
       ttsText: readTextField(parsed, ['tts_text', 'ttsText']),
       emotion: readTextField(parsed, ['emotion']),
@@ -184,7 +211,7 @@ function parseRefineContent(content) {
   }
   const trimmed = content.trim();
   const rejected = looksStructured(trimmed);
-  return { sourceCorrected: '', targetFinal: rejected ? '' : trimmed, ttsText: '', emotion: '', ttsSpeed: undefined, format: rejected ? 'rejected_structured' : 'plain_text' };
+  return { targetFinal: rejected ? '' : trimmed, ttsText: '', emotion: '', ttsSpeed: undefined, format: rejected ? 'rejected_structured' : 'plain_text' };
 }
 
 // ---------- refine prompt (mirror of the core's runtime policy) ----------
@@ -192,7 +219,7 @@ function targetLanguageTermPolicy(targetLanguage) {
   if (targetLanguage.startsWith('ja')) {
     return [
       'Target-language term policy:',
-      '- For Vietnamese source mentions of "Sếp", "Sip", "SIP", "CEO", "TGĐ", or "Tổng Giám đốc" that refer to the company president/general director, keep source_corrected in Vietnamese as "Sếp" or "Tổng Giám đốc" only when appropriate.',
+      '- Vietnamese source mentions of "Sếp", "Sip", "SIP", "CEO", "TGĐ", or "Tổng Giám đốc" that refer to the company president/general director all denote the same role.',
       '- In target_final Japanese, render that same role as "社長". Do not output "Sếp", "TGĐ", "CEO", or "Shachou" in Japanese subtitles unless the speaker is explicitly spelling the term.',
     ].join('\n');
   }
@@ -206,7 +233,7 @@ function targetLanguageTermPolicy(targetLanguage) {
   return '';
 }
 
-function buildRefinePrompt({ sourceText, previewText, sourceLanguage, targetLanguage, sourceEmotion, sourcePace, recentFinals, sessionBrief, sessionTerms }) {
+export function buildRefinePrompt({ sourceText, previewText, sourceLanguage, targetLanguage, sourceEmotion, sourcePace, recentFinals, sessionBrief, sessionTerms }) {
   return [
     'Refine a realtime translated subtitle for a live company event. Use the source transcript, preview translation, recent context, and provided terms to produce one accurate final subtitle in the target language. Preserve names, numbers, times, acronyms, tone, and meaning. Return only valid JSON.',
     [
@@ -216,12 +243,12 @@ function buildRefinePrompt({ sourceText, previewText, sourceLanguage, targetLang
       '- When the preview already conveys the source meaning accurately, keep its wording unchanged. Never paraphrase or restyle for taste alone.',
       '- Always apply these edits:',
       '  1. Correct proper nouns and terms using the provided term lists, with evidence from the source transcript.',
-      '  2. In target_final, ALWAYS render non-Japanese person and organization names in katakana so Japanese readers and TTS can pronounce them. Use the katakana reading from the term list when provided; a Latin canonical spelling in the term list applies to source_corrected only, never to target_final.',
+      '  2. In target_final, ALWAYS render non-Japanese person and organization names in katakana so Japanese readers and TTS can pronounce them. Use the katakana reading from the term list when provided.',
       '  3. When the target language is Japanese, enforce a formal-ceremony register: polite/humble/honorific endings (desu/masu, -te orimasu, o-/go- forms, sonkeigo for executives and guests). Change register and endings only, never content words.',
       '- If the source transcript is missing or empty, keep the preview wording and apply only edits 1-3.',
       '- If the preview translation is missing or empty, translate the source transcript directly and faithfully, applying edits 1-3.',
       '- If uncertain about a name, keep the lower-risk surface form instead of inventing one.',
-      '- Return source_corrected as "" (empty string) whenever the source transcript needs NO correction. Only when you actually changed something, return the full corrected transcript. Never re-type an unchanged transcript.',
+      '- The source transcript below is READ-ONLY evidence: never rewrite it, clean it up, or return it. Do not output the transcript or any corrected version of it — only the target_final translation. The recogniser already knows the event names.',
       '- When a session context or session terms block is provided below, it describes THIS specific meeting: use it to resolve ambiguous names, agenda items, and topic references, and let session terms override any conflicting generic terms. A session term with no target means: keep that name/acronym exact and correct ASR mishearings toward it.',
       '- A person listed in session terms is allowed vocabulary, NOT proof that the speaker said that name. Never insert or replace a person name unless the CURRENT source transcript contains a plausible matching name surface. Recent subtitles and session context alone are never evidence for a person name.',
       '- Also return emotion: exactly one of neutral, excited, serious, somber. When a detected-from-audio value is provided below, map it to the closest of those four. Otherwise infer it conservatively from the wording alone (exclamations, celebration, applause calls, condolences); default to neutral whenever unsure.',
@@ -243,7 +270,7 @@ function buildRefinePrompt({ sourceText, previewText, sourceLanguage, targetLang
     sourcePace
       ? `Measured source speaking pace (from transcript + mic timing): ${sourcePace.label}; ${sourcePace.unitsPerSecond.toFixed(2)} speech units/second over ${sourcePace.durationMs} ms; confidence ${sourcePace.confidence.toFixed(2)}.`
       : 'Measured source speaking pace: unavailable; use tts_speed 1.00.',
-    'Return JSON only with keys: source_corrected, target_final, tts_text, emotion, tts_speed. source_corrected and tts_text must be "" in the unchanged/untagged cases described above.',
+    'Return JSON only with keys: target_final, tts_text, emotion, tts_speed. tts_text must be "" in the untagged case described above.',
   ].filter(Boolean).join('\n\n');
 }
 
@@ -279,13 +306,12 @@ async function refineWithLlm(params) {
               schema: {
                 type: 'object',
                 properties: {
-                  source_corrected: { type: 'string' },
                   target_final: { type: 'string' },
                   tts_text: { type: 'string' },
                   emotion: { type: 'string', enum: ['neutral', 'excited', 'serious', 'somber'] },
                   tts_speed: { type: 'number', minimum: 0.85, maximum: 1.2 },
                 },
-                required: ['source_corrected', 'target_final', 'tts_text', 'emotion', 'tts_speed'],
+                required: ['target_final', 'tts_text', 'emotion', 'tts_speed'],
                 additionalProperties: false,
               },
             },
@@ -300,14 +326,11 @@ async function refineWithLlm(params) {
     const data = JSON.parse(raw);
     const parsed = parseRefineContent(extractResponseText(data));
     const targetFinal = normalizeText(parsed.targetFinal) || params.previewText;
-    // Without an input transcript the model has nothing to correct; keep the
-    // source empty instead of letting it fabricate one.
-    const sourceCorrected = normalizeText(params.sourceText)
-      ? (normalizeText(parsed.sourceCorrected) || params.sourceText)
-      : '';
+    // TASK 11.12: the transcript is read-only. `sourceText` is now a VERBATIM echo of what was sent — no
+    // model ever rewrites what was heard; the recogniser's keyterms handle proper nouns instead.
     const ttsAnnotated = normalizeText(parsed.ttsText);
     return {
-      sourceText: sourceCorrected,
+      sourceText: normalizeText(params.sourceText),
       translatedText: targetFinal,
       ttsText: ttsAnnotated && ttsAnnotated !== targetFinal ? ttsAnnotated : '',
       emotion: normalizeText(parsed.emotion).toLowerCase().slice(0, 24),
@@ -413,6 +436,68 @@ async function fetchVoiceCatalog() {
   slugToVoiceId.clear();
   for (const v of raw) { const id = String((v && v.voice_id) || ''); if (id) slugToVoiceId.set(slugOfVoice(id), id); }
   return raw;
+}
+
+// ---------- TASK 11: direct-dial ASR (Scribe v2 Realtime) ----------
+// Mint a single-use token; the browser dials the vendor with it. On a non-OK response throw with the
+// HTTP STATUS ONLY (the error body can carry account info). Never log the token, never return it as its
+// own field, never store it.
+async function mintScribeToken() {
+  const key = elevenApiKey();
+  if (!key) { const e = new Error('ASR key not configured'); e.code = 503; throw e; }
+  const resp = await withTimeout(
+    fetch(SCRIBE_TOKEN_URL, { method: 'POST', headers: { 'xi-api-key': key } }),
+    ELEVENLABS_TIMEOUT_MS,
+    'ASR token',
+  );
+  if (!resp.ok) { const e = new Error(`ASR token HTTP ${resp.status}`); e.code = resp.status; throw e; }
+  const data = await resp.json().catch(() => ({}));
+  const token = typeof data?.token === 'string' ? data.token
+    : typeof data?.single_use_token === 'string' ? data.single_use_token : '';
+  if (!token) { const e = new Error('ASR token missing from response'); e.code = 502; throw e; }
+  return token;
+}
+
+// Split session terms into keyterms; drop any over 20 chars — a single over-long keyterm makes the
+// recogniser reject the ENTIRE session (observed 14/07 with "Chương trình Vinh danh"). Cap at 30. A
+// dropped term still reaches the refine stage, so no meaning is lost.
+export function pickScribeKeyterms(corpus) {
+  const all = String(corpus || '').split(/[,\n;·]/).map((t) => t.trim()).filter(Boolean);
+  const kept = [];
+  let dropped = 0;
+  for (const t of all) {
+    if (t.length > SCRIBE_KEYTERM_MAX_LEN || kept.length >= SCRIBE_KEYTERM_MAX) { dropped += 1; continue; }
+    kept.push(t);
+  }
+  return { kept, dropped };
+}
+
+// Build the handshake query. `roomFilter` is THREE-STATE (TASK 11.13): true → set the parameter; false →
+// set nothing (vendor default is off; keeps demo byte-parity AND beats a server env that says on);
+// undefined → fall back to SCRIBE_FILTER_BACKGROUND. Returns the params + the value that ACTUALLY ended
+// up in the handshake, so the token response can report the applied value (never the requested one).
+export function buildScribeWsParams({ token, language, keyterms, roomFilter }) {
+  const p = new URLSearchParams();
+  p.set('model_id', SCRIBE_MODEL_ID);
+  p.set('token', token);
+  p.set('commit_strategy', 'vad');
+  p.set('vad_silence_threshold_secs', String(SCRIBE_VAD_SILENCE_SECS));
+  p.set('vad_threshold', String(SCRIBE_VAD_THRESHOLD));
+  p.set('min_speech_duration_ms', String(SCRIBE_MIN_SPEECH_MS));
+  p.set('min_silence_duration_ms', String(SCRIBE_MIN_SILENCE_MS));
+  p.set('include_timestamps', 'true');
+  p.set('include_language_detection', 'true');
+  for (const kt of keyterms) p.append('keyterms', kt);
+  if (SCRIBE_NO_VERBATIM) p.set('no_verbatim', SCRIBE_NO_VERBATIM); // unset knob adds no parameter at all
+  let filterApplied;
+  if (roomFilter === true) filterApplied = true;
+  else if (roomFilter === false) filterApplied = false; // explicit OFF beats the env
+  else filterApplied = SCRIBE_FILTER_BACKGROUND === 'true' || SCRIBE_FILTER_BACKGROUND === '1';
+  if (filterApplied) p.set('filter_background_audio', 'true');
+  // Do NOT send language_code unless explicitly enabled: pinning a language is exactly what breaks TASK 6.
+  if (SCRIBE_SEND_LANGUAGE_CODE === 'true' && language && language !== 'auto') p.set('language_code', language);
+  // Do NOT send audio_format (pcm_16000 is the default — fewer params, closer to the demo).
+  return { params: p, filterApplied };
 }
 
 // ---------- raw-http request/response helpers ----------
@@ -565,7 +650,7 @@ export function installOnlineApi(server, { requireAuth } = {}) {
     try {
       // FIX-07 app-management endpoints (write-only key config) — never return/echo/log values.
       if (pathname === '/online-api/config-status' && req.method === 'GET') {
-        sendJson(res, 200, getConfigStatus());
+        sendJson(res, 200, getConfigStatus(ONLINE_REQUIRED_SLUGS));
         return true;
       }
       if (pathname === '/online-api/config-keys' && req.method === 'POST') {
@@ -576,23 +661,57 @@ export function installOnlineApi(server, { requireAuth } = {}) {
           return true;
         }
         logLine('config.updated', { changed: result.changed }); // NAMES only — never values
-        sendJson(res, 200, getConfigStatus());
+        sendJson(res, 200, getConfigStatus(ONLINE_REQUIRED_SLUGS));
         return true;
       }
 
       if (pathname === '/online-api/realtime-preview-token' && req.method === 'POST') {
-        if (!asrWsBase() || !asrApiKey()) {
-          sendJson(res, 500, { error: 'Realtime ASR is not configured.' });
+        const body = await readJsonBody(req, 64 * 1024);
+        const language = typeof body?.language === 'string' && body.language.toLowerCase() === 'auto' ? 'auto' : normalizeLanguage(body?.language, 'vi');
+        const corpus = limitText(body?.corpus, 2_000);
+        // Accept roomFilter ONLY if it is a real boolean (11.13); anything else stays undefined so the
+        // fallback path runs.
+        const roomFilter = typeof body?.roomFilter === 'boolean' ? body.roomFilter : undefined;
+
+        if (ONLINE_ASR_PROVIDER === 'qwen3') {
+          // Rollback path (11.6): the old proxied response + asrTransport:'proxy' so the client chooses
+          // its path from one field and never from a vendor name.
+          if (!asrWsBase() || !asrApiKey()) {
+            sendJson(res, 500, { error: 'Realtime ASR is not configured.' });
+            return true;
+          }
+          sendJson(res, 200, {
+            mode: 'transcribe', asrProvider: 'qwen3', asrTransport: 'proxy', asrModel: ASR_MODEL,
+            asrSourceCorrectionEnabled: false, asrCorrectionTermCount: 0, asrWsPath: '/online-api/asr',
+          });
           return true;
         }
-        sendJson(res, 200, {
-          mode: 'transcribe',
-          asrProvider: 'qwen3',
-          asrModel: ASR_MODEL,
-          asrSourceCorrectionEnabled: true,
-          asrCorrectionTermCount: 0,
-          asrWsPath: '/online-api/asr',
-        });
+
+        // Direct-dial path: mint a single-use token + assemble ONE complete, opaque wss URL.
+        try {
+          const token = await mintScribeToken();
+          const { kept, dropped } = pickScribeKeyterms(corpus);
+          const { params, filterApplied } = buildScribeWsParams({ token, language, keyterms: kept, roomFilter });
+          const asrWsUrl = `${SCRIBE_WS_BASE}${SCRIBE_WS_PATH}?${params.toString()}`;
+          logLine('asr.session', { asrKeytermCount: kept.length, asrKeytermsDropped: dropped, asrRoomFilter: filterApplied }); // counts only — no term text, no URL, no token
+          sendJson(res, 200, {
+            mode: 'transcribe',
+            asrProvider: 'scribe',
+            asrTransport: 'direct',
+            asrModel: SCRIBE_MODEL_ID,
+            asrCommitMode: 'vad',
+            asrTokenTtlMs: SCRIBE_TOKEN_TTL_MS,
+            asrKeytermCount: kept.length,
+            asrKeytermsDropped: dropped,
+            asrSourceCorrectionEnabled: false, // 11.12 — the model no longer rewrites the source transcript
+            asrCorrectionTermCount: 0,
+            asrRoomFilter: filterApplied,
+            asrWsUrl,
+          });
+        } catch (error) {
+          logLine('asr.token.fail', { status: error?.code ?? 0 });
+          sendJson(res, 503, { error: 'Realtime ASR is not available.' });
+        }
         return true;
       }
 

@@ -20,6 +20,7 @@ import { enqueueTtsSentence, getTtsQueueLength, resetTtsPlayback, setTtsPlayback
 import { buildSessionExport, saveSessionExport, type SaveOutcome, type SessionLine } from './sessionExport';
 import { createLatencyTracker, type LatencyReport } from './latencyTracker';
 import { classifyUtterance, createDirectionTracker, directionOf, type DirectionTracker, type Lang } from './utteranceDirection';
+import { fetchAsrSession, createAsrCodec, type AsrCodec } from './asrTransport';
 
 const ONLINE_BASE = '/online-api';
 const RECENT_FINALS_MAX = 6;
@@ -66,6 +67,12 @@ const TTS_GATE_NETWORK_TAIL_MS = 1_200; // 'always': extra un-gate delay after p
 const AUTO_SAVE_INTERVAL_MS = 30_000; // checkpoint the transcript every 30s if new lines exist
 const USAGE_REPORT_INTERVAL_MS = 300_000; // usage report every 5 min (and once on stop)
 
+// TASK 11.4 — the ONE Stop exception to VAD commit: on Dừng, send a single commit and wait briefly for
+// the trailing final, then await the outstanding refine so the last sentence gets its finished
+// translation before teardown. A stop button that hesitates is worse than a lost tail — keep both bounds tight.
+const STOP_COMMIT_WAIT_MS = 700;
+const STOP_REFINE_WAIT_MS = 2_000;
+
 type StartOpts = {
   sourceLanguage: 'vi' | 'ja';
   targetLanguage: 'vi' | 'ja';
@@ -87,6 +94,8 @@ export interface OnlineLaneConfig {
   // TASK 6.2: one mic, two directions — read ONCE at start() and latched for the whole session.
   getTwoWay?: () => boolean;
   onDirectedLine?: (line: DirectedLaneLine) => void;
+  // TASK 11.13: hall-babble rejection — read at TICKET time (baked into the single-use asrWsUrl).
+  getRoomFilter?: () => boolean;
 }
 
 export interface OnlineDiagnostics {
@@ -133,6 +142,13 @@ export function createOnlineLane(events: LaneEvents, config: OnlineLaneConfig = 
   let tracker: DirectionTracker | null = null;
   const settledDir = new Map<string, 'vi2ja' | 'ja2vi'>();
 
+  // TASK 11: direct-dial transport. `codec` is set on a direct dial (JSON wire), null on the qwen3 proxy
+  // (raw binary). Because the token is single-use, EVERY dial mints a fresh one; the dial counter drops a
+  // token that resolves after Dừng or a restart. `lastFinalForReconnect` seeds previous_text on reconnect.
+  let codec: AsrCodec | null = null;
+  let dialCounter = 0;
+  let lastFinalForReconnect = '';
+
   let counter = 0;
   // Bumped on every start() and teardown(); an in-flight draft/refine fetch captures the value
   // at call time and refuses to emit if the session has since ended or restarted (lids restart
@@ -172,7 +188,7 @@ export function createOnlineLane(events: LaneEvents, config: OnlineLaneConfig = 
   let draftSeq = 0;
 
   // M6 refine-tier state
-  const pendingRefineTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  const pendingRefineTimers = new Map<string, { timer: ReturnType<typeof setTimeout>; run: () => Promise<void> }>();
   let latestEmotion: string | undefined;
   // per-segment pace timing
   let segmentFirstPartialAt = 0;
@@ -365,29 +381,8 @@ export function createOnlineLane(events: LaneEvents, config: OnlineLaneConfig = 
     console.debug(`[onlineLane] dropped ghost (${reason}): ${transcript.slice(0, 40)}`);
   }
 
-  function wsUrl(): string {
-    const o = opts!;
-    const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const corpus = encodeURIComponent((o.terms ?? '').slice(0, CORPUS_MAX_CHARS));
-    // Two-way opens the socket with language=auto; the server then omits the language field so the model
-    // detects each utterance. One-way keeps today's behaviour exactly.
-    return `${proto}//${location.host}${ONLINE_BASE}/asr?language=${twoWay ? 'auto' : o.sourceLanguage}&corpus=${corpus}`;
-  }
-
-  async function fetchToken(): Promise<void> {
-    const o = opts!;
-    const res = await fetch(`${ONLINE_BASE}/realtime-preview-token`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ targetLanguage: o.targetLanguage }),
-    });
-    if (!res.ok) throw new Error(`token request failed (HTTP ${res.status})`);
-    const data = (await res.json()) as { mode?: string; ephemeralKey?: string; sdpUrl?: string };
-    // Contract: the only supported mode is 'transcribe'. ephemeralKey/sdpUrl ⇒ WebRTC misconfig.
-    if (data.mode !== 'transcribe') {
-      throw new Error('server is in WebRTC mode, fix server config');
-    }
-  }
+  // TASK 11.2: wsUrl()/fetchToken() are gone — one `openWs()` mints a fresh single-use session on EVERY
+  // dial (including every reconnect) via asrTransport and opens the finished address. See below.
 
   async function ensureCapture(): Promise<void> {
     // `capture` is assigned only AFTER getUserMedia resolves, so a second session.created (e.g. a
@@ -411,9 +406,10 @@ export function createOnlineLane(events: LaneEvents, config: OnlineLaneConfig = 
           }
           voicedWindow.push({ at: Date.now(), voicedMs });
           pruneVoiced();
-          // Only send audio while the WS is OPEN and the upstream session is ready.
-          // Audio produced while not OPEN is discarded here — no unbounded buffering.
-          if (ws && ws.readyState === WebSocket.OPEN && sessionReady) ws.send(pcm);
+          // Only send audio while the WS is OPEN and the upstream session is ready. Audio produced while
+          // not OPEN is discarded here — no unbounded buffering. Direct transport → JSON frame via codec;
+          // proxy → raw binary as before (11.2).
+          if (ws && ws.readyState === WebSocket.OPEN && sessionReady) ws.send(codec ? codec.encodeAudio(pcm) : pcm);
         },
         (v: number) => {
           events.onLevel(v);
@@ -687,6 +683,7 @@ export function createOnlineLane(events: LaneEvents, config: OnlineLaneConfig = 
     // so don't reuse it as the head's provisional target — refine fills the head-only version.
     const draftFallback = remainder ? '' : lastInterimTarget;
     emitLine({ lid, sourceText: head, targetText: draftFallback, interim: false, corrected: false });
+    lastFinalForReconnect = head; // seeds previous_text if the socket drops and we re-dial (11.5)
     // Record NOW (provisional draft translation) so a Stop before refine resolves still keeps the
     // sentence in the transcript deliverable; refine upgrades this same lid in place when it returns.
     recordSessionLine(lid, finalizedAt, head, draftFallback);
@@ -719,12 +716,12 @@ export function createOnlineLane(events: LaneEvents, config: OnlineLaneConfig = 
   function scheduleRefine(lid: string, head: string, priorFinals: string[], sourcePace: string | undefined, draftFallback: string, finalizedAt: number): void {
     const idleDelay = endsWithStrongSentenceBreak(head, true) ? PUNCTUATION_REFINE_IDLE_MS : REFINE_IDLE_MS;
     const existing = pendingRefineTimers.get(lid);
-    if (existing) clearTimeout(existing);
-    const t = setTimeout(() => {
-      pendingRefineTimers.delete(lid);
-      void refine(lid, head, priorFinals, sourcePace, draftFallback, finalizedAt);
-    }, idleDelay);
-    pendingRefineTimers.set(lid, t);
+    if (existing) clearTimeout(existing.timer);
+    // Store the invocation as a thunk so stop() (11.4) can fire the last pending refine immediately and
+    // await it before teardown, instead of losing it to teardown's timer-clear.
+    const run = () => refine(lid, head, priorFinals, sourcePace, draftFallback, finalizedAt);
+    const timer = setTimeout(() => { pendingRefineTimers.delete(lid); void run(); }, idleDelay);
+    pendingRefineTimers.set(lid, { timer, run });
   }
 
   async function attemptRefine(body: string): Promise<{ ok: true; data: Record<string, unknown> } | { ok: false; retriable: boolean; message: string }> {
@@ -832,21 +829,58 @@ export function createOnlineLane(events: LaneEvents, config: OnlineLaneConfig = 
 
   // ---- M2: WS lifecycle + reconnect + watchdog ----
 
-  function openWs(): void {
+  async function openWs(initial: boolean): Promise<void> {
     lastEventAt = Date.now(); // give the fresh connection a full stall window before its first event
-    const socket = new WebSocket(wsUrl());
+    const gen = sessionGen;
+    const dial = ++dialCounter;
+    let session;
+    try {
+      session = await fetchAsrSession({
+        targetLanguage: opts!.targetLanguage,
+        language: twoWay ? 'auto' : opts!.sourceLanguage,
+        corpus: (opts!.terms ?? '').slice(0, CORPUS_MAX_CHARS),
+        roomFilter: config.getRoomFilter?.(),
+      });
+    } catch (err) {
+      // A token that arrives after Dừng or a restart is dropped, not surfaced.
+      if (gen !== sessionGen || dial !== dialCounter || !running) return;
+      if (initial) { // the very first dial failing is fatal — the operator must know
+        const m = err instanceof Error ? err.message : String(err);
+        teardown(); setStatus('error', m); events.onError(m);
+        return;
+      }
+      scheduleReconnect(); // a reconnect dial failing → let the backoff ladder retry
+      return;
+    }
+    // The awaited fetch is guarded by the session generation AND the dial counter: a single-use token
+    // that resolves after Dừng/restart is dropped instead of opening a stray socket.
+    if (gen !== sessionGen || dial !== dialCounter || !running) return;
+
+    // previous_text rides the FIRST chunk on a RECONNECT only (never a fresh session); a partial is never
+    // fed back (a mistake fed back propagates).
+    codec = session.transport === 'direct' ? createAsrCodec(initial ? undefined : (lastFinalForReconnect || undefined)) : null;
+
+    const socket = new WebSocket(session.url);
     socket.binaryType = 'arraybuffer';
     ws = socket;
 
     socket.onopen = () => setStatus('ready');
     socket.onmessage = (ev: MessageEvent) => {
-      if (typeof ev.data !== 'string') return; // the core sends JSON text events only
-      let msg: Record<string, unknown>;
-      try {
-        msg = JSON.parse(ev.data) as Record<string, unknown>;
-      } catch {
+      if (typeof ev.data !== 'string') return; // JSON text frames only (both transports)
+      if (codec) {
+        const decoded = codec.decode(ev.data);
+        if (!decoded) return;
+        lastEventAt = Date.now();
+        if (decoded.fatal) {
+          const message = decoded.event.type === 'error' ? decoded.event.error.message : 'ASR fatal error';
+          teardown(); setStatus('error', message); events.onError(`online lane: ${message}`);
+          return;
+        }
+        handleEvent(decoded.event as unknown as Record<string, unknown>);
         return;
       }
+      let msg: Record<string, unknown>;
+      try { msg = JSON.parse(ev.data) as Record<string, unknown>; } catch { return; }
       handleEvent(msg);
     };
     socket.onerror = () => {
@@ -874,7 +908,7 @@ export function createOnlineLane(events: LaneEvents, config: OnlineLaneConfig = 
     setStatus('reconnecting', `attempt ${reconnectAttempts}/${RECONNECT_MAX_ATTEMPTS}`);
     reconnectTimer = setTimeout(() => {
       reconnectTimer = null;
-      if (running) openWs();
+      if (running) void openWs(false);
     }, delayMs);
   }
 
@@ -927,6 +961,8 @@ export function createOnlineLane(events: LaneEvents, config: OnlineLaneConfig = 
   function teardown(): void {
     running = false;
     sessionGen += 1; // invalidate any in-flight draft/refine fetches from this session
+    dialCounter += 1; // a token/socket resolving after teardown is now stale (11.2)
+    codec = null;
     sessionReady = false;
     if (reconnectTimer) {
       clearTimeout(reconnectTimer);
@@ -935,7 +971,7 @@ export function createOnlineLane(events: LaneEvents, config: OnlineLaneConfig = 
     stopWatchdog();
     clearSegmentTimer();
     resetDraftState();
-    for (const t of pendingRefineTimers.values()) clearTimeout(t);
+    for (const t of pendingRefineTimers.values()) clearTimeout(t.timer);
     pendingRefineTimers.clear();
     // Phase 3: stop playing our own voice + release the speaking subscription + open the gate.
     if (unsubscribeSpeaking) {
@@ -1016,7 +1052,7 @@ export function createOnlineLane(events: LaneEvents, config: OnlineLaneConfig = 
     inFlightDraftSources.clear();
     draftSeq = 0;
     latestEmotion = undefined;
-    for (const t of pendingRefineTimers.values()) clearTimeout(t);
+    for (const t of pendingRefineTimers.values()) clearTimeout(t.timer);
     pendingRefineTimers.clear();
     segmentFirstPartialAt = 0;
     lastPartialAt = 0;
@@ -1074,31 +1110,43 @@ export function createOnlineLane(events: LaneEvents, config: OnlineLaneConfig = 
     lastEventAt = now;
     lastLoudAt = now; // grace: don't ghost-drop the first transcripts before any loud frame
     setStatus('connecting');
-    try {
-      await fetchToken();
-    } catch (err) {
-      const m = err instanceof Error ? err.message : String(err);
-      teardown(); // release the gate subscription + auto-save/usage timers + playback hook armed above
-      setStatus('error', m);
-      events.onError(m);
-      throw err;
-    }
-    // stop() may have fired while the token request was in flight — abort before opening anything.
-    if (!running) return;
     startWatchdog();
-    openWs();
+    // openWs mints the first single-use token via asrTransport and opens the socket; it surfaces its own
+    // fatal error (and tears down) on the initial dial, so no separate preflight is needed.
+    await openWs(true);
+  }
+
+  // TASK 11.4: fire any pending refine NOW and await it (bounded) so the last sentence gets its finished
+  // translation on screen + in the transcript before teardown clears the refine queue. If the reply does
+  // not arrive in time, keep the draft and carry on; a second Dừng bumps sessionGen and abandons the wait.
+  async function awaitLastRefine(maxMs: number): Promise<void> {
+    const runs: Promise<void>[] = [];
+    for (const [lid, entry] of Array.from(pendingRefineTimers)) {
+      clearTimeout(entry.timer);
+      pendingRefineTimers.delete(lid);
+      runs.push(entry.run());
+    }
+    if (!runs.length) return;
+    await Promise.race([Promise.allSettled(runs).then(() => undefined), delay(maxMs)]);
   }
 
   async function stop(): Promise<void> {
-    // M8: capture the last (possibly un-flushed) sentence, then one final checkpoint + usage
-    // report BEFORE teardown tears down the timers. (buildSessionExport reads sessionLines
-    // synchronously; the POSTs are fire-and-forget.)
-    if (running) {
-      // Flush the FULL residual (a >120-char buffer cuts into head+remainder; loop until empty so
-      // every residual sentence is recorded — each pass removes its head, so this terminates).
-      while (segmentBuffer.trim()) flushSegment();
-      finalizeSession();
+    if (!running) { teardown(); setStatus('stopped'); return; }
+    // The audio path stops on the FIRST press. Prevent any reconnect, release the mic, and send exactly
+    // ONE commit as the last thing on the wire (the speaker often finishes a sentence and THEN the
+    // operator presses stop); wait at most 700ms for the trailing final.
+    running = false;
+    capture?.stop();
+    capture = null;
+    if (codec && ws && ws.readyState === WebSocket.OPEN && sessionReady) {
+      try { ws.send(codec.encodeCommit()); } catch { /* ignore */ }
+      sessionReady = false; // nothing more on the wire after the commit
+      await delay(STOP_COMMIT_WAIT_MS);
     }
+    // Flush the FULL residual (loop: a >120-char buffer cuts head+remainder each pass, so this terminates).
+    while (segmentBuffer.trim()) flushSegment();
+    await awaitLastRefine(STOP_REFINE_WAIT_MS); // last line → finished translation before we checkpoint
+    finalizeSession();
     teardown();
     setStatus('stopped');
   }

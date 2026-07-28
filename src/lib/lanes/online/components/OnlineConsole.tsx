@@ -597,7 +597,17 @@ const OnlineConsole: React.FC = () => {
                   <input type="checkbox" checked={lane.nearMicGate} onChange={(e) => lane.setNearMicGate(e.target.checked)} disabled={lane.running} className="accent-secondary" />
                   Noise gate (near-mic)
                 </label>
-                {/* TASK 11.13 (Phase 4) thêm ô "Bỏ qua tiếng xì xào hội trường" ngay dưới đây. */}
+                <label className="flex items-start gap-2 font-label-caps text-label-caps text-on-surface-variant cursor-pointer">
+                  <input type="checkbox" checked={lane.roomFilter} onChange={(e) => lane.setRoomFilter(e.target.checked)} disabled={lane.running} className="accent-secondary mt-0.5" />
+                  <span>Bỏ qua tiếng xì xào hội trường<br />
+                    <span className="font-normal normal-case text-[11px] leading-relaxed">
+                      {lane.roomFilter
+                        ? 'Máy nghe sẽ bỏ qua tiếng trò chuyện và tiếng ồn xung quanh, chỉ bám giọng chính. Bật khi trên màn hiện ra câu mà không ai phát biểu. Đây KHÔNG phải bộ lọc tiếng ồn: nó không tẩy nhạc ra khỏi giọng nói, chỉ bớt việc máy tưởng nhầm tiếng ồn là lời nói. '
+                        : 'Máy nghe bắt mọi thứ lọt vào micro. Mic đi qua bàn trộn thì thu cả phòng — nếu thấy phụ đề hiện câu chẳng ai nói, bật ô này rồi thử lại. '}
+                      Chốt khi Bắt đầu — đổi lúc đang chạy thì áp dụng từ lần bắt đầu sau.
+                    </span>
+                  </span>
+                </label>
               </section>
 
               <div className="h-px bg-outline-variant"></div>

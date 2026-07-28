@@ -53,12 +53,19 @@ function hasEnv(name) {
   return getOnlineConfig(name) !== '';
 }
 
-/** { keys: { <slug>: boolean }, ready: boolean } — SLUGS only, NEVER any value or env name. */
-export function getConfigStatus() {
+// { keys:{<slug>:boolean}, required:[<slug>], ready:boolean } — SLUGS only, NEVER a value or env name.
+// `required` is the subset that matters for the CURRENT configuration (TASK 11.10): the direct-dial ASR
+// path needs 4 keys, the qwen3 rollback needs all 6. `keys` still reports all six; `ready` = every slug in
+// `required` is set. An absent/empty list falls back to "all six" so a caller that predates this keeps
+// gating exactly as before; an unknown slug in the list is ignored, not counted missing.
+export function getConfigStatus(required) {
   /** @type {Record<string, boolean>} */
   const keys = {};
   for (const slug of ONLINE_KEY_SLUGS) keys[slug] = hasEnv(SLUG_TO_ENV[slug]);
-  return { keys, ready: ONLINE_KEY_SLUGS.every((slug) => keys[slug]) };
+  const req = Array.isArray(required) && required.length
+    ? required.filter((slug) => slug in SLUG_TO_ENV)
+    : ONLINE_KEY_SLUGS.slice();
+  return { keys, required: req, ready: req.every((slug) => keys[slug]) };
 }
 
 // Apply a partial { <slug>: string }: a non-empty string sets the runtime value; an explicit ''

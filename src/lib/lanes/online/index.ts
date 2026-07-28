@@ -41,7 +41,15 @@ let moduleActiveSession = false
 // ---- app-management config endpoints (layered on top of the pipeline contract) ----
 export interface OnlineConfigStatus {
   keys: Record<string, boolean>
+  required?: string[] // TASK 11.10 — the subset that matters for the current config (absent on old servers)
   ready: boolean
+}
+
+// The slugs the server actually requires, falling back to "all six" when the field is absent so a server
+// that predates TASK 11.10 keeps gating as it does today. One helper so the console + Settings never drift.
+export function onlineRequiredKeySlugs(status: OnlineConfigStatus | null): string[] {
+  if (status && Array.isArray(status.required) && status.required.length) return status.required
+  return status ? Object.keys(status.keys) : []
 }
 
 export async function fetchOnlineConfigStatus(): Promise<OnlineConfigStatus> {
@@ -123,9 +131,11 @@ export interface UseOnlineLane {
   setSpeedMode: (m: SpeedMode) => void
   manualSpeed: number
   setManualSpeed: (s: number) => void
-  // two-way + audience wall + subtitles (TASK 6·7·8)
+  // two-way + audience wall + subtitles (TASK 6·7·8) + hall-babble switch (TASK 11.13)
   twoWay: boolean
   setTwoWay: (v: boolean) => void
+  roomFilter: boolean
+  setRoomFilter: (v: boolean) => void
   directedLines: AudienceLine[]
   subtitleFont: number
   setSubtitleFont: (n: number) => void
@@ -167,6 +177,7 @@ export function useOnlineLane(): UseOnlineLane {
 
   // two-way + audience wall + subtitles (TASK 6·7·8)
   const [twoWay, setTwoWayState] = useState<boolean>(() => { try { return localStorage.getItem('proyaku_online_two_way') === '1' } catch { return false } })
+  const [roomFilter, setRoomFilterState] = useState<boolean>(() => { try { return localStorage.getItem('proyaku_online_room_filter') === '1' } catch { return false } })
   const [subtitleFont, setSubtitleFontState] = useState<number>(() => { try { return clampSubtitleFont(Number(localStorage.getItem('proyaku_online_subtitle_font')) || SUBTITLE_FONT.default) } catch { return SUBTITLE_FONT.default } })
   const [wallOutputs, setWallOutputsState] = useState<WallOutput[]>(() => loadWallOutputs())
   const [wallSupport, setWallSupport] = useState<ScreenSupport>('idle')
@@ -291,6 +302,7 @@ export function useOnlineLane(): UseOnlineLane {
 
   // ── TASK 6·7·8: two-way direction map + audience publisher + subtitle font + wall placement ──
   const twoWayRef = useRef(twoWay); twoWayRef.current = twoWay
+  const roomFilterRef = useRef(roomFilter); roomFilterRef.current = roomFilter
   const subtitleFontRef = useRef(subtitleFont); subtitleFontRef.current = subtitleFont
   const wallOutputsRef = useRef(wallOutputs); wallOutputsRef.current = wallOutputs
   const wallScreensRef = useRef(wallScreens); wallScreensRef.current = wallScreens
@@ -298,6 +310,7 @@ export function useOnlineLane(): UseOnlineLane {
   const publisherRef = useRef<ReturnType<typeof createAudiencePublisher> | null>(null)
 
   const setTwoWay = useCallback((v: boolean) => { setTwoWayState(v); try { localStorage.setItem('proyaku_online_two_way', v ? '1' : '0') } catch { /* private mode */ } }, [])
+  const setRoomFilter = useCallback((v: boolean) => { setRoomFilterState(v); try { localStorage.setItem('proyaku_online_room_filter', v ? '1' : '0') } catch { /* private mode */ } }, [])
   const setSubtitleFont = useCallback((n: number) => { const c = clampSubtitleFont(n); setSubtitleFontState(c); try { localStorage.setItem('proyaku_online_subtitle_font', String(c)) } catch { /* private mode */ } }, [])
   const setWallOutputs = useCallback((o: WallOutput[]) => { setWallOutputsState(o); saveWallOutputs(o) }, [])
 
@@ -350,6 +363,7 @@ export function useOnlineLane(): UseOnlineLane {
         getNearMicGate: () => nearMicGateRef.current,
         getSpeakEnabled: () => speakEnabledRef.current,
         getTwoWay: () => twoWayRef.current,
+        getRoomFilter: () => roomFilterRef.current,
         onDirectedLine: (line) => {
           dirByLid.current.set(line.lid, line.dir)
           publisherRef.current?.publish({ lid: line.lid, sourceText: line.sourceText, targetText: line.targetText, interim: line.interim, corrected: line.corrected, at: line.at, dir: line.dir })
@@ -407,7 +421,7 @@ export function useOnlineLane(): UseOnlineLane {
     direction, setDirection, terms, setTerms, brief, setBrief,
     voices, voicesStatus, refreshVoices, voiceJa, setVoiceJa, voiceVi, setVoiceVi,
     speedMode, setSpeedMode, manualSpeed, setManualSpeed,
-    twoWay, setTwoWay, directedLines, subtitleFont, setSubtitleFont,
+    twoWay, setTwoWay, roomFilter, setRoomFilter, directedLines, subtitleFont, setSubtitleFont,
     wallOutputs, setWallOutputs, wallSupport, wallScreens, wallOpenIds, scanWall, openWall, closeWall,
     start, stop, saveSession,
   }
