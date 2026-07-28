@@ -83,12 +83,42 @@
 - **3 bucket:** **FIX NOW (4)** — **B1** `upstream.on('error')` giờ `clearTimers()`+đóng client (không phụ thuộc `ws` luôn phát `close` sau `error`); **B2** `finally` reset `capturingInFlight` gate theo `gen===sessionGen` (chặn 2 mic thoáng qua khi stop→start nhanh); **B3** reset `sendBacklogBytes` ở teardown (không kẹt số cũ khi thang reconnect cạn); **B4** tiết lưu toast backlog ≤1 lần/60s (uplink yếu không nhá toast đỏ mỗi ~24s; hàng backlog vẫn hiện liên tục). **DISAGREE/by-design (2)** — **A1** nhãn brand 9.1a trong bundle = NGOẠI LỆ hard-constraint spec cho phép (host thật chỉ ở `server/`); **A2** `prepData` đọc `/api/glossary` = module TRUNG LẬP fail-open, không phải pipeline ONLINE gọi `/api`. **GHI & ĐỂ (1)** — +1 lint warning `ConferenceModeContext` (cùng mẫu `LiveSessionContext`/`ActiveEventContext` sẵn có; tách file sẽ lệch quy ước repo).
 - **Cổng lại sau vá:** `node --check` server OK · test **96/96** · build OK · lint **4** (0 mới) · **red-light PASS:** AudioRouting hunk CHỈ ở vùng wrapper (`@@ -14 imports` + `@@ -1086` sau thân OfflineConsole — reviewer A xác nhận thân hàm KHÔNG có hunk) · `types.ts`/`package.json`/`api.ts`/`LiveSessionContext`/`useMeter` KHÔNG đổi · bundle 0 vendor.
 
-## DANH SÁCH CÒN NỢ (owed — chứng minh ở Phase 8 khô / Phase 9 sống)
-- **[Phase 1]** Khoá công tắc lane khi đang chạy (cần phiên sống) — logic: switch `disabled={busy}`, `busy` do console báo qua context.
-- **[Phase 1]** DỪNG head bar dừng một phiên OFFLINE đang chạy thật từ Chuẩn bị/Báo cáo/Cài đặt (cần backend OFFLINE sống).
-- **[Phase 2]** Danh mục giọng theo tên (personal-first) + đổi giọng/tốc độ áp từ câu kế tiếp — cần TTS key thật (voices trả 503 khi chưa có key).
-- **[Phase 2]** `/online-api/voices` body không lộ voice id thật (kiểm shape ở Phase 8 khô; kiểm với key thật ở Phase 9).
-- *(bổ sung dần theo từng phase — mọi hạng mục cần "câu nói thật + khoá thật + mic thật")*
+## PHASE 8 — Dry acceptance trên build Phase 7 (không báo cáo — 1 báo cáo duy nhất cuối Phase 9)
+Chạy MỌI mục khô tại chỗ trên build `1576f03`. Tất cả PASS → không quay lại Phase 7. (Mục sống = cần câu nói/khoá/mic thật → chuyển nguyên sang OWED bên dưới.)
+- **OfflineConsole diff proof:** hunk AudioRouting chỉ ở import + vùng wrapper (sau thân hàm) — reviewer A xác nhận thân KHÔNG có hunk. ✓
+- **Hai console giống khung:** OFFLINE & ONLINE render cùng vỏ (rail trái · standby 20周年 · status strip · drawer) — chỉ khác mục rail + nội dung drawer. ✓
+- **Head-bar:** switch `disabled={busy}` (title cảnh báo) ✓ · **DỪNG ẩn trên ONLINE** (`dungPresentOnOnline:false` ở 1920) ✓.
+- **Chuẩn bị:** không pill/DỪNG khi chưa có phiên (Phase 1) ✓. **`/audio`→`/console`** redirect ✓.
+- **Modal thiếu khoá:** bấm Bắt đầu (chưa có khoá) → hiện "Chưa nhập khoá dịch vụ (API Key)" + nút "Mở Cài đặt" (`/settings#ok`) ✓.
+- **9.1 câu chữ + 6 nhãn nhà cung cấp:** khớp CHÍNH XÁC acceptance — `Endpoint của Qwen · API Key của Qwen · API Key của GPT (OpenAI) · API Key của ElevenLabs · Voice ID tiếng Nhật (ElevenLabs) · Voice ID tiếng Việt (ElevenLabs)`; hint = trang lấy khoá. ✓
+- **9.2 chống dội mặc định:** `gateMode` init `'off'` (tai nghe) ✓.
+- **Responsive 6 mốc:** 390/480/768/900/1280/1920 — `scrollWidth===clientWidth` (0 tràn ngang) MỌI mốc ✓.
+- **Bundle grep:** 0 env-name/model-id/host/`xi-api-key` ✓. **Vitest:** 96/96 (14 file) ✓. **`/online-lab`:** render OnlinePanel đầy đủ (Micro·gate·Chiều dịch·VU·chẩn đoán·Bắt đầu) ✓.
+- **Shape endpoint (node server thật):** `config-status` = `{keys:{6 slug bool}, required:["refine_key","tts_key","tts_voice_ja","tts_voice_vi"], ready:false}` (slug đục, 0 value) ✓ · `voices` chưa-khoá = `{error:"TTS voice service is not configured."}` (shape sạch, 0 voice id) ✓.
+
+## DANH SÁCH CÒN NỢ (owed — CHỜ Phase 9 SỐNG: câu nói thật + khoá Railway thật + mic thật). *Mục owed KHÔNG phải mục đã pass.*
+**Cần phiên chạy / câu nói thật:**
+- Hai chiều VI/JA: mỗi câu dịch sang tiếng kia, vào ĐÚNG cột console, không nhảy cột sau khi chốt.
+- Dừng flush đuôi + câu cuối lên bản dịch hoàn chỉnh trong ~2s (11.4); lặp với mạng bóp refine → giữ nháp, không treo.
+- 9 luật phụ đề + hướng đọc neo-đỉnh (câu đầu sát MÉP TRÊN, khoảng trống ở DƯỚI) trên `/wall` + monitor.
+- Màn khán giả: Xuất mở đúng màn được gán · backfill câu cũ · đổi gán → dời cửa sổ (không mở cửa thứ 2) · đóng tay → panel về "Chưa mở" · Bắt đầu lại xoá mọi cửa /wall.
+- TASK 11 trên dây: `getUserMedia` đúng ràng buộc (deviceId exact·channelCount 1·EC/NS/AGC) · `AudioContext.sampleRate===16000` · KHÔNG `MediaRecorder` · frame `input_audio_chunk` 8192 byte, 0 frame nhị phân · token single-use mỗi dial (buộc reconnect → thấy POST token thứ 2) · câu chốt 2 lần (include_timestamps) chỉ hiện 1 · keyterm dài → `asrKeytermsDropped:1` vẫn tới refine · sai `ELEVENLABS_API_KEY` → dừng có lỗi, không loop 5 lần.
+- 11.3 sabotage worklet load fail → nhả mic (đèn tắt, track ended), Bắt đầu lại chạy không reload.
+**Cần khoá Railway thật (Thầy đặt env — KHÔNG qua form, 12.7):**
+- Danh mục giọng thật (personal-first) + `/online-api/voices` không lộ voice id · đổi giọng/tốc độ áp từ câu kế · 2 chế độ tốc độ.
+- 11.10 khoá đã bỏ: với 4 khoá đặt → `config-status ready:true`, preflight `4/4`, Bắt đầu chạy, 2 ô đọc "không bắt buộc"; xoá 1 khoá bắt buộc → chặn lại; `ONLINE_ASR_PROVIDER=qwen3` → hỏi đủ 6.
+- 11.12 refine không viết lại nguồn: `sourceText` trả về y nguyên ký tự, `translatedText` dùng đúng thuật ngữ; `asrSourceCorrectionEnabled:false`, `asrCorrectionTermCount:0` (cả direct & qwen3).
+- 11.13 công tắc hội trường (roomFilter) 3 trạng thái: bật→`asrRoomFilter:true`; tắt→`false` **và param biến mất khỏi `asrWsUrl`**; env `SCRIBE_FILTER_BACKGROUND=true` + ô tắt → handshake vẫn sạch (OFF của người vận hành thắng env); tải lại giữ lựa chọn; disabled khi đang chạy.
+- Rollback `ONLINE_ASR_PROVIDER=qwen3`: phiên phiên dịch lại qua `WS /online-api/asr`, KHÔNG đổi front-end.
+**TASK 12 — acceptance SỐNG (mọi mục làm ở Phase 6 chờ chứng trên live):**
+- 12.1 mở WS `/online-api/nonsense` từ DevTools → fail ngay + handle count KHÔNG tăng sau 10 lần; `/online-api/asr` (qwen3) vẫn upgrade.
+- 12.3 tắt save-endpoint, chạy 2 phút, nói vài câu → **0** file tải trong phiên, save-status báo lỗi; bấm "Lưu transcript" tay + bấm Dừng → mỗi cái ra 2 file (báo số lượt tải từng phần).
+- 12.4 upstream không reachable (qwen3) → trong 8s có lỗi hành động được, 2 socket đóng, log số frame drop; RAM không leo. Dán dòng log.
+- 12.5 bóp mạng (DevTools throttle) → diagnostics thấy backlog tăng + phụ đề trễ; qua ngưỡng 2 → reconnect; KHÔNG mất audio. Dán số backlog lúc tệ nhất.
+- 12.7 sau Dừng: save-status khiến tải-về là lựa chọn an toàn; README nêu đĩa tạm (đã ghi).
+
+## SỰ CỐ (incidents — nguyên văn lỗi)
+- *(chưa có)*
 
 ## SỰ CỐ (incidents — nguyên văn lỗi)
 - *(chưa có)*
