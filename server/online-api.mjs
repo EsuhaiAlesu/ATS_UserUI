@@ -474,7 +474,10 @@ export function installOnlineApi(server, { requireAuth } = {}) {
 
   asrWss.on('connection', (client, request) => {
     const url = new URL(request.url || '/online-api/asr', 'http://localhost');
-    const language = normalizeLanguage(url.searchParams.get('language'), 'vi');
+    // TASK 6.2: 'auto' (two-way) passes through so the language field is omitted below → the model
+    // detects each utterance's language. Anything else normalises to vi/ja as before.
+    const rawLang = (url.searchParams.get('language') || '').toLowerCase();
+    const language = rawLang === 'auto' ? 'auto' : normalizeLanguage(rawLang, 'vi');
     // Session-scoped biasing terms arrive in the WS URL (≤ 2000 chars).
     const corpusText = limitText(url.searchParams.get('corpus') || url.searchParams.get('hotwords'), 2_000);
 
@@ -502,7 +505,7 @@ export function installOnlineApi(server, { requireAuth } = {}) {
           input_audio_format: 'pcm',
           sample_rate: 16000,
           input_audio_transcription: {
-            language,
+            ...(language === 'auto' ? {} : { language }),
             ...(corpusText ? { corpus: { text: corpusText } } : {}),
           },
           turn_detection: {

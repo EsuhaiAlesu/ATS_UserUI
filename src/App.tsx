@@ -3,6 +3,7 @@ import { Routes, Route, Navigate } from 'react-router-dom'
 import AudioRouting from './pages/AudioRouting'
 import RevealMoment from './pages/RevealMoment'
 import BilingualStream from './pages/BilingualStream'
+import AudienceWall from './pages/AudienceWall'
 import VoiceStudio from './pages/VoiceStudio'
 import GlossaryEditor from './pages/GlossaryEditor'
 import ScriptPrep from './pages/ScriptPrep'
@@ -65,6 +66,8 @@ const App: React.FC = () => {
             {/* Audience / ceremonial surfaces are full-screen — no operator chrome. */}
             <Route path="/reveal" element={<RevealMoment />} />
             <Route path="/stream" element={<BilingualStream />} />
+            {/* ONLINE audience wall — detachable subtitle window(s), one per direction (TASK 7). */}
+            <Route path="/wall" element={<AudienceWall />} />
 
             {/* ONLINE lane dev bench (docs/ONLINE-LANE-CONTRACT.md) — standalone, NO navbar link. */}
             <Route path="/online-lab" element={<OnlineLab />} />

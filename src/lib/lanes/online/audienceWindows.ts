@@ -1,0 +1,193 @@
+// src/lib/lanes/online/audienceWindows.ts — place the audience-wall windows on the hall's monitors.
+// One detachable /wall popup per enabled output (giữa / trái / phải), positioned through the Window
+// Management API when the browser grants it and evenly split across the current screen when it does not:
+// there is ALWAYS a manual fallback (drag across + press F), because Firefox/Safari have no such API and
+// Chrome may deny the permission. Popup handles are remembered so a reused window is re-navigated ONLY
+// when its URL actually changed (no flicker mid-ceremony) and the live open-count can be read back from
+// the windows themselves — a browser never tells the parent that a child window was closed. TASK 7.3.
+
+export type WallView = 'vi2ja' | 'ja2vi' | 'both'
+export interface WallOutput { id: string; label: string; enabled: boolean; view: WallView; showSource: boolean; screenIdx?: number }
+export type ScreenSupport = 'idle' | 'unsupported' | 'single' | 'multi' | 'denied'
+export interface WallScreen { left: number; top: number; width: number; height: number; label: string }
+
+// Window Management API (Chrome/Edge 100+) — declared locally so we do NOT depend on a particular TS lib
+// version; mirrors the shape used in src/pages/AudioRouting.tsx. There is always a manual fallback.
+interface WmScreen { availLeft: number; availTop: number; availWidth: number; availHeight: number; isPrimary: boolean; label: string }
+interface WmScreenDetails { screens: WmScreen[]; addEventListener?: (t: string, cb: () => void) => void }
+
+const STORAGE_KEY = 'proyaku_online_wall_outputs'
+
+// Gala default: Màn giữa = cả hai chiều · Màn trái = VI→JA · Màn phải = JA→VI. Nguồn ẩn mặc định.
+export const DEFAULT_WALL_OUTPUTS: WallOutput[] = [
+  { id: 'center', label: 'Màn giữa', enabled: true, view: 'both', showSource: false },
+  { id: 'left', label: 'Màn trái', enabled: true, view: 'vi2ja', showSource: false },
+  { id: 'right', label: 'Màn phải', enabled: true, view: 'ja2vi', showSource: false },
+]
+
+// localStorage is absent in SSR/tests and can throw in locked-down browsers — reach it defensively.
+function safeStorage(): Storage | null {
+  try { return typeof localStorage !== 'undefined' ? localStorage : null } catch { return null }
+}
+
+const isView = (v: unknown): v is WallView => v === 'vi2ja' || v === 'ja2vi' || v === 'both'
+
+// Merge one stored entry (which may be partial or corrupt) over its default, field by field, so a stale
+// value can never break the console: any field that is missing or the wrong type falls back to the default.
+function mergeStored(def: WallOutput, stored: Record<string, unknown> | undefined): WallOutput {
+  if (!stored) return { ...def }
+  const idx = stored.screenIdx
+  return {
+    id: def.id,
+    label: typeof stored.label === 'string' ? stored.label : def.label,
+    enabled: typeof stored.enabled === 'boolean' ? stored.enabled : def.enabled,
+    view: isView(stored.view) ? stored.view : def.view,
+    showSource: typeof stored.showSource === 'boolean' ? stored.showSource : def.showSource,
+    screenIdx: typeof idx === 'number' && Number.isInteger(idx) && idx >= 0 ? idx : undefined,
+  }
+}
+
+// Always returns the 3 defaults, each merged over its stored counterpart (matched by id). Unknown stored
+// ids are ignored, so a corrupt array can never add, drop or reorder an output.
+export function loadWallOutputs(): WallOutput[] {
+  let raw: unknown = null
+  const store = safeStorage()
+  if (store) {
+    try { raw = JSON.parse(store.getItem(STORAGE_KEY) || 'null') } catch { raw = null }
+  }
+  const byId = new Map<string, Record<string, unknown>>()
+  if (Array.isArray(raw)) {
+    for (const o of raw) {
+      if (o && typeof o === 'object' && typeof (o as { id?: unknown }).id === 'string') {
+        byId.set((o as { id: string }).id, o as Record<string, unknown>)
+      }
+    }
+  }
+  return DEFAULT_WALL_OUTPUTS.map((def) => mergeStored(def, byId.get(def.id)))
+}
+
+// Best-effort persist; a full or blocked quota must never crash the console mid-event.
+export function saveWallOutputs(outputs: WallOutput[]): void {
+  const store = safeStorage()
+  if (!store) return
+  try { store.setItem(STORAGE_KEY, JSON.stringify(outputs)) } catch { /* best-effort */ }
+}
+
+// Learn how many monitors exist and where they are. Never throws: no API → 'unsupported'; permission
+// denied / any failure → 'denied'; otherwise 'multi'/'single'. Every branch keeps a manual fallback.
+export async function detectWallScreens(): Promise<{ support: ScreenSupport; screens: WallScreen[] }> {
+  const getScreenDetails = (window as unknown as { getScreenDetails?: () => Promise<WmScreenDetails> }).getScreenDetails
+  if (typeof getScreenDetails !== 'function') return { support: 'unsupported', screens: [] }
+  // A non-extended desktop is unambiguously one screen — answer 'single' WITHOUT prompting for the
+  // window-management permission (the operator may not have plugged the wall in yet). Fallback covers it.
+  const isExtended = (window.screen as unknown as { isExtended?: boolean }).isExtended
+  if (isExtended === false) return { support: 'single', screens: [] }
+  try {
+    const details = await getScreenDetails()
+    const list = Array.isArray(details.screens) ? details.screens : []
+    const screens: WallScreen[] = list.map((s, i) => ({
+      left: s.availLeft, top: s.availTop, width: s.availWidth, height: s.availHeight, label: s.label || `Màn ${i + 1}`,
+    }))
+    return { support: screens.length > 1 ? 'multi' : 'single', screens }
+  } catch {
+    return { support: 'denied', screens: [] }
+  }
+}
+
+// A monitor was unplugged: drop any screenIdx that now points past the detected count, so the next Xuất
+// never opens a window on a screen that no longer exists. Returns the same array when nothing changed.
+export function scanWallScreens(outputs: WallOutput[], screenCount: number): WallOutput[] {
+  let changed = false
+  const next = outputs.map((o) => {
+    if (o.screenIdx != null && o.screenIdx >= screenCount) { changed = true; return { ...o, screenIdx: undefined } }
+    return o
+  })
+  return changed ? next : outputs
+}
+
+// window.open reuses a window with the same name and IGNORES the position string on reuse — so we remember
+// the live handles here (the Map<id, Window> the count is read back from) plus the URL each was last sent
+// to, to decide whether a reused window actually needs re-navigating.
+const wallWindows = new Map<string, Window>()
+const wallUrls = new Map<string, string>()
+
+// Reading `.closed` on a lost or cross-origin handle can throw — a handle we cannot inspect counts as closed.
+function isClosed(win: Window): boolean {
+  try { return win.closed } catch { return true }
+}
+
+// Open (or re-place) one popup per ENABLED output. An already-open window is re-navigated ONLY when its URL
+// changed, then always steered back onto its assigned screen. Returns { opened, total, blocked } so the UI
+// can say something true — `blocked` is the popups the blocker ate (window.open returned null).
+export function openWallWindows(outputs: WallOutput[], screens: WallScreen[], fontSize: number): { opened: number; total: number; blocked: number } {
+  const enabled = outputs.filter((o) => o.enabled)
+  const total = enabled.length
+  let opened = 0
+  let blocked = 0
+
+  // Manual fallback geometry: with no assigned monitor, divide the CURRENT screen evenly across the windows
+  // (Bước 1) — the operator drags each onto its hall monitor and presses F.
+  const availW = window.screen.availWidth || window.innerWidth || 1280
+  const availH = window.screen.availHeight || window.innerHeight || 720
+  const colW = total > 0 ? Math.max(320, Math.round(availW / total)) : availW
+
+  enabled.forEach((o, i) => {
+    const src = o.showSource ? '&src=1' : ''
+    const url = `/wall?dir=${o.view}&font=${fontSize}${src}`
+    // Assigned monitor (Bước 2) if screenIdx resolves to a detected screen, else the fallback slice.
+    const scr = (o.screenIdx != null && screens[o.screenIdx]) ? screens[o.screenIdx] : null
+    const left = scr ? scr.left : i * colW
+    const top = scr ? scr.top : 0
+    const width = scr ? scr.width : colW
+    const height = scr ? scr.height : availH
+
+    const existing = wallWindows.get(o.id)
+    if (existing && !isClosed(existing)) {
+      // Already open: re-navigate ONLY when the content changed (avoid flicker / a dropped BroadcastChannel
+      // mid-ceremony), then always move/resize it back onto its assigned screen.
+      if (wallUrls.get(o.id) !== url) {
+        try { existing.location.replace(url); wallUrls.set(o.id, url) } catch { /* navigation blocked — leave as-is */ }
+      }
+      try { existing.moveTo(left, top); existing.resizeTo(width, height) } catch { /* browsers restrict move/resize */ }
+      try { existing.focus() } catch { /* ignore */ }
+      opened++
+      return
+    }
+
+    // Not open (or the handle went dead): open a fresh popup with the position hint window.open honours only
+    // on first creation.
+    let win: Window | null = null
+    try { win = window.open(url, `proyaku-wall-${o.id}`, `popup=yes,left=${left},top=${top},width=${width},height=${height}`) } catch { win = null }
+    if (!win) {
+      wallWindows.delete(o.id); wallUrls.delete(o.id)
+      blocked++
+      return
+    }
+    wallWindows.set(o.id, win); wallUrls.set(o.id, url)
+    try { win.moveTo(left, top); win.resizeTo(width, height) } catch { /* browsers restrict move/resize */ }
+    try { win.focus() } catch { /* ignore */ }
+    opened++
+  })
+
+  return { opened, total, blocked }
+}
+
+// The only honest source of the open count: ask each remembered window whether it is still open, drop the
+// dead ones from the Map, and return the live ids. A browser fires no event when a child window closes.
+export function getOpenWallIds(): string[] {
+  const live: string[] = []
+  for (const [id, win] of wallWindows) {
+    if (isClosed(win)) { wallWindows.delete(id); wallUrls.delete(id) }
+    else live.push(id)
+  }
+  return live
+}
+
+// Close every remembered audience window at once (end of the event) and forget the handles.
+export function closeWallWindows(): void {
+  for (const win of wallWindows.values()) {
+    try { win.close() } catch { /* already gone */ }
+  }
+  wallWindows.clear()
+  wallUrls.clear()
+}

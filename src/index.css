@@ -503,3 +503,9 @@
     .reveal-text { opacity: 1 !important; transform: none !important; }
     * { scroll-behavior: auto !important; }
 }
+
+/* TASK 8 — newly appended subtitle characters fade in by OPACITY ONLY (never position), so the audience
+   never loses the line they were reading. */
+.sub-append { animation: subAppend 0.45s ease-out both; }
+@keyframes subAppend { from { opacity: 0.25; } to { opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { .sub-append { animation: none; } }

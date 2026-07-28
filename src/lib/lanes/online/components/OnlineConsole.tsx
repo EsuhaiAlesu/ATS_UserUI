@@ -13,10 +13,11 @@
 
 import React, { useCallback, useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { useOnlineLane, fetchOnlineConfigStatus, ONLINE_SPEED_RANGE, type LaneStatus, type OnlineVoice } from '../index'
+import { useOnlineLane, fetchOnlineConfigStatus, ONLINE_SPEED_RANGE, SUBTITLE_FONT, type LaneStatus, type OnlineVoice, type AudienceLine, type WallOutput } from '../index'
 import { useConferenceMode } from '../../../ConferenceModeContext'
 import { useActiveEvent } from '../../../ActiveEventContext'
 import { collectPrepPack, type PrepPack } from '../../../prepData'
+import SubtitleParagraphs from '../../../../components/SubtitleParagraphs'
 
 type CfgStatus = Awaited<ReturnType<typeof fetchOnlineConfigStatus>>
 
@@ -59,36 +60,6 @@ const RailBtn: React.FC<{
   )
 }
 
-// One language column of the live monitor — pins to the newest line (own copy; simple {lid,text} shape).
-const MonitorColumn: React.FC<{ label: React.ReactNode; lines: { lid: string; text: string }[]; jp?: boolean }> = ({ label, lines, jp }) => {
-  const ref = useRef<HTMLDivElement>(null)
-  const dep = `${lines.length}|${lines[lines.length - 1]?.text ?? ''}`
-  useEffect(() => { const el = ref.current; if (el) el.scrollTop = el.scrollHeight }, [dep])
-  return (
-    <div className="flex flex-col min-h-0 h-full">
-      <div className="shrink-0 flex items-center justify-center py-2.5">{label}</div>
-      <div ref={ref} className="flex-1 overflow-y-auto px-6 md:px-10">
-        <div className={`min-h-full flex flex-col justify-end gap-4 py-4 ${jp ? 'jp-text' : ''}`}>
-          {lines.map((line, i) => {
-            const age = lines.length - 1 - i
-            const cls = age === 0
-              ? 'fade-current text-secondary font-bold text-2xl md:text-[1.9rem] leading-snug'
-              : age === 1
-                ? 'fade-older text-on-surface font-semibold text-lg md:text-xl leading-snug'
-                : 'text-on-surface-variant opacity-70 font-medium text-base md:text-lg leading-snug'
-            return (
-              <p key={line.lid} lang={jp ? 'ja' : 'vi'} className={cls}
-                style={{ lineBreak: jp ? 'strict' : undefined, textShadow: age === 0 ? '0 0 22px rgba(232,184,75,0.28)' : undefined }}>
-                {line.text}
-              </p>
-            )
-          })}
-        </div>
-      </div>
-    </div>
-  )
-}
-
 // The missing-keys gate popup — moved from AudioRouting into the lane (§1.3).
 const MissingKeysModal: React.FC<{ onClose: () => void; onGoSettings: () => void }> = ({ onClose, onGoSettings }) => (
   <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 p-4" onClick={onClose} role="dialog" aria-modal="true" aria-label="Chưa nhập khoá dịch vụ (API Key)">
@@ -108,7 +79,21 @@ const MissingKeysModal: React.FC<{ onClose: () => void; onGoSettings: () => void
   </div>
 )
 
-type Panel = 'gate' | 'voice' | 'terms' | 'brief' | null
+type Panel = 'gate' | 'voice' | 'terms' | 'brief' | 'wall' | null
+
+function wallSupportLine(support: string, count: number): string {
+  if (support === 'multi') return `Thấy ${count} màn hình — chọn màn cho từng cửa sổ rồi bấm Xuất.`
+  if (support === 'single') return 'Chỉ thấy 1 màn — mở cửa sổ xong kéo sang màn hội trường rồi bấm F.'
+  if (support === 'unsupported') return 'Trình duyệt này chưa tự nhận diện màn hình. Vẫn xuất được — mở xong kéo cửa sổ sang màn hội trường rồi bấm F.'
+  if (support === 'denied') return 'Chưa được phép sắp cửa sổ. Bấm Quét màn hình rồi chọn "Cho phép", hoặc kéo tay cũng được.'
+  return 'Bấm Quét màn hình để nhận diện màn hội trường (hoặc kéo tay sau khi xuất).'
+}
+function wallStatusLine(enabled: number, open: number): string {
+  if (enabled === 0) return 'Chưa bật màn nào.'
+  if (open === 0) return `Chưa mở cửa sổ nào (đã bật ${enabled} màn). Bấm Xuất ra màn hình.`
+  if (open < enabled) return `Đang mở ${open}/${enabled} cửa sổ — có màn đã bị đóng. Bấm Xuất lại để mở lại.`
+  return `Đang mở ${open} cửa sổ. Kéo sang màn hội trường rồi bấm F để phóng toàn màn hình.`
+}
 
 const OnlineConsole: React.FC = () => {
   const nav = useNavigate()
@@ -209,6 +194,21 @@ const OnlineConsole: React.FC = () => {
     </div>
   ) : null
 
+  // ── TASK 7.4: audience wall placement ──
+  const [wallNote, setWallNote] = useState<{ msg: string; atCount: number } | null>(null)
+  const updateWallOutput = (id: string, patch: Partial<WallOutput>) => lane.setWallOutputs(lane.wallOutputs.map((o) => (o.id === id ? { ...o, ...patch } : o)))
+  const handleExportWall = () => {
+    const r = lane.openWall()
+    const msg = r.blocked > 0
+      ? `Trình duyệt đang chặn cửa sổ bật lên (mở được ${r.opened}/${r.total}) — cho phép rồi bấm Xuất lại.`
+      : r.total === 0 ? 'Chưa bật màn nào — chọn ít nhất một màn rồi bấm Xuất.' : ''
+    setWallNote(msg ? { msg, atCount: r.opened } : null)
+  }
+  // Scan the screens the first time the flyout opens — the permission prompt must be tied to the action.
+  useEffect(() => { if (panel === 'wall' && lane.wallSupport === 'idle') void lane.scanWall() }, [panel, lane.wallSupport, lane])
+  const enabledWallCount = lane.wallOutputs.filter((o) => o.enabled).length
+  const wallNoteMsg = wallNote && wallNote.atCount === lane.wallOpenIds.length ? wallNote.msg : ''
+
   // ── derived state ──
   const st = lane.status
   const ann = ANN[st] ?? ANN.idle
@@ -235,10 +235,11 @@ const OnlineConsole: React.FC = () => {
   const preflightPass = checks.filter((c) => c.ok).length
   const preflightOk = checks.every((c) => c.ok)
 
-  // Two language columns from the (session-level, for now) direction. TASK 8 replaces this with the shared
-  // subtitle mechanism; TASK 6 makes the language per-utterance.
-  const viCol = lane.lines.map((l) => ({ lid: l.lid, text: lane.direction === 'vi2ja' ? l.sourceText : l.targetText })).filter((x) => x.text.trim())
-  const jaCol = lane.lines.map((l) => ({ lid: l.lid, text: lane.direction === 'vi2ja' ? l.targetText : l.sourceText })).filter((x) => x.text.trim())
+  // Two LANGUAGE columns fed from directedLines (TASK 6.3): the Vietnamese side of each line goes to the
+  // VI column, the Japanese side to the JA column — each column forces its own language into the shared
+  // subtitle block (TASK 8), so jp-text / lineBreak key off the column, not the utterance.
+  const viColLines: AudienceLine[] = lane.directedLines.map((l) => ({ ...l, targetText: l.dir === 'vi2ja' ? l.sourceText : l.targetText, dir: 'ja2vi' }))
+  const jaColLines: AudienceLine[] = lane.directedLines.map((l) => ({ ...l, targetText: l.dir === 'vi2ja' ? l.targetText : l.sourceText, dir: 'vi2ja' }))
 
   const diag = lane.diagnostics
   const lat = diag?.latency
@@ -257,7 +258,15 @@ const OnlineConsole: React.FC = () => {
               onClick={() => { void handleStart() }} />
           )}
 
-          {/* B · MÀN KHÁN GIẢ — nhóm riêng của luồng ONLINE (2 chiều + Xuất) đến ở TASK 7 (Phase 3). */}
+          {/* B · MÀN KHÁN GIẢ */}
+          <div className="space-y-0.5">
+            <div className="px-2 pb-1 font-label-caps text-[10px] text-on-surface-variant/55 tracking-[0.16em]">MÀN KHÁN GIẢ</div>
+            <RailBtn icon={lane.twoWay ? 'sync_alt' : 'east'} label="Một mic hai chiều" title="Một micro cho cả VI và JA — máy tự nhận mỗi câu"
+              tone={lane.twoWay ? 'active' : 'default'} disabled={lane.running} onClick={() => lane.setTwoWay(!lane.twoWay)} />
+            <RailBtn icon="cast" label="Xuất màn khán giả" title="Định tuyến phụ đề ra các màn khán giả"
+              tone={panel === 'wall' ? 'active' : 'default'} dot={lane.wallOpenIds.length > 0 ? 'bg-secondary' : undefined}
+              onClick={() => setPanel((p) => (p === 'wall' ? null : 'wall'))} />
+          </div>
 
           {/* C · ÂM THANH & GIỌNG */}
           <div className="space-y-0.5">
@@ -316,28 +325,23 @@ const OnlineConsole: React.FC = () => {
           )}
 
           {live ? (
-            /* LIVE result monitor */
+            /* LIVE result monitor — two language columns through the shared subtitle block (top-anchored). */
             <div className="flex-1 min-h-0 relative overflow-hidden">
               <div className="absolute top-0 inset-x-0 h-1/3 bg-gradient-to-b from-surface-container/40 to-transparent pointer-events-none z-0"></div>
               <div className="absolute inset-0 flex z-10">
-                <div className="flex-1 min-w-0">
-                  <MonitorColumn label={<span className="font-label-caps text-label-caps tracking-widest text-secondary border border-secondary/60 rounded px-2.5 py-0.5">TIẾNG VIỆT</span>} lines={viCol} />
+                <div className="relative flex-1 min-w-0">
+                  <span className="absolute top-2 left-1/2 -translate-x-1/2 z-10 font-label-caps text-label-caps tracking-widest text-secondary border border-secondary/60 rounded px-2.5 py-0.5 bg-surface-container-lowest/80">TIẾNG VIỆT</span>
+                  <SubtitleParagraphs lines={viColLines} direction="ja2vi" fontSize={lane.subtitleFont} />
                 </div>
                 <div className="w-px relative flex flex-col items-center justify-center opacity-50 shrink-0" aria-hidden="true">
                   <div className="w-full h-full bg-gradient-to-b from-transparent via-secondary to-transparent"></div>
                   <div className="absolute w-2 h-2 rotate-45 border border-secondary bg-primary-container"></div>
                 </div>
-                <div className="flex-1 min-w-0">
-                  <MonitorColumn jp label={<span className="jp-text font-label-caps text-label-caps tracking-widest text-secondary border border-secondary/60 rounded px-2.5 py-0.5">日本語</span>} lines={jaCol} />
+                <div className="relative flex-1 min-w-0">
+                  <span className="absolute top-2 left-1/2 -translate-x-1/2 z-10 jp-text font-label-caps text-label-caps tracking-widest text-secondary border border-secondary/60 rounded px-2.5 py-0.5 bg-surface-container-lowest/80">日本語</span>
+                  <SubtitleParagraphs lines={jaColLines} direction="vi2ja" fontSize={lane.subtitleFont} />
                 </div>
               </div>
-              {viCol.length === 0 && jaCol.length === 0 && (
-                <div className="absolute inset-0 flex flex-col items-center justify-center gap-2.5 pointer-events-none z-20">
-                  <span className="material-symbols-outlined text-secondary opacity-70 listening-pulse" style={{ fontSize: '40px' }} aria-hidden="true">hearing</span>
-                  <span className="font-semibold text-xl text-secondary opacity-90">Đang chờ diễn giả…</span>
-                  <span className="jp-text text-base text-on-surface-variant opacity-70">お待ちください</span>
-                </div>
-              )}
             </div>
           ) : setupPhase ? (
             /* Connecting / reconnecting */
@@ -474,6 +478,66 @@ const OnlineConsole: React.FC = () => {
                 {prepCounts}
               </div>
             )}
+            {panel === 'wall' && (
+              <div className="space-y-3 overflow-y-auto" style={{ maxHeight: 'calc(100vh - 96px)' }}>
+                <h3 className="font-label-caps text-label-caps text-on-surface">Xuất màn khán giả</h3>
+                <button onClick={() => { void lane.scanWall() }} className="inline-flex items-center gap-1.5 rounded-lg border border-outline-variant text-on-surface-variant px-3 py-1.5 text-xs hover:text-primary hover:border-primary transition-colors">
+                  <span className="material-symbols-outlined text-[16px]" aria-hidden="true">devices</span>Quét màn hình
+                </button>
+                <p className="text-[11px] text-on-surface-variant leading-relaxed">{wallSupportLine(lane.wallSupport, lane.wallScreens.length)}</p>
+                <div className="space-y-2">
+                  {lane.wallOutputs.map((o) => {
+                    const open = lane.wallOpenIds.includes(o.id)
+                    return (
+                      <div key={o.id} className="rounded-lg border border-outline-variant p-2.5 space-y-1.5">
+                        <div className="flex items-center justify-between gap-2">
+                          <label className="flex items-center gap-2 text-sm text-on-surface cursor-pointer">
+                            <input type="checkbox" checked={o.enabled} onChange={(e) => updateWallOutput(o.id, { enabled: e.target.checked })} className="accent-secondary" />{o.label}
+                          </label>
+                          {o.enabled && <span className={`font-label-caps text-[10px] inline-flex items-center gap-1 ${open ? 'text-secondary' : 'text-on-surface-variant/70'}`}>{open ? <><span className="w-1.5 h-1.5 rounded-full bg-secondary"></span>Đang mở</> : 'Chưa mở'}</span>}
+                        </div>
+                        {o.enabled && (
+                          <div className="flex flex-wrap items-center gap-2">
+                            <select value={o.view} onChange={(e) => updateWallOutput(o.id, { view: e.target.value as WallOutput['view'] })} className={`${SELECT_CLS} w-auto text-xs py-1`}>
+                              <option value="both">Cả 2 (2 cột)</option>
+                              <option value="vi2ja">Chỉ 日本語</option>
+                              <option value="ja2vi">Chỉ Tiếng Việt</option>
+                            </select>
+                            {lane.wallScreens.length > 1 && (
+                              <select value={o.screenIdx ?? ''} onChange={(e) => updateWallOutput(o.id, { screenIdx: e.target.value === '' ? undefined : Number(e.target.value) })} className={`${SELECT_CLS} w-auto text-xs py-1`}>
+                                <option value="">— màn —</option>
+                                {lane.wallScreens.map((s, i) => <option key={i} value={i}>{s.label || `Màn ${i + 1}`}</option>)}
+                              </select>
+                            )}
+                            <label className="flex items-center gap-1 text-xs text-on-surface-variant cursor-pointer"><input type="checkbox" checked={o.showSource} onChange={(e) => updateWallOutput(o.id, { showSource: e.target.checked })} className="accent-secondary" />Hiện cả bản gốc</label>
+                          </div>
+                        )}
+                        {o.enabled && o.view === 'both' && !lane.twoWay && <p className="text-[10px] text-error/80">Phiên một-chiều: một cột của "cả 2" sẽ trống.</p>}
+                      </div>
+                    )
+                  })}
+                </div>
+                <div>
+                  <label className="font-label-caps text-label-caps text-on-surface-variant block mb-1.5">CỠ CHỮ PHỤ ĐỀ</label>
+                  <div className="flex items-center gap-2">
+                    <input type="range" min={SUBTITLE_FONT.min} max={SUBTITLE_FONT.max} step={SUBTITLE_FONT.step} value={lane.subtitleFont} onChange={(e) => lane.setSubtitleFont(Number(e.target.value))} className="flex-1 accent-[var(--secondary)]" aria-label="Cỡ chữ phụ đề" />
+                    <span className="w-10 shrink-0 text-right tabular-nums text-sm text-on-surface">{lane.subtitleFont}px</span>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2">
+                  <button onClick={handleExportWall} className="flex-1 inline-flex items-center justify-center gap-1.5 rounded-lg btn-lux bg-secondary text-on-secondary px-3 py-2 text-sm font-semibold hover:opacity-90">
+                    <span className="material-symbols-outlined text-[18px]" aria-hidden="true">cast</span>{lane.wallOpenIds.length > 0 ? 'Xuất lại' : 'Xuất ra màn hình'}
+                  </button>
+                  {lane.wallOpenIds.length > 0 && (
+                    <button onClick={() => lane.closeWall()} className="inline-flex items-center gap-1.5 rounded-lg border border-outline-variant text-on-surface-variant px-3 py-2 text-sm hover:text-error hover:border-error transition-colors">
+                      <span className="material-symbols-outlined text-[18px]" aria-hidden="true">close</span>Đóng hết
+                    </button>
+                  )}
+                </div>
+                <p className="text-[11px] text-on-surface-variant">{wallStatusLine(enabledWallCount, lane.wallOpenIds.length)}</p>
+                {wallNoteMsg && <p className="text-[11px] text-primary">{wallNoteMsg}</p>}
+              </div>
+            )}
           </div>
         </>
       )}
@@ -549,7 +613,10 @@ const OnlineConsole: React.FC = () => {
                     </button>
                   ))}
                 </div>
-                {/* TASK 6 (Phase 3) thêm ô "một mic hai chiều" ngay dưới. */}
+                <label className="flex items-start gap-2 font-label-caps text-label-caps text-on-surface-variant cursor-pointer">
+                  <input type="checkbox" checked={lane.twoWay} onChange={(e) => lane.setTwoWay(e.target.checked)} disabled={lane.running} className="accent-secondary mt-0.5" />
+                  <span>Một mic hai chiều<br /><span className="font-normal normal-case text-[11px] leading-relaxed">Máy tự nhận ra câu vừa nói là tiếng Việt hay tiếng Nhật rồi dịch sang tiếng còn lại. Chiều đã chọn ở trên chỉ dùng cho câu đầu tiên.</span></span>
+                </label>
               </section>
 
               <div className="h-px bg-outline-variant"></div>

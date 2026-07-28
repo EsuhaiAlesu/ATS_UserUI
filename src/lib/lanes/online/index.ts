@@ -11,10 +11,19 @@ import type { LaneEvents, LaneLine, LaneStatus } from '../types'
 import { createOnlineLane, type OnlineDiagnostics, type OnlineLaneController, type TtsGateMode } from './onlineLane'
 import { setTtsSinkId, setTtsWarningHandler, setTtsVoice, setTtsManualSpeed } from './ttsPlayback'
 import type { SaveOutcome } from './sessionExport'
+import { createAudiencePublisher, type AudienceLine } from '../../audienceChannel'
+import { SUBTITLE_FONT, clampSubtitleFont } from '../../audienceSubtitles'
+import {
+  loadWallOutputs, saveWallOutputs, detectWallScreens, scanWallScreens, openWallWindows, getOpenWallIds, closeWallWindows,
+  type WallOutput, type ScreenSupport, type WallScreen,
+} from './audienceWindows'
 
 export type { LaneLine, LaneStatus } from '../types'
 export type { OnlineDiagnostics, TtsGateMode } from './onlineLane'
 export type { SaveOutcome } from './sessionExport'
+export type { AudienceLine } from '../../audienceChannel'
+export type { WallOutput, WallView, ScreenSupport, WallScreen } from './audienceWindows'
+export { SUBTITLE_FONT } from '../../audienceSubtitles'
 export type OnlineDirection = 'vi2ja' | 'ja2vi'
 export type SpeedMode = 'auto' | 'manual'
 export interface OnlineVoice { slug: string; name: string; language: string; category: string; labels: Record<string, string> }
@@ -114,6 +123,20 @@ export interface UseOnlineLane {
   setSpeedMode: (m: SpeedMode) => void
   manualSpeed: number
   setManualSpeed: (s: number) => void
+  // two-way + audience wall + subtitles (TASK 6·7·8)
+  twoWay: boolean
+  setTwoWay: (v: boolean) => void
+  directedLines: AudienceLine[]
+  subtitleFont: number
+  setSubtitleFont: (n: number) => void
+  wallOutputs: WallOutput[]
+  setWallOutputs: (o: WallOutput[]) => void
+  wallSupport: ScreenSupport
+  wallScreens: WallScreen[]
+  wallOpenIds: string[]
+  scanWall: () => Promise<void>
+  openWall: () => { opened: number; total: number; blocked: number }
+  closeWall: () => void
   // controls
   start: () => Promise<void>
   stop: () => Promise<void>
@@ -141,6 +164,14 @@ export function useOnlineLane(): UseOnlineLane {
   const [manualSpeed, setManualSpeedState] = useState<number>(() => {
     try { const n = Number(localStorage.getItem('proyaku_online_manual_speed')); return Number.isFinite(n) && n >= ONLINE_SPEED_RANGE.min && n <= ONLINE_SPEED_RANGE.max ? n : 1 } catch { return 1 }
   })
+
+  // two-way + audience wall + subtitles (TASK 6·7·8)
+  const [twoWay, setTwoWayState] = useState<boolean>(() => { try { return localStorage.getItem('proyaku_online_two_way') === '1' } catch { return false } })
+  const [subtitleFont, setSubtitleFontState] = useState<number>(() => { try { return clampSubtitleFont(Number(localStorage.getItem('proyaku_online_subtitle_font')) || SUBTITLE_FONT.default) } catch { return SUBTITLE_FONT.default } })
+  const [wallOutputs, setWallOutputsState] = useState<WallOutput[]>(() => loadWallOutputs())
+  const [wallSupport, setWallSupport] = useState<ScreenSupport>('idle')
+  const [wallScreens, setWallScreens] = useState<WallScreen[]>([])
+  const [wallOpenIds, setWallOpenIds] = useState<string[]>([])
 
   const [status, setStatus] = useState<LaneStatus>('idle')
   const [statusDetail, setStatusDetail] = useState('')
@@ -258,6 +289,51 @@ export function useOnlineLane(): UseOnlineLane {
   useEffect(() => { setTtsManualSpeed(speedMode === 'manual' ? manualSpeed : undefined) }, [speedMode, manualSpeed])
   useEffect(() => { void refreshVoices() }, [refreshVoices])
 
+  // ── TASK 6·7·8: two-way direction map + audience publisher + subtitle font + wall placement ──
+  const twoWayRef = useRef(twoWay); twoWayRef.current = twoWay
+  const subtitleFontRef = useRef(subtitleFont); subtitleFontRef.current = subtitleFont
+  const wallOutputsRef = useRef(wallOutputs); wallOutputsRef.current = wallOutputs
+  const wallScreensRef = useRef(wallScreens); wallScreensRef.current = wallScreens
+  const dirByLid = useRef<Map<string, 'vi2ja' | 'ja2vi'>>(new Map())
+  const publisherRef = useRef<ReturnType<typeof createAudiencePublisher> | null>(null)
+
+  const setTwoWay = useCallback((v: boolean) => { setTwoWayState(v); try { localStorage.setItem('proyaku_online_two_way', v ? '1' : '0') } catch { /* private mode */ } }, [])
+  const setSubtitleFont = useCallback((n: number) => { const c = clampSubtitleFont(n); setSubtitleFontState(c); try { localStorage.setItem('proyaku_online_subtitle_font', String(c)) } catch { /* private mode */ } }, [])
+  const setWallOutputs = useCallback((o: WallOutput[]) => { setWallOutputsState(o); saveWallOutputs(o) }, [])
+
+  const scanWall = useCallback(async () => {
+    const { support, screens } = await detectWallScreens()
+    setWallSupport(support)
+    setWallScreens(screens)
+    setWallOutputsState((prev) => { const next = scanWallScreens(prev, screens.length); saveWallOutputs(next); return next })
+  }, [])
+  const openWall = useCallback(() => {
+    const r = openWallWindows(wallOutputsRef.current, wallScreensRef.current, subtitleFontRef.current)
+    setWallOpenIds(getOpenWallIds())
+    return r
+  }, [])
+  const closeWall = useCallback(() => { closeWallWindows(); setWallOpenIds(getOpenWallIds()) }, [])
+
+  // The publisher lives for the console's lifetime (windows opened before the ceremony are already
+  // connected). A browser never tells the parent a child window closed, so poll getOpenWallIds every 1s.
+  useEffect(() => {
+    publisherRef.current = createAudiencePublisher()
+    return () => { publisherRef.current?.close(); publisherRef.current = null }
+  }, [])
+  useEffect(() => {
+    const id = window.setInterval(() => {
+      const ids = getOpenWallIds()
+      setWallOpenIds((prev) => (prev.length === ids.length && prev.every((x, i) => x === ids[i]) ? prev : ids))
+    }, 1000)
+    return () => window.clearInterval(id)
+  }, [])
+
+  // directedLines = the transcript joined with the per-utterance direction map onDirectedLine maintains.
+  const directedLines = useMemo<AudienceLine[]>(
+    () => lines.map((l) => ({ lid: l.lid, sourceText: l.sourceText, targetText: l.targetText, interim: l.interim, corrected: l.corrected, at: l.at, dir: dirByLid.current.get(l.lid) ?? (direction as 'vi2ja' | 'ja2vi') })),
+    [lines, direction],
+  )
+
   const start = useCallback(async () => {
     if (!mountedRef.current) return // unmounted during a pre-start gate → never open a leaked lane
     if (moduleActiveSession) {
@@ -266,11 +342,18 @@ export function useOnlineLane(): UseOnlineLane {
     }
     setError('')
     setLines([])
+    dirByLid.current.clear()
+    publisherRef.current?.reset() // a new session never begins with the previous one's lines on the wall
     if (!laneRef.current) {
       laneRef.current = createOnlineLane(events, {
         getDeviceId: () => deviceIdRef.current || undefined,
         getNearMicGate: () => nearMicGateRef.current,
         getSpeakEnabled: () => speakEnabledRef.current,
+        getTwoWay: () => twoWayRef.current,
+        onDirectedLine: (line) => {
+          dirByLid.current.set(line.lid, line.dir)
+          publisherRef.current?.publish({ lid: line.lid, sourceText: line.sourceText, targetText: line.targetText, interim: line.interim, corrected: line.corrected, at: line.at, dir: line.dir })
+        },
       })
     }
     const [sourceLanguage, targetLanguage] = directionRef.current === 'vi2ja' ? (['vi', 'ja'] as const) : (['ja', 'vi'] as const)
@@ -324,6 +407,8 @@ export function useOnlineLane(): UseOnlineLane {
     direction, setDirection, terms, setTerms, brief, setBrief,
     voices, voicesStatus, refreshVoices, voiceJa, setVoiceJa, voiceVi, setVoiceVi,
     speedMode, setSpeedMode, manualSpeed, setManualSpeed,
+    twoWay, setTwoWay, directedLines, subtitleFont, setSubtitleFont,
+    wallOutputs, setWallOutputs, wallSupport, wallScreens, wallOpenIds, scanWall, openWall, closeWall,
     start, stop, saveSession,
   }
 }

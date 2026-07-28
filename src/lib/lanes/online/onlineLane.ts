@@ -19,6 +19,7 @@ import { estimateSourceSpeechPace } from './sourceSpeechPace';
 import { enqueueTtsSentence, getTtsQueueLength, resetTtsPlayback, setTtsPlaybackStartHandler, stopTtsPlayback, subscribeTtsSpeaking } from './ttsPlayback';
 import { buildSessionExport, saveSessionExport, type SaveOutcome, type SessionLine } from './sessionExport';
 import { createLatencyTracker, type LatencyReport } from './latencyTracker';
+import { classifyUtterance, createDirectionTracker, directionOf, type DirectionTracker, type Lang } from './utteranceDirection';
 
 const ONLINE_BASE = '/online-api';
 const RECENT_FINALS_MAX = 6;
@@ -73,12 +74,19 @@ type StartOpts = {
   ttsGate?: TtsGateMode;
 };
 
+// TASK 6.2: per-utterance direction leaves the lane through this lane-private channel (NOT the treaty
+// LaneLine — src/lib/lanes/types.ts stays untouched), alongside events.onLine rather than instead of it.
+export type DirectedLaneLine = LaneLine & { dir: 'vi2ja' | 'ja2vi' };
+
 export interface OnlineLaneConfig {
   // The shared LaneController.start() signature (the treaty) carries no device/gate options,
   // so the host page supplies them here; all are read live at the relevant moment.
   getDeviceId?: () => string | undefined;
   getNearMicGate?: () => boolean;
   getSpeakEnabled?: () => boolean; // Phase 3: speak refined translations via TTS
+  // TASK 6.2: one mic, two directions — read ONCE at start() and latched for the whole session.
+  getTwoWay?: () => boolean;
+  onDirectedLine?: (line: DirectedLaneLine) => void;
 }
 
 export interface OnlineDiagnostics {
@@ -118,6 +126,12 @@ export function createOnlineLane(events: LaneEvents, config: OnlineLaneConfig = 
   let capture: CaptureHandle | null = null;
   let capturingInFlight = false; // a getUserMedia is pending (capture is assigned only after it resolves)
   let opts: StartOpts | null = null;
+
+  // TASK 6.2: one mic, two directions. `twoWay` is latched at start(); the tracker + per-lid settled
+  // direction keep an utterance from ever changing direction after it finalises.
+  let twoWay = false;
+  let tracker: DirectionTracker | null = null;
+  const settledDir = new Map<string, 'vi2ja' | 'ja2vi'>();
 
   let counter = 0;
   // Bumped on every start() and teardown(); an in-flight draft/refine fetch captures the value
@@ -200,7 +214,28 @@ export function createOnlineLane(events: LaneEvents, config: OnlineLaneConfig = 
   let silentReconnects = 0; // silence-driven reconnects that did NOT show an error toast (TASK 3)
 
   const setStatus = (s: LaneStatus, detail?: string) => events.onStatus(s, detail);
-  const emitLine = (line: Omit<LaneLine, 'at'>) => events.onLine({ ...line, at: Date.now() });
+
+  // Resolve source/target language + direction for an utterance. One-way → the latched opts. Two-way →
+  // the tracker decides: GUESSED for interim text (no state change), SETTLED at finalisation and never
+  // changed again (a sentence must not jump audience windows after it is finalised).
+  function dirLangs(lid: string, sourceText: string, interim: boolean): { source: Lang; target: Lang; dir: 'vi2ja' | 'ja2vi' } {
+    if (!twoWay || !tracker) {
+      const source: Lang = opts?.sourceLanguage ?? 'vi';
+      return { source, target: source === 'vi' ? 'ja' : 'vi', dir: directionOf(source) };
+    }
+    const settled = settledDir.get(lid);
+    let source: Lang;
+    if (settled) source = settled === 'vi2ja' ? 'vi' : 'ja';
+    else if (interim) source = classifyUtterance(sourceText, tracker.current()).language;
+    else { source = tracker.next(sourceText).language; settledDir.set(lid, directionOf(source)); }
+    return { source, target: source === 'vi' ? 'ja' : 'vi', dir: directionOf(source) };
+  }
+
+  const emitLine = (line: Omit<LaneLine, 'at'>) => {
+    const full: LaneLine = { ...line, at: Date.now() };
+    events.onLine(full);
+    if (config.onDirectedLine) config.onDirectedLine({ ...full, dir: dirLangs(full.lid, full.sourceText, full.interim).dir });
+  };
 
   function pruneVoiced(): number {
     const cutoff = Date.now() - VOICED_WINDOW_MS;
@@ -334,7 +369,9 @@ export function createOnlineLane(events: LaneEvents, config: OnlineLaneConfig = 
     const o = opts!;
     const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
     const corpus = encodeURIComponent((o.terms ?? '').slice(0, CORPUS_MAX_CHARS));
-    return `${proto}//${location.host}${ONLINE_BASE}/asr?language=${o.sourceLanguage}&corpus=${corpus}`;
+    // Two-way opens the socket with language=auto; the server then omits the language field so the model
+    // detects each utterance. One-way keeps today's behaviour exactly.
+    return `${proto}//${location.host}${ONLINE_BASE}/asr?language=${twoWay ? 'auto' : o.sourceLanguage}&corpus=${corpus}`;
   }
 
   async function fetchToken(): Promise<void> {
@@ -479,7 +516,7 @@ export function createOnlineLane(events: LaneEvents, config: OnlineLaneConfig = 
   }
 
   async function sendDraft(sentSource: string, fullAtSend: string, lid: string): Promise<void> {
-    const o = opts!;
+    const dl = dirLangs(lid, sentSource, true); // interim → guessed direction
     const gen = sessionGen;
     inFlightDraftSources.add(sentSource);
     draftWindow.push(Date.now());
@@ -492,8 +529,8 @@ export function createOnlineLane(events: LaneEvents, config: OnlineLaneConfig = 
         // Drafts stay fast + cheap: no recentFinals / sessionBrief.
         body: JSON.stringify({
           sourceText: sentSource,
-          sourceLanguage: o.sourceLanguage,
-          targetLanguage: o.targetLanguage,
+          sourceLanguage: dl.source,
+          targetLanguage: dl.target,
           refineStage: 'draft',
           traceId: `${lid}-d${++draftSeq}`,
           subtitleId: lid,
@@ -707,11 +744,12 @@ export function createOnlineLane(events: LaneEvents, config: OnlineLaneConfig = 
 
   async function refine(lid: string, head: string, priorFinals: string[], sourcePace: string | undefined, draftFallback: string, finalizedAt: number): Promise<void> {
     const o = opts!;
+    const dl = dirLangs(lid, head, false); // settled at finalisation — never changes again
     const gen = sessionGen;
     const body = JSON.stringify({
       sourceText: head,
-      sourceLanguage: o.sourceLanguage,
-      targetLanguage: o.targetLanguage,
+      sourceLanguage: dl.source,
+      targetLanguage: dl.target,
       refineStage: 'refine',
       recentFinals: priorFinals,
       sessionBrief: o.brief,
@@ -743,7 +781,7 @@ export function createOnlineLane(events: LaneEvents, config: OnlineLaneConfig = 
       if (config.getSpeakEnabled?.()) {
         const speakText = data.ttsText || data.translatedText || '';
         if (speakText) {
-          enqueueTtsSentence(speakText, o.targetLanguage, data.emotion, data.ttsSpeed, lid);
+          enqueueTtsSentence(speakText, dl.target, data.emotion, data.ttsSpeed, lid);
           ttsSentences += 1;
         }
       }
@@ -955,6 +993,11 @@ export function createOnlineLane(events: LaneEvents, config: OnlineLaneConfig = 
   async function start(startOpts: StartOpts): Promise<void> {
     if (running) return; // already running — ignore duplicate Start
     opts = startOpts;
+    // TASK 6.2: latch the listening mode ONCE (flipping it mid-session only produces drift) and seed the
+    // tracker with the technician's chosen source language for the first utterance.
+    twoWay = config.getTwoWay?.() ?? false;
+    tracker = createDirectionTracker(startOpts.sourceLanguage);
+    settledDir.clear();
     running = true;
     sessionGen += 1; // new session generation — stale fetches from any prior session are now ignored
     sessionReady = false;
