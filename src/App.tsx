@@ -19,6 +19,7 @@ import Toaster from './components/Toaster'
 import ErrorBoundary from './components/ErrorBoundary'
 import { LiveSessionProvider } from './lib/LiveSessionContext'
 import { ActiveEventProvider } from './lib/ActiveEventContext'
+import { ConferenceModeProvider } from './lib/ConferenceModeContext'
 
 const App: React.FC = () => {
   // The ESUHAI intro splash only plays on the home page ("/"), then redirects into the
@@ -30,6 +31,7 @@ const App: React.FC = () => {
 
   return (
     <LiveSessionProvider>
+      <ConferenceModeProvider>
       <ActiveEventProvider>
       <Toaster />
       <div className="bg-background min-h-screen">
@@ -52,9 +54,13 @@ const App: React.FC = () => {
               <Route path="/speakers" element={<SpeakerMemory />} />
               <Route path="/documents" element={<DocumentsLibrary />} />
               {/* Dịch hội nghị — TRONG shell: giữ headbar + pill "Dịch hội nghị" sáng; thanh điều khiển
-                  riêng của bàn điều khiển đóng vai side menu (OperatorLayout ẩn sidebar shell cho menu ops). */}
-              <Route path="/audio" element={<AudioRouting />} />
+                  riêng của bàn điều khiển đóng vai side menu (OperatorLayout ẩn sidebar shell cho menu ops).
+                  Route = /console (tên "/audio" nói về thiết bị âm thanh, không phải bàn điều khiển). */}
+              <Route path="/console" element={<AudioRouting />} />
             </Route>
+
+            {/* /audio là tên cũ → giữ redirect cho bookmark & cửa sổ đã mở. */}
+            <Route path="/audio" element={<Navigate to="/console" replace />} />
 
             {/* Audience / ceremonial surfaces are full-screen — no operator chrome. */}
             <Route path="/reveal" element={<RevealMoment />} />
@@ -69,6 +75,7 @@ const App: React.FC = () => {
         )}
       </div>
       </ActiveEventProvider>
+      </ConferenceModeProvider>
     </LiveSessionProvider>
   )
 }

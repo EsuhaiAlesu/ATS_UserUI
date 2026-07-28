@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { useLiveSession, isSessionActive } from '../lib/LiveSessionContext';
 import type { LiveStatus } from '../lib/LiveSessionContext';
+import { useConferenceMode } from '../lib/ConferenceModeContext';
 import { hasUnsaved } from '../lib/guards';
 import EventSwitcher from './EventSwitcher';
 
@@ -27,8 +28,8 @@ const MENUS: Menu[] = [
         { label: 'Tình trạng', icon: 'monitor_heart', desc: 'Hệ thống thời gian thực', to: '/report', hash: 'status' },
         { label: 'Nhật ký', icon: 'history', desc: 'Hoạt động từng phiên', to: '/report', hash: 'log' },
     ] },
-    { key: 'ops', label: 'Dịch hội nghị', match: ['/audio'], tools: [
-        { label: 'Điều khiển', icon: 'tune', desc: 'Bàn dịch trực tiếp', to: '/audio' },
+    { key: 'ops', label: 'Dịch hội nghị', match: ['/console', '/audio'], tools: [
+        { label: 'Điều khiển', icon: 'tune', desc: 'Bàn dịch trực tiếp', to: '/console' },
         { label: 'Phụ đề', icon: 'subtitles', desc: 'Màn chiếu cho khán giả', to: '/stream', external: true },
         { label: 'Reveal', icon: 'auto_awesome', desc: 'Màn công bố khoảnh khắc', to: '/reveal', external: true },
     ] },
@@ -63,6 +64,7 @@ const scrollToHash = (id: string) =>
 
 const OperatorLayout: React.FC = () => {
     const session = useLiveSession();
+    const { mode, setMode, busy, requestStop } = useConferenceMode();
     const loc = useLocation();
     const nav = useNavigate();
     const m = master(session.backendOnline, session.status);
@@ -196,23 +198,56 @@ const OperatorLayout: React.FC = () => {
                     </button>
                     <div className="hidden xl:block"><EventSwitcher /></div>
                 </div>
-                {/* Đèn trạng thái — chỉ dùng màu, không viền */}
-                <div role="status" aria-live="polite" aria-label={`Trạng thái: ${m.text}`} className="flex items-center gap-2 mr-1 md:mr-2 shrink-0">
-                    <span className={`w-2.5 h-2.5 rounded-full ${m.dot}`} aria-hidden="true"></span>
-                    {/* Chữ trạng thái ẩn dưới sm (chấm màu vẫn là chỉ báo trạng thái) để header không tràn trên điện thoại */}
-                    <span className={`hidden sm:inline text-[11px] font-semibold tracking-[0.1em] leading-none ${m.cls}`}>{m.text}</span>
-                </div>
-                {/* Dừng khẩn cấp — control duy nhất màu đỏ, luôn sẵn sàng; dưới sm chỉ hiện icon (nhãn ẩn) */}
-                <button onClick={() => session.stop()} title="Dừng phiên ngay (khẩn cấp)" aria-label="Dừng phiên khẩn cấp"
-                    className="shrink-0 flex items-center gap-1.5 h-9 px-2.5 md:px-3 rounded-lg border border-error text-error hover:bg-error hover:text-on-error transition-colors">
-                    <span className="material-symbols-outlined text-[20px]" aria-hidden="true">pan_tool</span>
-                    <span className="hidden sm:inline text-[11px] font-semibold tracking-[0.06em] leading-none">DỪNG</span>
-                </button>
+                {/* ══ Cụm điều khiển phiên (chuyển luồng · đèn trạng thái · DỪNG) ══
+                    Chỉ hiện trên bàn điều khiển (ops), HOẶC khi một phiên OFFLINE vẫn đang chạy sau khi
+                    rời trang (để DỪNG luôn trong tầm tay). Trên Chuẩn bị/Báo cáo/Cài đặt khi KHÔNG có phiên
+                    thì ẩn cả cụm — nếu không người dùng đọc "OFFLINE + DỪNG" là tưởng đang có gì đó lỗi. */}
+                {(opsActive || isSessionActive(session.status)) && (
+                <>
+                    {/* Chuyển luồng OFFLINE|ONLINE — chỉ khi đang ở bàn điều khiển (luồng vô nghĩa ở trang khác).
+                        Khoá khi đang chạy: never two captures. Nhãn "LUỒNG" chỉ hiện từ xl. */}
+                    {opsActive && (
+                        <div className="flex items-center gap-1.5 mr-1 shrink-0">
+                            <span className="hidden xl:inline font-label-caps text-[10px] tracking-[0.14em] text-on-surface-variant/60 select-none">LUỒNG</span>
+                            <div className="flex items-center gap-0.5 rounded-full border border-outline-variant bg-surface p-0.5" role="group" aria-label="Luồng dịch">
+                                {(['offline', 'online'] as const).map((lm) => (
+                                    <button key={lm} type="button" disabled={busy} onClick={() => setMode(lm)}
+                                        aria-pressed={mode === lm}
+                                        title={busy ? 'Đang chạy — hãy Dừng trước khi đổi luồng' : (lm === 'online' ? 'ONLINE — dịch qua dịch vụ đám mây' : 'OFFLINE — dịch qua máy chủ nội bộ')}
+                                        className={`h-7 px-2.5 rounded-full text-[11px] font-bold tracking-wide transition-colors ${mode === lm ? (lm === 'online' ? 'bg-secondary text-on-secondary shadow' : 'bg-primary text-on-primary shadow') : 'text-on-surface-variant hover:text-on-surface'} ${busy ? 'opacity-50 cursor-not-allowed' : ''}`}>
+                                        {lm === 'offline' ? 'OFFLINE' : 'ONLINE'}
+                                    </button>
+                                ))}
+                            </div>
+                        </div>
+                    )}
+                    {/* Đèn trạng thái đọc backend OFFLINE — trên luồng ONLINE bàn điều khiển có annunciator riêng,
+                        nên ẩn đèn này trừ khi một phiên OFFLINE thực sự đang chạy (kẻo in "OFFLINE" cạnh "ONLINE"). */}
+                    {(mode === 'offline' || isSessionActive(session.status)) && (
+                        <div role="status" aria-live="polite" aria-label={`Trạng thái: ${m.text}`} className="flex items-center gap-2 mr-1 md:mr-2 shrink-0">
+                            <span className={`w-2.5 h-2.5 rounded-full ${m.dot}`} aria-hidden="true"></span>
+                            {/* Chữ trạng thái ẩn dưới sm (chấm màu vẫn là chỉ báo trạng thái) để header không tràn trên điện thoại */}
+                            <span className={`hidden sm:inline text-[11px] font-semibold tracking-[0.1em] leading-none ${m.cls}`}>{m.text}</span>
+                        </div>
+                    )}
+                    {/* Dừng khẩn cấp — dừng luồng nào đang sống. ẨN trên luồng ONLINE (bàn điều khiển có nút
+                        "Dừng dịch" đỏ to hơn ngay trên rail), NHƯNG giữ lại bất cứ khi nào một phiên OFFLINE
+                        còn chạy (đó là cách duy nhất để dừng nó từ đây). Không đổi thành mode==='offline':
+                        như vậy sẽ mất nút dừng khẩn khi ai đó gạt luồng lúc phiên OFFLINE đang sống. */}
+                    {!(mode === 'online' && !isSessionActive(session.status)) && (
+                        <button onClick={() => { session.stop(); requestStop(); }} title="Dừng phiên ngay (khẩn cấp)" aria-label="Dừng phiên khẩn cấp"
+                            className="shrink-0 flex items-center gap-1.5 h-9 px-2.5 md:px-3 rounded-lg border border-error text-error hover:bg-error hover:text-on-error transition-colors">
+                            <span className="material-symbols-outlined text-[20px]" aria-hidden="true">pan_tool</span>
+                            <span className="hidden sm:inline text-[11px] font-semibold tracking-[0.06em] leading-none">DỪNG</span>
+                        </button>
+                    )}
+                </>
+                )}
             </header>
 
             {/* ══════════ BODY: contextual sidebar + content ══════════ */}
             <div className="flex-1 min-h-0 flex overflow-hidden">
-                {/* Menu "Dịch hội nghị" (/audio) tự có thanh điều khiển riêng làm side menu → KHÔNG hiện
+                {/* Menu "Dịch hội nghị" (/console) tự có thanh điều khiển riêng làm side menu → KHÔNG hiện
                     sidebar ngữ cảnh của shell ở đây (tránh 2 thanh trùng nhau). Headbar vẫn giữ nguyên. */}
                 {cur.key !== 'ops' && (
                 <aside className={`hidden xl:flex flex-col shrink-0 border-r border-outline-variant shell-rail rail-aside font-jakarta overflow-hidden ${collapsed ? 'w-16' : 'w-[248px]'}`}>

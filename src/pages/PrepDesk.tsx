@@ -293,7 +293,7 @@ const PrepDesk: React.FC = () => {
                 id: 'backend-reachable', label: 'Lõi dịch phản hồi (backend health.ok)', phase: 'pre', weight: 'blocker', kind: 'measured',
                 state: session.backendOnline ? 'ok' : 'fail',
                 detail: session.backendOnline ? `Online tại ${API_BASE || '127.0.0.1:8080'}` : `Không phản hồi — ${API_BASE || '127.0.0.1:8080'}`,
-                to: '/audio', toLabel: 'Mở console',
+                to: '/console', toLabel: 'Mở console',
             },
             {
                 id: 'pipeline-registered', label: 'Đồ hình xử lý đã đăng ký (STT·MT·TTS)', phase: 'pre', weight: 'important', kind: 'measured',
@@ -305,8 +305,8 @@ const PrepDesk: React.FC = () => {
                 state: warm ? 'ok' : 'fail',
                 detail: prep.reachedReadyTs ? `Đã quan sát READY (${fmtTs(prep.reachedReadyTs)}) trong phiên trình duyệt này`
                     : (session.status === 'ready' || session.status === 'listening') ? 'Đang READY/LIVE ngay bây giờ'
-                        : 'Chưa quan sát WARMING→READY — chạy dry-run START ở /audio (rủi ro Metal≠CUDA lớn nhất)',
-                to: '/audio', toLabel: 'Dry-run START→READY',
+                        : 'Chưa quan sát WARMING→READY — chạy dry-run START ở /console (rủi ro Metal≠CUDA lớn nhất)',
+                to: '/console', toLabel: 'Dry-run START→READY',
             },
             {
                 id: 'script-approved', label: 'Kịch bản song ngữ có dòng ĐÃ DUYỆT', phase: 'pre', weight: 'important', kind: 'measured',
@@ -332,14 +332,14 @@ const PrepDesk: React.FC = () => {
             {
                 id: 'mic-present', label: 'Backend thấy thiết bị mic', phase: 'pre', weight: 'important', kind: 'measured',
                 state: data.inputsErr ? 'unknown' : ((data.inputs ?? 0) >= 1 ? 'ok' : 'fail'),
-                detail: data.inputsErr ? 'chưa đo được' : `${data.inputs ?? 0} mic — còn phải CHỌN & khoá mic sân khấu ở /audio`,
-                to: '/audio', toLabel: 'Chọn mic',
+                detail: data.inputsErr ? 'chưa đo được' : `${data.inputs ?? 0} mic — còn phải CHỌN & khoá mic sân khấu ở /console`,
+                to: '/console', toLabel: 'Chọn mic',
             },
             {
                 id: 'outputs-split', label: 'Đủ ≥2 ngõ loa để tách VI ≠ JA', phase: 'pre', weight: 'important', kind: 'measured',
                 state: data.outputsErr ? 'unknown' : ((data.outputs ?? 0) >= 2 ? 'ok' : 'fail'),
                 detail: data.outputsErr ? 'chưa đo được' : `${data.outputs ?? 0} ngõ ra`,
-                to: '/audio', toLabel: 'Gán ngõ ra',
+                to: '/console', toLabel: 'Gán ngõ ra',
             },
             {
                 id: 'network-loopback', label: 'Chạy loopback — KHÔNG trỏ cloud', phase: 'pre', weight: 'important', kind: 'measured',
@@ -387,7 +387,7 @@ const PrepDesk: React.FC = () => {
             {
                 id: 'cut-to-safe', label: 'Nút CUT-TO-SAFE (freeze/slate) đã tập', phase: 'in', weight: 'important', kind: 'attest',
                 state: attState('cut-to-safe'),
-                detail: `cắt hiện tại: ${session.audienceCut} — ký 'đã tập freeze/slate từ /audio xuống /stream + ≥1 cửa sổ LED đang mở'`,
+                detail: `cắt hiện tại: ${session.audienceCut} — ký 'đã tập freeze/slate từ /console xuống /stream + ≥1 cửa sổ LED đang mở'`,
             },
             {
                 id: 'recording-armed', label: 'Đã xác nhận GHI phiên ở backend (Mac Studio)', phase: 'in', weight: 'nice', kind: 'attest',
@@ -521,7 +521,7 @@ const PrepDesk: React.FC = () => {
                         {nextBlocker?.to
                             ? <Link to={nextBlocker.to} className={`shrink-0 flex items-center gap-1.5 border border-outline-variant px-4 py-2 rounded-full font-label-caps text-label-caps hover:bg-surface-container transition-colors ${tone.text}`}>{nextBlocker.toLabel ?? 'Xử lý'}<span className="material-symbols-outlined text-[18px]" aria-hidden="true">arrow_forward</span></Link>
                             : verdict === 'GO'
-                                ? <Link to="/audio" className={`shrink-0 flex items-center gap-1.5 border border-outline-variant px-4 py-2 rounded-full font-label-caps text-label-caps hover:bg-surface-container transition-colors ${tone.text}`}>Vào điều khiển<span className="material-symbols-outlined text-[18px]" aria-hidden="true">arrow_forward</span></Link>
+                                ? <Link to="/console" className={`shrink-0 flex items-center gap-1.5 border border-outline-variant px-4 py-2 rounded-full font-label-caps text-label-caps hover:bg-surface-container transition-colors ${tone.text}`}>Vào điều khiển<span className="material-symbols-outlined text-[18px]" aria-hidden="true">arrow_forward</span></Link>
                                 : null}
                     </div>
 
@@ -529,7 +529,7 @@ const PrepDesk: React.FC = () => {
                         {/* In-event quick actions */}
                     {selPhase === 'in' && (
                         <div className="grid sm:grid-cols-3 gap-3">
-                            <Link to="/audio" className="flex items-center justify-center gap-2 bg-primary text-on-primary rounded-xl px-4 py-3.5 font-label-caps text-label-caps hover:opacity-90"><span className="material-symbols-outlined text-[20px]" aria-hidden="true">tune</span>Điều khiển</Link>
+                            <Link to="/console" className="flex items-center justify-center gap-2 bg-primary text-on-primary rounded-xl px-4 py-3.5 font-label-caps text-label-caps hover:opacity-90"><span className="material-symbols-outlined text-[20px]" aria-hidden="true">tune</span>Điều khiển</Link>
                             <Link to="/stream" className="btn-lux flex items-center justify-center gap-2 bg-secondary text-on-secondary rounded-xl px-4 py-3.5 font-label-caps text-label-caps hover:opacity-90"><span className="material-symbols-outlined text-[20px]" aria-hidden="true">subtitles</span>Tường phụ đề</Link>
                             <Link to="/reveal" className="flex items-center justify-center gap-2 border border-outline-variant text-on-surface-variant rounded-xl px-4 py-3.5 font-label-caps text-label-caps hover:border-primary"><span className="material-symbols-outlined text-[20px]" aria-hidden="true">auto_awesome</span>Reveal</Link>
                         </div>

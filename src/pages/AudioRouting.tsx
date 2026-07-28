@@ -16,6 +16,7 @@ import { useActiveEvent } from '../lib/ActiveEventContext';
 import { computeReadiness, TIER_LABEL } from '../lib/readiness';
 // FIX-07: ONLINE mode integration — a sanctioned facade-root import (live-screen mode switch).
 import { OnlinePanel, fetchOnlineConfigStatus } from '../lib/lanes/online';
+import { useConferenceMode } from '../lib/ConferenceModeContext';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Operator console as a clean video-meeting cockpit (Zoom/Teams pattern):
@@ -1086,40 +1087,10 @@ const OfflineConsole: React.FC = () => {
     );
 };
 
-// ══════════ FIX-07: ONLINE / OFFLINE mode switch on the live conference screen ══════════
-
-const ONLINE_MODE_KEY = 'proyaku_conference_mode';
-
-// Labelled segmented control for the translation lane. Disabled while a session is live (never two
-// captures). Visible in BOTH modes. Responsive: below md it sits in normal flow as a full-width top
-// bar (never overlapping content); at md+ it floats top-right. ONLINE is the current default.
-const ModePill: React.FC<{ mode: 'offline' | 'online'; disabled: boolean; onChange: (m: 'offline' | 'online') => void }> = ({ mode, disabled, onChange }) => (
-    <div
-        className="z-50 flex items-center gap-2 border-outline-variant bg-surface-container-lowest shadow-xl max-xl:w-full max-xl:justify-between max-xl:border-b max-xl:px-3 max-xl:py-2 xl:absolute xl:top-3 xl:right-4 xl:rounded-full xl:border xl:pl-3 xl:pr-1.5 xl:py-1.5"
-        title={disabled ? 'Dừng phiên hiện tại để đổi chế độ' : 'Chọn luồng dịch: OFFLINE (máy chủ nội bộ) hoặc ONLINE (đám mây)'}
-    >
-        <div className="flex items-center gap-2 min-w-0">
-            <span className="material-symbols-outlined text-[18px] text-secondary shrink-0" aria-hidden="true">hub</span>
-            <span className="font-label-caps text-label-caps text-on-surface-variant select-none truncate">Luồng dịch</span>
-        </div>
-        <div className="flex items-center gap-0.5 bg-surface rounded-full p-0.5 shrink-0">
-            {(['offline', 'online'] as const).map((m) => (
-                <button
-                    key={m}
-                    type="button"
-                    disabled={disabled}
-                    onClick={() => onChange(m)}
-                    title={m === 'online' ? 'ONLINE — dịch qua dịch vụ đám mây · mặc định (cần nhập khóa trong Cài đặt)' : 'OFFLINE — dịch qua máy chủ nội bộ (chưa nối vào bản deploy này)'}
-                    className={`px-3.5 py-1.5 rounded-full text-sm font-bold transition-colors ${
-                        mode === m ? (m === 'online' ? 'bg-secondary text-on-secondary shadow' : 'bg-primary text-on-primary shadow') : 'text-on-surface-variant hover:text-on-surface'
-                    } ${disabled ? 'opacity-50 cursor-not-allowed' : ''}`}
-                >
-                    {m === 'offline' ? 'OFFLINE' : 'ONLINE'}
-                </button>
-            ))}
-        </div>
-    </div>
-);
+// ══════════ ONLINE / OFFLINE console — the lane switch now lives in the HEAD BAR ══════════
+// The segmented "Luồng dịch" pill that used to float on this page was removed: OperatorLayout renders
+// the switch in the head-bar right cluster, and this page reads the chosen lane from the neutral
+// ConferenceModeContext. (Prompt-09 TASK 2 — moved to stop it overlapping the settings drawer.)
 
 const MissingKeysModal: React.FC<{ onClose: () => void; onGoSettings: () => void }> = ({ onClose, onGoSettings }) => (
     <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 p-4" onClick={onClose}>
@@ -1167,31 +1138,36 @@ const OnlineConferenceMode: React.FC<{ onRunningChange: (running: boolean) => vo
     );
 };
 
-// Default export: mode switch over the (unchanged) OFFLINE console.
-// Default = ONLINE — the self-hosted OFFLINE backend is not wired into this deployment yet, so a fresh
-// browser should open the lane that actually works. A stored user choice always wins, in BOTH directions.
+// Default export: render the OFFLINE console or the ONLINE branch per the neutral ConferenceModeContext
+// (the head-bar switch owns the choice now). Default = ONLINE — the self-hosted OFFLINE backend is not
+// wired into this deployment yet, so a fresh browser opens the lane that works; a stored choice wins.
+// The OFFLINE console (OfflineConsole) is UNCHANGED. This wrapper also registers the OFFLINE stop and
+// reports its running state to the context, so the head-bar DỪNG can stop the offline lane from anywhere
+// — without touching OfflineConsole itself.
 const AudioRouting: React.FC = () => {
     const session = useLiveSession();
     const offlineLive = isSessionActive(session.status);
-    // Only an explicit stored 'offline' selects OFFLINE; unset / 'online' → ONLINE (the new default).
-    const [mode, setMode] = useState<'offline' | 'online'>(() => (localStorage.getItem(ONLINE_MODE_KEY) === 'offline' ? 'offline' : 'online'));
-    const [onlineRunning, setOnlineRunning] = useState(false);
-    // Never two captures: block a mode change while EITHER lane is live (user must Stop first).
-    const selectorDisabled = mode === 'online' ? onlineRunning : offlineLive;
-    const changeMode = (m: 'offline' | 'online') => {
-        if (selectorDisabled || m === mode) return;
-        setMode(m);
-        try { localStorage.setItem(ONLINE_MODE_KEY, m); } catch { /* ignore */ }
-    };
+    const { mode, setBusy, registerStop } = useConferenceMode();
+
+    // Report OFFLINE running to the context (disables the head-bar switch; drives cluster visibility).
+    // The ONLINE branch reports its own running via onRunningChange below.
+    useEffect(() => {
+        if (mode === 'offline') setBusy(offlineLive);
+    }, [mode, offlineLive, setBusy]);
+
+    // Register the OFFLINE stop for the head-bar DỪNG's requestStop() while this lane is shown.
+    useEffect(() => {
+        if (mode !== 'offline') return;
+        registerStop(() => session.stop());
+        return () => registerStop(null);
+    }, [mode, registerStop, session]);
+
     return (
         <div className="h-full w-full relative flex flex-col">
-            {/* ModePill kept FIRST: below md it is the normal-flow top bar; at md+ it is md:absolute
-                (out of flow) and the content below takes the full height. */}
-            <ModePill mode={mode} disabled={selectorDisabled} onChange={changeMode} />
-            {/* Switching to OFFLINE unmounts the online panel → its useOnlineLane cleanup releases the mic
-                fully before the offline lane can claim it (and vice-versa). */}
+            {/* Switching lanes unmounts the other one → useOnlineLane cleanup releases the mic fully before
+                the other lane can claim it (never two captures). */}
             <div className="flex-1 min-h-0">
-                {mode === 'offline' ? <OfflineConsole /> : <OnlineConferenceMode onRunningChange={setOnlineRunning} />}
+                {mode === 'offline' ? <OfflineConsole /> : <OnlineConferenceMode onRunningChange={setBusy} />}
             </div>
         </div>
     );

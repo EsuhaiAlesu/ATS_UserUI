@@ -10,7 +10,7 @@ import { OnlineKeysSettings } from '../lib/lanes/online';
 
 // Central Settings page (Giai đoạn 1) — consolidates the scattered per-feature config into one
 // professional place: Kết nối · Sự kiện · Hiển thị · Giọng đọc · Tài khoản · Dữ liệu · Giới thiệu.
-// Session-contextual device/model pickers stay in the /audio drawer on purpose (chosen per session).
+// Session-contextual device/model pickers stay in the /console drawer on purpose (chosen per session).
 
 const APP_VERSION = '1.0 · 2026-07';
 // text-base on mobile (≥16px) so iOS does not zoom on focus; text-sm from sm up keeps the desktop look.
