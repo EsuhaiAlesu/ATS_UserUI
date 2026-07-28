@@ -16,6 +16,7 @@ import { WebSocketServer, WebSocket } from 'ws';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { getOnlineConfig, getConfigStatus, setOnlineConfig } from './online-config.mjs';
+import { createHash } from 'node:crypto';
 
 const env = (name, fallback = '') => (process.env[name] ?? fallback).trim();
 const num = (name, fallback) => {
@@ -42,6 +43,7 @@ const viVoiceId = () => getOnlineConfig('VI_ELEVENLABS_VOICE_ID');
 const ELEVENLABS_MODEL_ID = env('ELEVENLABS_MODEL_ID', 'eleven_flash_v2_5');
 const ELEVENLABS_OUTPUT_FORMAT = env('ELEVENLABS_OUTPUT_FORMAT', 'mp3_22050_32');
 const ELEVENLABS_TIMEOUT_MS = num('ELEVENLABS_TIMEOUT_MS', 15_000);
+const TTS_VOICE_CATALOG_TTL_MS = num('TTS_VOICE_CATALOG_TTL_MS', 5 * 60 * 1000);
 
 const HISTORY_DIR = env('ONLINE_HISTORY_DIR', './translated_history');
 const MAX_TEXT_CHARS = 12_000;
@@ -365,6 +367,54 @@ async function synthesizeSpeech(text, language, voiceId, emotion, speed, res) {
   if (!res.writableEnded) res.end();
 }
 
+// ---------- TTS voice catalog (TASK 5) : opaque slugs only, cached in-process ----------
+// The provider's real voice id must NEVER reach the browser (CLAUDE.md rule 6). The client sees an
+// opaque, stable slug; the server keeps a slug→realId map to resolve a chosen voice at TTS time.
+const slugOfVoice = (voiceId) => 'v_' + createHash('sha256').update(String(voiceId)).digest('hex').slice(0, 12);
+let voiceCatalog = { at: 0, list: [] };
+const slugToVoiceId = new Map();
+
+const voiceLangLabel = (v) => {
+  const l = (v && typeof v.labels === 'object' && v.labels) || {};
+  return String(l.language || l.accent || (v && v.fine_tuning && v.fine_tuning.language) || '').toLowerCase();
+};
+const voiceLangMatches = (labelStr, requested) => {
+  if (!labelStr) return true; // no label → multilingual → keep (else the list would come back empty)
+  if (requested === 'ja') return /ja|japan|日本/.test(labelStr);
+  if (requested === 'vi') return /vi|viet|việt/.test(labelStr);
+  return true;
+};
+// "my voices" (cloned / professional / generated / personal) sort first.
+const voiceCategoryOf = (v) => (/clone|professional|generated|personal/.test(String((v && v.category) || '').toLowerCase()) ? 'personal' : 'standard');
+const pickVoiceLabels = (labels) => {
+  const l = labels && typeof labels === 'object' ? labels : {};
+  const out = {};
+  for (const k of ['accent', 'gender', 'age', 'use_case', 'description', 'descriptive']) {
+    if (typeof l[k] === 'string' && l[k]) out[k] = l[k];
+  }
+  return out;
+};
+
+// Fetch (and cache, 5 min, ≤200) the account's voice list. Throws {code:503} with no key, {code:502}
+// when the provider does not answer — both non-fatal for the UI.
+async function fetchVoiceCatalog() {
+  const now = Date.now();
+  if (voiceCatalog.list.length && now - voiceCatalog.at < TTS_VOICE_CATALOG_TTL_MS) return voiceCatalog.list;
+  const key = elevenApiKey();
+  if (!key) { const e = new Error('TTS key not configured'); e.code = 503; throw e; }
+  let resp;
+  try {
+    resp = await withTimeout(fetch('https://api.elevenlabs.io/v1/voices', { headers: { 'xi-api-key': key } }), ELEVENLABS_TIMEOUT_MS, 'Voice catalog');
+  } catch { const e = new Error('Voice catalog request failed'); e.code = 502; throw e; }
+  if (!resp.ok) { const e = new Error(`Voice catalog HTTP ${resp.status}`); e.code = 502; throw e; }
+  const data = await resp.json().catch(() => ({}));
+  const raw = Array.isArray(data && data.voices) ? data.voices.slice(0, 200) : [];
+  voiceCatalog = { at: now, list: raw };
+  slugToVoiceId.clear();
+  for (const v of raw) { const id = String((v && v.voice_id) || ''); if (id) slugToVoiceId.set(slugOfVoice(id), id); }
+  return raw;
+}
+
 // ---------- raw-http request/response helpers ----------
 function sendJson(res, status, obj) {
   const body = JSON.stringify(obj);
@@ -578,6 +628,31 @@ export function installOnlineApi(server, { requireAuth } = {}) {
         return true;
       }
 
+      if (pathname === '/online-api/voices' && req.method === 'GET') {
+        const language = normalizeLanguage(url.searchParams.get('language'), 'ja');
+        try {
+          const raw = await fetchVoiceCatalog();
+          const configured = language === 'vi' ? viVoiceId() : jaVoiceId();
+          // Build each entry field by field — NEVER spread the provider object, or a future API version
+          // leaks a new field (e.g. the real voice id) into the client bundle (CLAUDE.md rule 6).
+          const voices = raw
+            .filter((v) => voiceLangMatches(voiceLangLabel(v), language))
+            .map((v) => ({
+              slug: slugOfVoice(String((v && v.voice_id) || '')),
+              name: String((v && v.name) || ''),
+              language,
+              category: voiceCategoryOf(v),
+              labels: pickVoiceLabels(v && v.labels),
+            }))
+            .sort((a, b) => (a.category === b.category ? a.name.localeCompare(b.name) : a.category === 'personal' ? -1 : 1));
+          sendJson(res, 200, { voices, current: configured ? slugOfVoice(configured) : '', cachedAt: voiceCatalog.at });
+        } catch (error) {
+          const code = error && error.code === 503 ? 503 : 502;
+          sendJson(res, code, { error: code === 503 ? 'TTS voice service is not configured.' : 'Voice catalog is not responding.' });
+        }
+        return true;
+      }
+
       if (pathname === '/online-api/tts' && req.method === 'POST') {
         const body = await readJsonBody(req, 1 * 1024 * 1024);
         try {
@@ -589,7 +664,19 @@ export function installOnlineApi(server, { requireAuth } = {}) {
             sendJson(res, 400, { error: 'text is required.' });
             return true;
           }
-          const voiceId = language === 'vi' ? viVoiceId() : jaVoiceId();
+          let voiceId = language === 'vi' ? viVoiceId() : jaVoiceId();
+          // Optional voice override arrives as an opaque slug; resolve it via the cached catalog. An
+          // unknown / unresolvable slug silently falls back to the configured voice — picking a voice is
+          // a convenience and must never be able to fail the audio path mid-ceremony.
+          const voiceSlug = typeof body?.voice === 'string' ? body.voice.trim() : '';
+          if (voiceSlug) {
+            let resolved = slugToVoiceId.get(voiceSlug);
+            if (!resolved && slugToVoiceId.size === 0) {
+              try { await fetchVoiceCatalog(); } catch { /* keep the configured voice */ }
+              resolved = slugToVoiceId.get(voiceSlug);
+            }
+            if (resolved) voiceId = resolved;
+          }
           if (!elevenApiKey() || !voiceId) {
             sendJson(res, 503, { error: `TTS is not configured for language "${language}".` });
             return true;

@@ -52,9 +52,16 @@
 
 ---
 
+## PHASE 2 — Nội dung buổi dịch + Giọng đọc (TASK 4·5) — commit C (`__C__`)
+- **Xong:** `prepData.ts` (lane-neutral: nạp Từ điển `/api` + roster + script + schedule → `terms`+`brief`; rank 0 tên diễn giả/hotword · 1 alias/name-company · 2 còn lại; dedup không phân biệt hoa-thường; cắt 40 dòng/2000 ký tự + đếm `dropped`; không bao giờ throw) + test **6/6**. Server `GET /online-api/voices` (slug đục `v_+sha256(voiceId)[:12]`, cache 5', ≤200, personal-first, 503 không key/502 không đáp, build field-by-field) + `/tts` nhận `voice` slug (resolve qua cache → fallback giọng cài sẵn). `ttsPlayback`: `setTtsVoice`/`setTtsManualSpeed` (manual thắng). Facade: `voices/voicesStatus/refreshVoices/voiceJa·vi/speedMode/manualSpeed/ONLINE_SPEED_RANGE` (persist localStorage). `OnlineConsole`: tự nạp 1 lần/(event×direction) CHỈ vào ô rỗng + nút "Nạp từ Chuẩn bị" (ghi đè) + dòng đếm (`N thuật ngữ · M mục từ điển · K diễn giả` + "còn … vượt 40 dòng" + "chưa với tới Từ điển máy chủ") + flyout "Giọng đọc" (2 dropdown personal-first + auto/manual + slider + tải lại).
+- **Cổng:** `node --check` server OK · lint **4 warning** (0 mới) · test **36/36** · build OK · **red-light PASS:** AudioRouting KHÔNG đổi · bundle **0** hit (elevenlabs/xi-api-key/host/model/env). Render trực tiếp không lỗi runtime.
+- **Tự quyết/owed:** brief lấy `chức danh · đơn vị` = ghép `role` (schedule) + `org` (roster lookup theo tên). **OWED (Phase 9 live):** danh mục giọng thật + 2 tốc độ áp câu-kế-tiếp cần TTS key thật + phiên sống. Không đụng treaty/offline.
+
 ## DANH SÁCH CÒN NỢ (owed — chứng minh ở Phase 8 khô / Phase 9 sống)
 - **[Phase 1]** Khoá công tắc lane khi đang chạy (cần phiên sống) — logic: switch `disabled={busy}`, `busy` do console báo qua context.
 - **[Phase 1]** DỪNG head bar dừng một phiên OFFLINE đang chạy thật từ Chuẩn bị/Báo cáo/Cài đặt (cần backend OFFLINE sống).
+- **[Phase 2]** Danh mục giọng theo tên (personal-first) + đổi giọng/tốc độ áp từ câu kế tiếp — cần TTS key thật (voices trả 503 khi chưa có key).
+- **[Phase 2]** `/online-api/voices` body không lộ voice id thật (kiểm shape ở Phase 8 khô; kiểm với key thật ở Phase 9).
 - *(bổ sung dần theo từng phase — mọi hạng mục cần "câu nói thật + khoá thật + mic thật")*
 
 ## SỰ CỐ (incidents — nguyên văn lỗi)

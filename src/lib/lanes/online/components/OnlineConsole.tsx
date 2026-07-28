@@ -13,8 +13,10 @@
 
 import React, { useCallback, useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { useOnlineLane, fetchOnlineConfigStatus, type LaneStatus } from '../index'
+import { useOnlineLane, fetchOnlineConfigStatus, ONLINE_SPEED_RANGE, type LaneStatus, type OnlineVoice } from '../index'
 import { useConferenceMode } from '../../../ConferenceModeContext'
+import { useActiveEvent } from '../../../ActiveEventContext'
+import { collectPrepPack, type PrepPack } from '../../../prepData'
 
 type CfgStatus = Awaited<ReturnType<typeof fetchOnlineConfigStatus>>
 
@@ -106,12 +108,13 @@ const MissingKeysModal: React.FC<{ onClose: () => void; onGoSettings: () => void
   </div>
 )
 
-type Panel = 'gate' | 'terms' | 'brief' | null
+type Panel = 'gate' | 'voice' | 'terms' | 'brief' | null
 
 const OnlineConsole: React.FC = () => {
   const nav = useNavigate()
   const lane = useOnlineLane()
   const { setBusy, registerStop } = useConferenceMode()
+  const { event } = useActiveEvent()
 
   const [panel, setPanel] = useState<Panel>(null)
   const [settingsOpen, setSettingsOpen] = useState(false)
@@ -119,6 +122,8 @@ const OnlineConsole: React.FC = () => {
   const [showKeyModal, setShowKeyModal] = useState(false)
   const [isFs, setIsFs] = useState(false)
   const [elapsed, setElapsed] = useState(0)
+  const [prep, setPrep] = useState<PrepPack | null>(null)
+  const prepLoadedRef = useRef('')
 
   // Report running state + register the stop function to the neutral context, so the head-bar DỪNG can
   // relay to this lane and the lane switch locks while a capture is live. (ConferenceModeContext is
@@ -162,6 +167,47 @@ const OnlineConsole: React.FC = () => {
     if (!ready) { setShowKeyModal(true); return }
     try { await lane.start() } catch { /* lane surfaces the error via lane.error */ }
   }, [lane])
+
+  // ── TASK 4: fill the Thuật ngữ / Bối cảnh boxes from the Chuẩn bị stores ──
+  const loadPrep = async (overwrite: boolean) => {
+    const pack = await collectPrepPack(event, lane.direction)
+    setPrep(pack)
+    if (overwrite) { lane.setTerms(pack.terms); lane.setBrief(pack.brief) }
+  }
+  // Auto-load once per (event × direction), and only into boxes that are still empty — auto-fill must
+  // never overwrite something the technician typed.
+  useEffect(() => {
+    const key = `${event?.id ?? ''}|${lane.direction}`
+    if (prepLoadedRef.current === key) return
+    prepLoadedRef.current = key
+    let cancelled = false
+    void collectPrepPack(event, lane.direction).then((pack) => {
+      if (cancelled) return
+      setPrep(pack)
+      if (!lane.terms.trim()) lane.setTerms(pack.terms)
+      if (!lane.brief.trim()) lane.setBrief(pack.brief)
+    })
+    return () => { cancelled = true }
+  }, [event, lane.direction, lane])
+
+  const voiceOptions = (list: OnlineVoice[]) => {
+    const personal = list.filter((v) => v.category === 'personal')
+    const rest = list.filter((v) => v.category !== 'personal')
+    return (
+      <>
+        {personal.length > 0 && <optgroup label="Giọng của tôi">{personal.map((v) => <option key={v.slug} value={v.slug}>{v.name}</option>)}</optgroup>}
+        {rest.length > 0 && <optgroup label="Giọng có sẵn">{rest.map((v) => <option key={v.slug} value={v.slug}>{v.name}</option>)}</optgroup>}
+      </>
+    )
+  }
+
+  const prepCounts = prep ? (
+    <div className="text-[11px] text-on-surface-variant leading-relaxed">
+      {prep.stats.termLines} thuật ngữ · {prep.stats.glossary} mục từ điển · {prep.stats.speakers} diễn giả
+      {prep.stats.dropped > 0 ? ` · còn ${prep.stats.dropped} mục vượt hạn mức 40 dòng` : ''}
+      {!prep.glossaryReachable ? ' · chưa với tới Từ điển trên máy chủ nội bộ' : ''}
+    </div>
+  ) : null
 
   // ── derived state ──
   const st = lane.status
@@ -219,6 +265,7 @@ const OnlineConsole: React.FC = () => {
             <RailBtn icon={lane.speakEnabled ? 'volume_up' : 'subtitles'} label={lane.speakEnabled ? 'Đang đọc tiếng' : 'Chỉ phụ đề'}
               title={lane.speakEnabled ? 'Đang đọc tiếng — bấm để chỉ phụ đề' : 'Chỉ phụ đề — bấm để bật đọc tiếng'}
               tone={lane.speakEnabled ? 'active' : 'default'} onClick={() => lane.setSpeakEnabled(!lane.speakEnabled)} />
+            <RailBtn icon="record_voice_over" label="Giọng đọc" title="Chọn giọng đọc theo tên + tốc độ" tone={panel === 'voice' ? 'active' : 'default'} onClick={() => setPanel((p) => (p === 'voice' ? null : 'voice'))} />
             <RailBtn icon="graphic_eq" label="Chống dội (gate)" title="Chế độ chống dội tiếng" tone={panel === 'gate' ? 'active' : 'default'} onClick={() => setPanel((p) => (p === 'gate' ? null : 'gate'))} />
           </div>
 
@@ -358,19 +405,73 @@ const OnlineConsole: React.FC = () => {
                 <p className="text-[12px] text-on-surface-variant leading-relaxed">Chế độ gate chốt khi Bắt đầu (đổi lúc đang chạy không áp).</p>
               </div>
             )}
+            {panel === 'voice' && (
+              <div className="space-y-3">
+                <h3 className="font-label-caps text-label-caps text-on-surface">Giọng đọc</h3>
+                <div>
+                  <label htmlFor="online-voice-ja" className="font-label-caps text-label-caps text-on-surface-variant block mb-1.5">Giọng tiếng Nhật</label>
+                  <select id="online-voice-ja" value={lane.voiceJa} onChange={(e) => lane.setVoiceJa(e.target.value)} className={SELECT_CLS}>
+                    <option value="">— Giọng đã cài sẵn —</option>
+                    {voiceOptions(lane.voices.ja)}
+                  </select>
+                </div>
+                <div>
+                  <label htmlFor="online-voice-vi" className="font-label-caps text-label-caps text-on-surface-variant block mb-1.5">Giọng tiếng Việt</label>
+                  <select id="online-voice-vi" value={lane.voiceVi} onChange={(e) => lane.setVoiceVi(e.target.value)} className={SELECT_CLS}>
+                    <option value="">— Giọng đã cài sẵn —</option>
+                    {voiceOptions(lane.voices.vi)}
+                  </select>
+                </div>
+                <div>
+                  <span className="font-label-caps text-label-caps text-on-surface-variant block mb-1.5">Tốc độ đọc</span>
+                  <div className="flex items-center gap-0.5 bg-surface rounded-full p-0.5 w-fit">
+                    {([['auto', 'Tự động theo nhịp nói'], ['manual', 'Đặt tay']] as const).map(([m, label]) => (
+                      <button key={m} type="button" onClick={() => lane.setSpeedMode(m)}
+                        className={`px-3 py-1.5 rounded-full text-xs font-bold transition-colors ${lane.speedMode === m ? 'bg-secondary text-on-secondary shadow' : 'text-on-surface-variant hover:text-on-surface'}`}>{label}</button>
+                    ))}
+                  </div>
+                  {lane.speedMode === 'manual' && (
+                    <div className="flex items-center gap-2 mt-2">
+                      <input type="range" min={ONLINE_SPEED_RANGE.min} max={ONLINE_SPEED_RANGE.max} step={ONLINE_SPEED_RANGE.step}
+                        value={lane.manualSpeed} onChange={(e) => lane.setManualSpeed(Number(e.target.value))}
+                        aria-label="Tốc độ đọc thủ công" className="flex-1 accent-[var(--secondary)]" />
+                      <span className="w-12 shrink-0 text-right tabular-nums text-sm text-on-surface">{lane.manualSpeed.toFixed(2)}×</span>
+                    </div>
+                  )}
+                </div>
+                <button onClick={() => { void lane.refreshVoices() }} className="inline-flex items-center gap-1.5 text-xs text-secondary hover:underline">
+                  <span className={`material-symbols-outlined text-[15px] ${lane.voicesStatus === 'loading' ? 'animate-spin' : ''}`} aria-hidden="true">{lane.voicesStatus === 'loading' ? 'progress_activity' : 'refresh'}</span>Tải lại danh sách giọng
+                </button>
+                {lane.voicesStatus === 'error' && <p className="text-[11px] text-on-surface-variant">Chưa lấy được danh sách giọng — vẫn dùng giọng đã cài sẵn.</p>}
+              </div>
+            )}
             {panel === 'terms' && (
               <div className="space-y-2">
-                <h3 className="font-label-caps text-label-caps text-on-surface">Thuật ngữ / corpus (≤ 2000 ký tự)</h3>
+                <div className="flex items-center justify-between gap-2">
+                  <h3 className="font-label-caps text-label-caps text-on-surface">Thuật ngữ / corpus (≤ 2000 ký tự)</h3>
+                  <button onClick={() => { void loadPrep(true) }} disabled={lane.running} title="Nạp Từ điển · Bộ nhớ diễn giả · buổi đang chọn"
+                    className="inline-flex items-center gap-1 rounded-lg border border-outline-variant text-on-surface-variant px-2.5 py-1 text-xs hover:text-primary hover:border-primary transition-colors disabled:opacity-50">
+                    <span className="material-symbols-outlined text-[15px]" aria-hidden="true">download</span>Nạp từ Chuẩn bị
+                  </button>
+                </div>
                 <textarea value={lane.terms} onChange={(e) => lane.setTerms(e.target.value)} rows={6} maxLength={2000} disabled={lane.running}
                   className={TEXTAREA_CLS} placeholder="Tên riêng, thuật ngữ — mỗi mục một dòng…" />
                 <div className="text-right text-[11px] text-on-surface-variant tabular-nums">{lane.terms.length}/2000</div>
+                {prepCounts}
               </div>
             )}
             {panel === 'brief' && (
               <div className="space-y-2">
-                <h3 className="font-label-caps text-label-caps text-on-surface">Bối cảnh (brief)</h3>
+                <div className="flex items-center justify-between gap-2">
+                  <h3 className="font-label-caps text-label-caps text-on-surface">Bối cảnh (brief)</h3>
+                  <button onClick={() => { void loadPrep(true) }} disabled={lane.running} title="Nạp bối cảnh từ buổi đang chọn"
+                    className="inline-flex items-center gap-1 rounded-lg border border-outline-variant text-on-surface-variant px-2.5 py-1 text-xs hover:text-primary hover:border-primary transition-colors disabled:opacity-50">
+                    <span className="material-symbols-outlined text-[15px]" aria-hidden="true">download</span>Nạp từ Chuẩn bị
+                  </button>
+                </div>
                 <textarea value={lane.brief} onChange={(e) => lane.setBrief(e.target.value)} rows={6} disabled={lane.running}
                   className={TEXTAREA_CLS} placeholder="Bối cảnh buổi dịch để bản dịch sát nghĩa hơn…" />
+                {prepCounts}
               </div>
             )}
           </div>

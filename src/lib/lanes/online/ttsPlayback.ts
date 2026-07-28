@@ -42,6 +42,14 @@ export function setTtsWarningHandler(handler: (message: string) => void) { onWar
 let onPlaybackStart: (subtitleId?: string) => void = () => undefined;
 export function setTtsPlaybackStartHandler(handler: (subtitleId?: string) => void) { onPlaybackStart = handler; }
 
+// TASK 5: voice catalog + manual speed. The chosen voice is an OPAQUE slug per language (the server
+// resolves it to the real id); the manual speed, when set, overrides the per-sentence pace computed by
+// the refine stage. Both apply from the next sentence. These are user prefs — not cleared on stop.
+const voiceByLang: Record<string, string | undefined> = {};
+let manualSpeed: number | undefined;
+export function setTtsVoice(language: 'ja' | 'vi', slug: string | undefined) { voiceByLang[language] = slug || undefined; }
+export function setTtsManualSpeed(speed: number | undefined) { manualSpeed = typeof speed === 'number' && Number.isFinite(speed) ? speed : undefined; }
+
 /** Current number of sentences waiting to be spoken (for diagnostics). */
 export function getTtsQueueLength() { return queue.length; }
 
@@ -91,6 +99,8 @@ function warnOnce(message: string) {
 }
 
 async function fetchTtsResponse(item: QueueItem): Promise<Response | null> {
+  const speed = manualSpeed ?? item.speed;       // manual speed wins when set, else the per-sentence pace
+  const voice = voiceByLang[item.language];       // opaque slug, sent only when a voice was picked
   try {
     const response = await fetch('/online-api/tts', {
       method: 'POST',
@@ -99,7 +109,8 @@ async function fetchTtsResponse(item: QueueItem): Promise<Response | null> {
         text: item.text,
         language: item.language,
         ...(item.emotion ? { emotion: item.emotion } : {}),
-        ...(Number.isFinite(item.speed) ? { speed: item.speed } : {}),
+        ...(Number.isFinite(speed) ? { speed } : {}),
+        ...(voice ? { voice } : {}),
         ...(item.subtitleId ? { subtitleId: item.subtitleId } : {}),
       }),
     });

@@ -9,13 +9,16 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { LaneEvents, LaneLine, LaneStatus } from '../types'
 import { createOnlineLane, type OnlineDiagnostics, type OnlineLaneController, type TtsGateMode } from './onlineLane'
-import { setTtsSinkId, setTtsWarningHandler } from './ttsPlayback'
+import { setTtsSinkId, setTtsWarningHandler, setTtsVoice, setTtsManualSpeed } from './ttsPlayback'
 import type { SaveOutcome } from './sessionExport'
 
 export type { LaneLine, LaneStatus } from '../types'
 export type { OnlineDiagnostics, TtsGateMode } from './onlineLane'
 export type { SaveOutcome } from './sessionExport'
 export type OnlineDirection = 'vi2ja' | 'ja2vi'
+export type SpeedMode = 'auto' | 'manual'
+export interface OnlineVoice { slug: string; name: string; language: string; category: string; labels: Record<string, string> }
+export const ONLINE_SPEED_RANGE = { min: 0.85, max: 1.2, step: 0.01 } as const
 
 export const ONLINE_ACTIVE_STATUSES: LaneStatus[] = ['connecting', 'ready', 'listening', 'reconnecting']
 export const ONLINE_STATUS_COLOR: Record<LaneStatus, string> = {
@@ -99,6 +102,18 @@ export interface UseOnlineLane {
   setTerms: (v: string) => void
   brief: string
   setBrief: (v: string) => void
+  // voices + speed (TASK 5)
+  voices: Record<'ja' | 'vi', OnlineVoice[]>
+  voicesStatus: 'idle' | 'loading' | 'ready' | 'error'
+  refreshVoices: () => Promise<void>
+  voiceJa: string
+  setVoiceJa: (slug: string) => void
+  voiceVi: string
+  setVoiceVi: (slug: string) => void
+  speedMode: SpeedMode
+  setSpeedMode: (m: SpeedMode) => void
+  manualSpeed: number
+  setManualSpeed: (s: number) => void
   // controls
   start: () => Promise<void>
   stop: () => Promise<void>
@@ -116,6 +131,16 @@ export function useOnlineLane(): UseOnlineLane {
   const [direction, setDirection] = useState<OnlineDirection>('vi2ja')
   const [terms, setTerms] = useState('')
   const [brief, setBrief] = useState('')
+
+  // voices + speed (TASK 5) — persisted so the operator's choice survives a reload.
+  const [voices, setVoices] = useState<Record<'ja' | 'vi', OnlineVoice[]>>({ ja: [], vi: [] })
+  const [voicesStatus, setVoicesStatus] = useState<'idle' | 'loading' | 'ready' | 'error'>('idle')
+  const [voiceJa, setVoiceJaState] = useState<string>(() => { try { return localStorage.getItem('proyaku_online_voice_ja') ?? '' } catch { return '' } })
+  const [voiceVi, setVoiceViState] = useState<string>(() => { try { return localStorage.getItem('proyaku_online_voice_vi') ?? '' } catch { return '' } })
+  const [speedMode, setSpeedModeState] = useState<SpeedMode>(() => { try { return localStorage.getItem('proyaku_online_speed_mode') === 'manual' ? 'manual' : 'auto' } catch { return 'auto' } })
+  const [manualSpeed, setManualSpeedState] = useState<number>(() => {
+    try { const n = Number(localStorage.getItem('proyaku_online_manual_speed')); return Number.isFinite(n) && n >= ONLINE_SPEED_RANGE.min && n <= ONLINE_SPEED_RANGE.max ? n : 1 } catch { return 1 }
+  })
 
   const [status, setStatus] = useState<LaneStatus>('idle')
   const [statusDetail, setStatusDetail] = useState('')
@@ -203,6 +228,36 @@ export function useOnlineLane(): UseOnlineLane {
     setTtsSinkId(v || undefined)
   }, [])
 
+  // ── TASK 5: voices + speed. Setters only persist + set state; two effects push the current values to
+  // the playback module (single source of truth), so a reload restores the operator's choice. ──
+  const setVoiceJa = useCallback((slug: string) => { setVoiceJaState(slug); try { localStorage.setItem('proyaku_online_voice_ja', slug) } catch { /* private mode */ } }, [])
+  const setVoiceVi = useCallback((slug: string) => { setVoiceViState(slug); try { localStorage.setItem('proyaku_online_voice_vi', slug) } catch { /* private mode */ } }, [])
+  const setSpeedMode = useCallback((m: SpeedMode) => { setSpeedModeState(m); try { localStorage.setItem('proyaku_online_speed_mode', m) } catch { /* private mode */ } }, [])
+  const setManualSpeed = useCallback((s: number) => { setManualSpeedState(s); try { localStorage.setItem('proyaku_online_manual_speed', String(s)) } catch { /* private mode */ } }, [])
+
+  const refreshVoices = useCallback(async () => {
+    setVoicesStatus('loading')
+    try {
+      const one = async (lang: 'ja' | 'vi') => {
+        const r = await fetch(`/online-api/voices?language=${lang}`, { headers: { Accept: 'application/json' } })
+        if (!r.ok) throw new Error(String(r.status))
+        const body = (await r.json()) as { voices?: OnlineVoice[] }
+        return Array.isArray(body.voices) ? body.voices : []
+      }
+      const [ja, vi] = await Promise.all([one('ja'), one('vi')])
+      setVoices({ ja, vi })
+      setVoicesStatus('ready')
+    } catch {
+      setVoicesStatus('error') // normal when no TTS key yet — the UI keeps the configured voice
+    }
+  }, [])
+
+  // Apply persisted voices + the speed policy to the playback module (before the first sentence), and
+  // load the catalog once when the console mounts so the panel is populated before it is opened.
+  useEffect(() => { setTtsVoice('ja', voiceJa || undefined); setTtsVoice('vi', voiceVi || undefined) }, [voiceJa, voiceVi])
+  useEffect(() => { setTtsManualSpeed(speedMode === 'manual' ? manualSpeed : undefined) }, [speedMode, manualSpeed])
+  useEffect(() => { void refreshVoices() }, [refreshVoices])
+
   const start = useCallback(async () => {
     if (!mountedRef.current) return // unmounted during a pre-start gate → never open a leaked lane
     if (moduleActiveSession) {
@@ -267,6 +322,8 @@ export function useOnlineLane(): UseOnlineLane {
     deviceId, setDeviceId, outputDeviceId, setOutputDeviceId,
     nearMicGate, setNearMicGate, speakEnabled, setSpeakEnabled, gateMode, setGateMode,
     direction, setDirection, terms, setTerms, brief, setBrief,
+    voices, voicesStatus, refreshVoices, voiceJa, setVoiceJa, voiceVi, setVoiceVi,
+    speedMode, setSpeedMode, manualSpeed, setManualSpeed,
     start, stop, saveSession,
   }
 }
