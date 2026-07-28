@@ -150,27 +150,27 @@ const OperatorLayout: React.FC = () => {
 
     return (
         <>
-        <div className="h-screen flex flex-col overflow-clip text-on-background app-aurora">
+        <div className="h-[100dvh] flex flex-col overflow-clip text-on-background app-aurora">
             {/* ══════════ HEAD BAR ══════════ */}
             <header className="relative !z-20 shrink-0 h-14 xl:h-20 flex items-center gap-1 px-3 xl:px-4 xl:pr-2.5 border-b border-outline-variant shell-rail font-jakarta">
-                {/* Hamburger — dưới lg (điện thoại + tablet): mở ngăn điều hướng thay cho sidebar/nav desktop.
-                    Ngưỡng lg (không md) vì header desktop đầy đủ (nav 21px + pill + Sự kiện) chỉ đủ chỗ từ ~1024px. */}
+                {/* Hamburger — dưới xl (điện thoại + tablet): mở ngăn điều hướng thay cho sidebar/nav desktop.
+                    Ngưỡng xl (không lg/md) vì header desktop đầy đủ (nav 21px + pill + Sự kiện) chỉ đủ chỗ từ ~1280px. */}
                 <button type="button" onClick={(e) => { openerRef.current = e.currentTarget; setDrawerOpen(true); }} aria-label="Mở menu điều hướng"
                     aria-expanded={drawerOpen} aria-controls="proyaku-mobile-drawer"
                     className="xl:hidden shrink-0 w-10 h-10 flex items-center justify-center rounded-lg text-on-surface-variant hover:text-on-surface hover:bg-surface-container transition-colors">
                     <span className="material-symbols-outlined" aria-hidden="true">menu</span>
                 </button>
                 {/* Thương hiệu — chữ Latin, dùng Sora; canh trái thẳng cột với tiêu đề sidebar */}
-                <span className="font-sora font-bold text-[18px] xl:text-[25px] tracking-[0.12em] xl:tracking-[0.16em] leading-none text-on-surface select-none shrink-0" style={{ textShadow: '0 0 18px rgba(244,208,106,0.20)' }}>PROYAKU</span>
+                <span className="font-sora font-bold text-[18px] xl:text-[21px] 2xl:text-[25px] tracking-[0.12em] xl:tracking-[0.14em] 2xl:tracking-[0.16em] leading-none text-on-surface select-none shrink-0" style={{ textShadow: '0 0 18px rgba(244,208,106,0.20)' }}>PROYAKU</span>
                 {/* Menu chính — 3 tab full-height (Chuẩn bị · Báo cáo · Cài đặt), gạch chân vàng khi active (kiểu cũ).
-                    Ẩn dưới lg → đưa vào ngăn điều hướng (hamburger).
+                    Ẩn dưới xl → đưa vào ngăn điều hướng (hamburger).
                     "Dịch hội nghị" KHÔNG nằm ở đây — nó là pill riêng (kiểu tikme) đặt cạnh Sự kiện, xem bên dưới. */}
-                <nav aria-label="Điều hướng chính" className="hidden xl:flex h-full items-center gap-1 ml-8">
+                <nav aria-label="Điều hướng chính" className="hidden xl:flex h-full items-center gap-1 ml-4 2xl:ml-8">
                     {MENUS.filter((mm) => mm.key !== 'ops').map((mm) => {
                         const on = mm.key === cur.key;
                         return (
                             <button key={mm.key} onClick={() => goMenu(mm)} aria-current={on ? 'page' : undefined}
-                                className={`relative h-full flex items-center px-4 text-[21px] font-medium leading-none transition-colors focus-visible:[outline-offset:-2px] ${on ? 'text-secondary' : 'text-on-surface-variant hover:text-on-surface'}`}>
+                                className={`relative h-full flex items-center px-3 2xl:px-4 text-[18px] 2xl:text-[21px] font-medium leading-none transition-colors focus-visible:[outline-offset:-2px] ${on ? 'text-secondary' : 'text-on-surface-variant hover:text-on-surface'}`}>
                                 {mm.label}
                                 {on && <span aria-hidden="true" className="absolute inset-x-3 bottom-[-1px] h-[3px] rounded-t-full bg-secondary"></span>}
                             </button>
@@ -178,7 +178,7 @@ const OperatorLayout: React.FC = () => {
                     })}
                 </nav>
                 {/* Cụm GIỮA — pill "Dịch hội nghị" (kiểu tikme Omni Channel) đứng sát TRÁI, rồi tới Sự kiện */}
-                <div className="flex-1 min-w-0 flex items-center justify-center gap-3 px-4">
+                <div className="flex-1 min-w-0 flex items-center justify-center gap-2 px-2 2xl:gap-3 2xl:px-4">
                     {/* Dịch hội nghị — pill KHỚP 99% "Omni Channel" của Tikme: ĐANG MỞ = gradient cam→hổ phách
                         (#f97316 0/50% → #f59e0b) + viền cam 2px #fdba74 + glow cam + chấm trắng + chữ HOA extrabold
                         11px letter-spacing + chevron mảnh; CHƯA VÀO = pill tối viền mờ + chấm cam (kiểu "My Page"). */}
@@ -189,11 +189,11 @@ const OperatorLayout: React.FC = () => {
                             borderColor: '#fdba74',
                             boxShadow: '0 8px 24px -6px rgba(251, 146, 60, 0.75)',
                         } : undefined}
-                        className={`shrink-0 hidden xl:flex items-center gap-2 rounded-full border-2 px-5 py-2 whitespace-nowrap transition-all focus-visible:[outline-offset:2px] ${opsActive
+                        className={`shrink-0 hidden xl:flex items-center gap-1.5 2xl:gap-2 rounded-full border-2 px-3.5 2xl:px-5 py-2 whitespace-nowrap transition-all focus-visible:[outline-offset:2px] ${opsActive
                             ? 'text-white'
                             : 'text-on-surface-variant border-outline-variant bg-surface-container/50 hover:text-on-surface hover:border-outline hover:bg-surface-container'}`}>
                         <span className={`w-2 h-2 rounded-full shrink-0 ${opsActive ? 'bg-white' : 'bg-[#fb923c]'}`} aria-hidden="true"></span>
-                        <span className="text-[15px] font-extrabold uppercase tracking-wider leading-none">{opsMenu.label}</span>
+                        <span className="text-[13px] 2xl:text-[15px] font-extrabold uppercase tracking-wide 2xl:tracking-wider leading-none">{opsMenu.label}</span>
                         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className={opsActive ? '' : 'opacity-80'} aria-hidden="true"><path d="m9 18 6-6-6-6" /></svg>
                     </button>
                     <div className="hidden xl:block"><EventSwitcher /></div>
@@ -294,20 +294,20 @@ const OperatorLayout: React.FC = () => {
                 </aside>
                 )}
 
-                {/* Dưới lg nội dung CUỘN dọc (không bị cắt ở màn thấp); từ lg giữ nguyên như cũ. */}
+                {/* Dưới xl nội dung CUỘN dọc (không bị cắt ở màn thấp); từ xl giữ nguyên như cũ. */}
                 <div className="flex-1 min-w-0 overflow-y-auto xl:overflow-hidden flex flex-col">
                     <Outlet />
                 </div>
             </div>
         </div>
 
-            {/* ══════════ NGĂN ĐIỀU HƯỚNG MOBILE (chỉ <md) — sibling của shell (KHÔNG là con .app-aurora,
+            {/* ══════════ NGĂN ĐIỀU HƯỚNG MOBILE (chỉ <xl) — sibling của shell (KHÔNG là con .app-aurora,
                 nếu không rule `.app-aurora > * { position:relative; z-index:1 }` sẽ đè `fixed`) ══════════ */}
             {drawerOpen && (
                 <div className="xl:hidden fixed inset-0 z-[80]" role="dialog" aria-modal="true" aria-label="Menu điều hướng">
                     <div className="absolute inset-0 bg-black/60" onClick={() => setDrawerOpen(false)} aria-hidden="true"></div>
                     <div id="proyaku-mobile-drawer" ref={drawerRef} tabIndex={-1}
-                        className="absolute inset-y-0 left-0 w-[86%] max-w-[320px] bg-surface-container-lowest border-r border-outline-variant shadow-2xl flex flex-col overflow-y-auto font-jakarta focus:outline-none">
+                        className="absolute inset-y-0 left-0 w-[86%] max-w-[320px] bg-surface-container-lowest border-r border-outline-variant shadow-2xl flex flex-col font-jakarta focus:outline-none">
                         <div className="shrink-0 flex items-center justify-between px-4 h-14 border-b border-outline-variant">
                             <span className="font-sora font-bold text-[18px] tracking-[0.12em] text-on-surface">PROYAKU</span>
                             <button type="button" onClick={() => setDrawerOpen(false)} aria-label="Đóng menu"
@@ -316,6 +316,9 @@ const OperatorLayout: React.FC = () => {
                             </button>
                         </div>
                         <div className="shrink-0 px-3 py-3 border-b border-outline-variant"><EventSwitcher /></div>
+                        {/* Scroll ONLY the menu lists — the EventSwitcher above stays in a non-scrolling
+                            section so its absolute dropdown is not clipped by overflow-y-auto (10.4). */}
+                        <div className="flex-1 min-h-0 overflow-y-auto">
                         {/* Menu chính (kể cả Dịch hội nghị) */}
                         <nav aria-label="Điều hướng chính" className="shrink-0 p-2 space-y-0.5 border-b border-outline-variant">
                             {MENUS.map((mm) => {
@@ -350,6 +353,7 @@ const OperatorLayout: React.FC = () => {
                                 );
                             })}
                         </nav>
+                        </div>
                     </div>
                 </div>
             )}

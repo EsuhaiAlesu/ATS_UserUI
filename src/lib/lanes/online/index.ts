@@ -79,13 +79,17 @@ export async function saveOnlineConfigKeys(partial: Record<string, string>): Pro
 
 // Metadata for the Settings key section. The `name` is an OPAQUE SLUG (server maps it to the real
 // env var) so no vendor env name reaches the client bundle. Vietnamese-first labels; no values.
+// TASK 9.1a: each field is named after the PROVIDER it belongs to (the person filling the form holds an
+// account at a named company and is looking at that company's website — what they cannot guess is WHOSE
+// key goes in the box). A brand name in a label is NOT an env name / model id / API host / key value, so
+// rule 6 permits it here; the hints point at the LOGIN pages (never the API hosts we call).
 export const ONLINE_KEY_FIELDS: { name: string; label: string; hint: string }[] = [
-  { name: 'asr_endpoint', label: 'Máy chủ nhận dạng giọng nói', hint: 'Địa chỉ wss của workspace nhận dạng giọng (ASR)' },
-  { name: 'asr_key', label: 'Khóa nhận dạng giọng nói', hint: 'API key dịch vụ ASR' },
-  { name: 'refine_key', label: 'Khóa dịch tinh chỉnh', hint: 'API key mô hình refine bản dịch' },
-  { name: 'tts_key', label: 'Khóa đọc giọng (TTS)', hint: 'API key dịch vụ tổng hợp giọng nói' },
-  { name: 'tts_voice_ja', label: 'Giọng đọc tiếng Nhật', hint: 'Mã giọng (voice ID) cho tiếng Nhật' },
-  { name: 'tts_voice_vi', label: 'Giọng đọc tiếng Việt', hint: 'Mã giọng (voice ID) cho tiếng Việt' },
+  { name: 'asr_endpoint', label: 'Endpoint của Qwen', hint: 'Địa chỉ wss workspace Qwen — chỉ dùng khi quay về cách nhận dạng cũ' },
+  { name: 'asr_key', label: 'API Key của Qwen', hint: 'Lấy ở trang Alibaba Cloud Model Studio (DashScope) → API Keys' },
+  { name: 'refine_key', label: 'API Key của GPT (OpenAI)', hint: 'Lấy ở platform.openai.com → API keys → Create new secret key' },
+  { name: 'tts_key', label: 'API Key của ElevenLabs', hint: 'Lấy ở elevenlabs.io → ảnh đại diện góc phải → API Keys' },
+  { name: 'tts_voice_ja', label: 'Voice ID tiếng Nhật (ElevenLabs)', hint: 'Ở elevenlabs.io → Voices → chọn giọng → nút Copy Voice ID' },
+  { name: 'tts_voice_vi', label: 'Voice ID tiếng Việt (ElevenLabs)', hint: 'Ở elevenlabs.io → Voices → chọn giọng → nút Copy Voice ID' },
 ]
 
 export interface UseOnlineLane {
@@ -160,7 +164,11 @@ export function useOnlineLane(): UseOnlineLane {
   const [outputDeviceId, setOutputDeviceIdState] = useState('')
   const [nearMicGate, setNearMicGate] = useState(true)
   const [speakEnabled, setSpeakEnabled] = useState(true)
-  const [gateMode, setGateMode] = useState<TtsGateMode>('auto')
+  // TASK 9.2: default OFF (full duplex). Esuhai runs "khách mời đeo tai nghe" — the MC/presenters speak
+  // into the hall mic + out the hall speakers, while the translated voice goes ONLY to the guests'
+  // headphones, so the mic never hears it; gating would only throw away words spoken while the voice
+  // plays. 'auto'/'always' stay in the flyout + drawer for a speaker-output setup.
+  const [gateMode, setGateMode] = useState<TtsGateMode>('off')
   const [direction, setDirection] = useState<OnlineDirection>('vi2ja')
   const [terms, setTerms] = useState('')
   const [brief, setBrief] = useState('')

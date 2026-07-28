@@ -118,8 +118,8 @@ const Settings: React.FC = () => {
                         </div>
                     </Section>
 
-                    {/* CHẾ ĐỘ ONLINE — KHÓA API (FIX-07) */}
-                    <Section id="ok" icon="vpn_key" title="Chế độ ONLINE — Khóa API" desc="Khóa dịch vụ cho luồng ONLINE (nhận dạng giọng · dịch · đọc giọng). Lưu trên máy chủ, chỉ ghi.">
+                    {/* CHẾ ĐỘ ONLINE — KHOÁ DỊCH VỤ (API Key) (FIX-07 / PROMPT-09 9.1) */}
+                    <Section id="ok" icon="vpn_key" title="Chế độ ONLINE — Khoá dịch vụ (API Key)" desc="Khoá dịch vụ (API Key) cho luồng ONLINE (nhận dạng giọng · dịch · đọc giọng). Lưu trên máy chủ, chỉ ghi.">
                         <OnlineKeysSettings />
                     </Section>
 
