@@ -33,6 +33,33 @@ const ASR_MODEL = env('QWEN3_ASR_MODEL', 'qwen3-asr-flash-realtime-2026-02-10');
 const ASR_VAD_THRESHOLD = num('QWEN3_ASR_VAD_THRESHOLD', 0.45);
 const ASR_VAD_SILENCE_MS = num('QWEN3_ASR_VAD_SILENCE_MS', 800);
 
+// TASK 12.4 — two ceilings on the proxied (qwen3 rollback) path.
+// Audio frames are ~256 ms each (4096 PCM16 samples @16kHz). Cap the pre-open queue at ~5s of
+// speech so a dead upstream cannot grow it without bound: 5000 / 256 ≈ 20 frames. And give the
+// upstream 8s to open — if it never does, tell the operator instead of buffering forever.
+const PENDING_FRAMES_MAX = 20; // ≈ 5s of audio (20 × 256 ms)
+const UPSTREAM_CONNECT_TIMEOUT_MS = 8_000;
+// TASK 12.6 — after the upstream opens, wait this long for the client's `session.terms` message
+// before configuring the session without any terms (a URL-only rollback client never sends it).
+const SESSION_TERMS_GRACE_MS = 250;
+
+// TASK 12.4 — a bounded FIFO for the pre-open audio frames. At capacity it drops the OLDEST frame
+// (in speech the newest audio is the useful one) and counts the drop. Exported so the cap can be
+// tested without a live upstream socket.
+export function createBoundedFrameQueue(max) {
+  const frames = [];
+  let dropped = 0;
+  return {
+    push(frame) {
+      frames.push(frame);
+      if (frames.length > max) { frames.shift(); dropped += 1; }
+    },
+    drain() { const out = frames.slice(); frames.length = 0; return out; },
+    get size() { return frames.length; },
+    get dropped() { return dropped; },
+  };
+}
+
 const openaiApiKey = () => getOnlineConfig('OPENAI_API_KEY');
 const REFINE_MODEL = env('OPENAI_PREVIEW_REFINE_MODEL', 'gpt-4.1');
 const REFINE_TIMEOUT_MS = num('PREVIEW_REFINE_TIMEOUT_MS', 10_000);
@@ -546,15 +573,26 @@ export function installOnlineApi(server, { requireAuth } = {}) {
 
   server.on('upgrade', (request, socket, head) => {
     const url = new URL(request.url || '/', 'http://localhost');
-    // Only claim our own path; other upgrade handlers may own the rest.
-    if (url.pathname !== '/online-api/asr') return;
-    if (!authed(request)) {
-      socket.destroy();
+    // Claim our own path; upgrade the socket.
+    if (url.pathname === '/online-api/asr') {
+      if (!authed(request)) {
+        socket.destroy();
+        return;
+      }
+      asrWss.handleUpgrade(request, socket, head, (ws) => {
+        asrWss.emit('connection', ws, request);
+      });
       return;
     }
-    asrWss.handleUpgrade(request, socket, head, (ws) => {
-      asrWss.emit('connection', ws, request);
-    });
+    // TASK 12.1 — an upgrade knocking on a path we do not own. The old code simply `return`ed,
+    // leaving the client's socket connected to nothing and holding a file descriptor until the
+    // process restarted (a scanner, a stale tab, a mistyped URL each leak one). Close it — but only
+    // when OURS is the only upgrade listener attached: the polite `return` was written to leave room
+    // for a second listener, so if someone later mounts one, keep returning and let them answer.
+    if (server.listenerCount('upgrade') === 1) {
+      try { socket.write('HTTP/1.1 400 Bad Request\r\nConnection: close\r\n\r\n'); } catch { /* socket already gone */ }
+      socket.destroy();
+    }
   });
 
   asrWss.on('connection', (client, request) => {
@@ -563,8 +601,11 @@ export function installOnlineApi(server, { requireAuth } = {}) {
     // detects each utterance's language. Anything else normalises to vi/ja as before.
     const rawLang = (url.searchParams.get('language') || '').toLowerCase();
     const language = rawLang === 'auto' ? 'auto' : normalizeLanguage(rawLang, 'vi');
-    // Session-scoped biasing terms arrive in the WS URL (≤ 2000 chars).
-    const corpusText = limitText(url.searchParams.get('corpus') || url.searchParams.get('hotwords'), 2_000);
+    // TASK 12.6: session terms may arrive in the URL (query param kept for one release so the 11.6
+    // rollback works with any client) OR as a first `{type:'session.terms'}` WS message. Either way
+    // they land in `terms` before the upstream session.update goes out.
+    let terms = limitText(url.searchParams.get('corpus') || url.searchParams.get('hotwords'), 2_000);
+    let termsKnown = terms !== '';
 
     const wsBase = asrWsBase();
     const apiKey = asrApiKey();
@@ -574,15 +615,40 @@ export function installOnlineApi(server, { requireAuth } = {}) {
       return;
     }
 
-    logLine('asr.session', { language, corpusChars: corpusText.length });
+    logLine('asr.session', { language });
     const upstream = new WebSocket(
       `${wsBase}/api-ws/v1/realtime?model=${encodeURIComponent(ASR_MODEL)}`,
       { headers: { Authorization: `Bearer ${apiKey}`, 'OpenAI-Beta': 'realtime=v1' } },
     );
     let upstreamReady = false;
-    const pendingFrames = [];
+    let sessionSent = false;
+    let graceTimer = null;
+    const pending = createBoundedFrameQueue(PENDING_FRAMES_MAX); // TASK 12.4 — bounded pre-open queue
 
-    upstream.on('open', () => {
+    // TASK 12.4 — the old code had no connect timeout: a dead upstream hung forever while the queue
+    // grew and nothing told the operator. Give it 8s; on expiry send an actionable error and close
+    // both sockets, logging how many frames were dropped so a bad uplink is diagnosable afterwards.
+    let connectTimer = setTimeout(() => {
+      connectTimer = null;
+      logLine('asr.upstream_connect_timeout', { droppedFrames: pending.dropped, queued: pending.size });
+      if (client.readyState === WebSocket.OPEN) {
+        client.send(JSON.stringify({ type: 'error', error: { message: 'ASR upstream did not connect (check the recogniser endpoint/key).' } }));
+      }
+      try { upstream.terminate(); } catch { /* already gone */ }
+      try { client.close(1011, 'ASR upstream connect timeout'); } catch { /* already gone */ }
+    }, UPSTREAM_CONNECT_TIMEOUT_MS);
+
+    const clearTimers = () => {
+      if (connectTimer) { clearTimeout(connectTimer); connectTimer = null; }
+      if (graceTimer) { clearTimeout(graceTimer); graceTimer = null; }
+    };
+
+    // Send the one-time session.update (with whatever terms are known) and flush the queue. No-op
+    // until the upstream is actually OPEN, so it can be called from either the open or the terms path.
+    function configureUpstream() {
+      if (sessionSent || upstream.readyState !== WebSocket.OPEN) return;
+      sessionSent = true;
+      if (graceTimer) { clearTimeout(graceTimer); graceTimer = null; }
       upstream.send(JSON.stringify({
         type: 'session.update',
         session: {
@@ -591,7 +657,7 @@ export function installOnlineApi(server, { requireAuth } = {}) {
           sample_rate: 16000,
           input_audio_transcription: {
             ...(language === 'auto' ? {} : { language }),
-            ...(corpusText ? { corpus: { text: corpusText } } : {}),
+            ...(terms ? { corpus: { text: terms } } : {}),
           },
           turn_detection: {
             type: 'server_vad',
@@ -601,8 +667,15 @@ export function installOnlineApi(server, { requireAuth } = {}) {
         },
       }));
       upstreamReady = true;
-      for (const frame of pendingFrames) upstream.send(frame);
-      pendingFrames.length = 0;
+      for (const frame of pending.drain()) upstream.send(frame);
+    }
+
+    upstream.on('open', () => {
+      if (connectTimer) { clearTimeout(connectTimer); connectTimer = null; }
+      // Terms already known (URL param or an early session.terms) → configure now. Otherwise wait a
+      // short grace for the client's session.terms before configuring without any (12.6).
+      if (termsKnown) configureUpstream();
+      else graceTimer = setTimeout(configureUpstream, SESSION_TERMS_GRACE_MS);
     });
 
     // Upstream already emits the contract's event shapes — pass through verbatim.
@@ -619,20 +692,33 @@ export function installOnlineApi(server, { requireAuth } = {}) {
     });
 
     upstream.on('close', () => {
+      clearTimers();
       if (client.readyState === WebSocket.OPEN) client.close(1011, 'ASR upstream closed');
     });
 
     client.on('message', (raw, isBinary) => {
-      if (isBinary) {
-        const audio = Buffer.isBuffer(raw) ? raw : Buffer.from(raw);
-        if (audio.length === 0 || audio.length > 1024 * 1024) return;
-        const frame = JSON.stringify({ type: 'input_audio_buffer.append', audio: audio.toString('base64') });
-        if (upstreamReady && upstream.readyState === WebSocket.OPEN) upstream.send(frame);
-        else pendingFrames.push(frame);
+      if (!isBinary) {
+        // TASK 12.6 — the only control frame we accept is session.terms; anything else is ignored.
+        let msg;
+        try { msg = JSON.parse(raw.toString()); } catch { return; }
+        if (msg && msg.type === 'session.terms') {
+          termsKnown = true;
+          const t = limitText(msg.corpus, 2_000);
+          if (t) terms = t;
+          configureUpstream(); // no-op until upstream is open; then it flushes with the terms applied
+        }
+        return;
       }
+      const audio = Buffer.isBuffer(raw) ? raw : Buffer.from(raw);
+      if (audio.length === 0 || audio.length > 1024 * 1024) return;
+      const frame = JSON.stringify({ type: 'input_audio_buffer.append', audio: audio.toString('base64') });
+      if (upstreamReady && upstream.readyState === WebSocket.OPEN) upstream.send(frame);
+      else pending.push(frame); // bounded — drops the oldest when full (12.4)
     });
 
     client.on('close', () => {
+      clearTimers();
+      if (pending.dropped > 0) logLine('asr.frames_dropped', { droppedFrames: pending.dropped });
       try { upstream.close(); } catch { /* already closed */ }
     });
   });

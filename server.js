@@ -126,7 +126,10 @@ function serveStatic(req, res) {
     let urlPath = decodeURIComponent((req.url || '/').split('?')[0]);
     if (urlPath.endsWith('/')) urlPath += 'index.html';
     let filePath = path.join(DIST, urlPath);
-    if (!filePath.startsWith(DIST)) return send(res, 403, 'Forbidden'); // path traversal guard
+    // TASK 12.2 — path-traversal guard. A bare startsWith(DIST) also accepts a sibling like
+    // `<dist>-secret`, because it never requires the separator; compare against DIST + sep (and allow
+    // the exact DIST directory itself). One line, no behaviour change for any real file under dist/.
+    if (filePath !== DIST && !filePath.startsWith(DIST + path.sep)) return send(res, 403, 'Forbidden');
 
     fs.stat(filePath, (err, stat) => {
         if (err || !stat.isFile()) {

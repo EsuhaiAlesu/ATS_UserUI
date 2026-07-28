@@ -285,6 +285,10 @@ const OnlineConsole: React.FC = () => {
             <RailBtn icon="article" label="Bối cảnh" title="Bối cảnh (brief) cho bản dịch" tone={panel === 'brief' ? 'active' : 'default'} onClick={() => setPanel((p) => (p === 'brief' ? null : 'brief'))} />
             <RailBtn icon="save" label="Lưu transcript" title="Lưu bản ghi phiên dịch" onClick={() => { void lane.saveSession() }} />
             {lane.saveStatus && <div className="px-3 pt-0.5 text-[11px] text-on-surface-variant">{lane.saveStatus}</div>}
+            {/* TASK 12.3 — a failing auto-save is silent (no download storm) but must not be invisible. */}
+            {diag?.lastSaveOk === false && (
+              <div className="px-3 pt-0.5 text-[11px] text-error">⚠ Lưu tự động đang lỗi — bấm “Lưu transcript” để tải bản ghi về máy.</div>
+            )}
           </div>
         </div>
 
@@ -668,6 +672,10 @@ const OnlineConsole: React.FC = () => {
                     <div>draft {diag.draftCalls} (dup {diag.draftSkipped.duplicate}·rate {diag.draftSkipped['rate-limit']}·infl {diag.draftSkipped['in-flight']})</div>
                     <div>refine {diag.refineCalls} · retries {diag.refineRetries}</div>
                     <div>ttsQueue {diag.ttsQueueLength} · gate {diag.gateActive ? 'on' : 'off'} · gatedMs {diag.gatedMs}</div>
+                    {/* TASK 12.5 — the lane reports a backlog only once it is worth acting on (≈8s of audio). */}
+                    {diag.sendBacklogBytes > 0 && (
+                      <div className="text-error">⇡ backlog gửi {(diag.sendBacklogBytes / 1024).toFixed(0)} KB · mạng chậm, phụ đề đang trễ</div>
+                    )}
                     {lat && <div>p50 draft {lat.draftP50}·refine {lat.refineP50}·tts {lat.ttsP50}</div>}
                     {lat && <div>p90 draft {lat.draftP90}·refine {lat.refineP90}·tts {lat.ttsP90}</div>}
                     <div>usage {diag.lastUsageReportAt ? new Date(diag.lastUsageReportAt).toLocaleTimeString() : '—'}</div>

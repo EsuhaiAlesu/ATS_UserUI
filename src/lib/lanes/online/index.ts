@@ -395,6 +395,10 @@ export function useOnlineLane(): UseOnlineLane {
   const stop = useCallback(async () => {
     await laneRef.current?.stop()
     moduleActiveSession = false
+    // TASK 12.7: the transcript lives on the container's EPHEMERAL disk (wiped on every redeploy). After
+    // Dừng, tell whoever is at the desk that downloading a copy is the safe move — this fires only on an
+    // explicit operator stop (the unmount/mode-switch teardown calls the lane's stop() directly).
+    setSaveStatus('Đã dừng · bản ghi đã lưu trên máy chủ (ổ đĩa tạm — hãy bấm “Lưu transcript” để tải một bản về máy cho chắc).')
   }, [])
 
   const saveSession = useCallback(async () => {

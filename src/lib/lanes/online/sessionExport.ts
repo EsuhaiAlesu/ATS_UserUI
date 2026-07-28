@@ -91,8 +91,13 @@ function downloadFallback(exp: SessionExport): void {
   downloadBlob(`${exp.filename}.md`, exp.md, 'text/markdown');
 }
 
-// POST to the server; on network/4xx/5xx (including the 413 size limit) → local download of both files.
-export async function saveSessionExport(exp: SessionExport): Promise<SaveOutcome> {
+// POST to the server; on network/4xx/5xx (including the 413 size limit) → local download of both files
+// — BUT only when `allowDownload` is true. TASK 12.3: the manual "Lưu transcript" button and the save
+// on Dừng pass true (download is the right safety net there); the 30-second auto-save tick passes false,
+// so a persistently failing endpoint does not fire a download every thirty seconds onto the projected
+// screen. When it is false and the POST fails, nothing is downloaded and the failure is returned for the
+// lane to surface in its save status — silent must not mean invisible.
+export async function saveSessionExport(exp: SessionExport, allowDownload = true): Promise<SaveOutcome> {
   try {
     const res = await fetch('/online-api/save-session', {
       method: 'POST',
@@ -104,7 +109,10 @@ export async function saveSessionExport(exp: SessionExport): Promise<SaveOutcome
     if (!data.saved) throw new Error('save not confirmed');
     return { saved: true, filename: data.filename ?? exp.filename, downloaded: false };
   } catch {
-    downloadFallback(exp);
-    return { saved: false, filename: exp.filename, downloaded: true };
+    if (allowDownload) {
+      downloadFallback(exp);
+      return { saved: false, filename: exp.filename, downloaded: true };
+    }
+    return { saved: false, filename: exp.filename, downloaded: false };
   }
 }

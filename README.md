@@ -46,6 +46,8 @@ Luồng ONLINE cần **6 giá trị dịch vụ**: máy chủ + khóa **nhận d
 
 > Giá trị nhập lúc chạy được lưu vào tệp trên đĩa; **đĩa Railway là tạm (ephemeral)** nên sau mỗi lần redeploy có thể phải nhập lại — dùng biến môi trường nếu muốn giữ vĩnh viễn. Không có khóa/mã model/địa chỉ dịch vụ nào được ghi trong mã nguồn hay lọt vào bundle client.
 
+> ⚠️ **Dữ liệu trên đĩa KHÔNG sống sót qua redeploy (TASK 12.7).** Cả `./translated_history` (bản ghi transcript của buổi dịch) lẫn `./online-keys.json` (6 khóa dịch vụ nhập lúc chạy) đều nằm trên đĩa tạm của container: **mỗi lần redeploy là xoá sạch cả hai** — mất transcript của buổi và toàn bộ khóa. Cách khắc phục là gắn một **Railway Volume** vào đúng đường dẫn đó để nó tồn tại qua các lần deploy (đặt `ONLINE_KEYS_FILE` và thư mục lưu transcript vào điểm mount của Volume). Trong lúc chưa có Volume: sau khi bấm **Dừng**, hãy bấm **"Lưu transcript"** để **tải một bản về máy** — đó là bản chắc chắn giữ được. *(Quyết định gắn Volume tốn phí hạ tầng nên thuộc về chủ dự án; khuyến nghị: gắn một Volume nhỏ cho khóa để khỏi nhập lại sau mỗi deploy, còn transcript thì luôn tải bản dự phòng về máy sau mỗi buổi.)*
+
 ## 5. Bố cục repo
 
 ```

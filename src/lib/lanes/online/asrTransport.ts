@@ -78,9 +78,9 @@ export async function fetchAsrSession(opts: {
 
   if (data.asrTransport === 'proxy') {
     const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const url = `${proto}//${location.host}${ONLINE_BASE}/asr?language=${encodeURIComponent(
-      opts.language,
-    )}&corpus=${encodeURIComponent(opts.corpus.slice(0, 2000))}`;
+    // TASK 12.6: the corpus no longer rides the URL — the lane sends it as the first `session.terms`
+    // WS message once the socket opens. The server still accepts `?corpus=` for one release (rollback).
+    const url = `${proto}//${location.host}${ONLINE_BASE}/asr?language=${encodeURIComponent(opts.language)}`;
     return { transport: 'proxy', url, commitMode: 'vad' };
   }
 

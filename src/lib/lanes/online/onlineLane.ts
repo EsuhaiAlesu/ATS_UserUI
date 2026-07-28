@@ -67,6 +67,11 @@ const TTS_GATE_NETWORK_TAIL_MS = 1_200; // 'always': extra un-gate delay after p
 const AUTO_SAVE_INTERVAL_MS = 30_000; // checkpoint the transcript every 30s if new lines exist
 const USAGE_REPORT_INTERVAL_MS = 300_000; // usage report every 5 min (and once on stop)
 
+// TASK 12.5 — the browser silently queues ws.send() on a weak uplink; the subtitle drifts while
+// everything still says "connected". Audio is 8192 bytes / 256 ms ≈ 32 KB/s, so:
+const SEND_BACKLOG_WARN_BYTES = 256 * 1024; // ≈ 8s of audio queued → surface it to the operator
+const SEND_BACKLOG_RECONNECT_BYTES = 768 * 1024; // ≈ 24s → the uplink is unusable, reconnect the ladder
+
 // TASK 11.4 — the ONE Stop exception to VAD commit: on Dừng, send a single commit and wait briefly for
 // the trailing final, then await the outstanding refine so the last sentence gets its finished
 // translation before teardown. A stop button that hesitates is worse than a lost tail — keep both bounds tight.
@@ -115,6 +120,8 @@ export interface OnlineDiagnostics {
   lastUsageReportAt: number | null;
   lastSaveAt: number | null;
   lastSaveDownloaded: boolean;
+  lastSaveOk: boolean; // TASK 12.3 — false when the last save failed (even if nothing downloaded)
+  sendBacklogBytes: number; // TASK 12.5 — the WS send buffer at the last audio frame
 }
 
 // Concrete online controller = the treaty + a diagnostics readout + a manual transcript save.
@@ -223,6 +230,8 @@ export function createOnlineLane(events: LaneEvents, config: OnlineLaneConfig = 
   let usageReportTimer: ReturnType<typeof setInterval> | null = null;
   let lastSaveAt: number | null = null;
   let lastSaveDownloaded = false;
+  let lastSaveOk = true; // TASK 12.3: false once a save (auto or manual) fails — surfaced in diagnostics
+  let sendBacklogBytes = 0; // TASK 12.5: the browser's WS send buffer at the last audio frame
   let lastUsageReportAt: number | null = null;
   let finals = 0; // finalized sentences (usage report)
   let ttsSentences = 0; // TTS sentences enqueued (usage report)
@@ -312,7 +321,10 @@ export function createOnlineLane(events: LaneEvents, config: OnlineLaneConfig = 
     return Array.from(sessionLines.values()).sort((a, b) => a.at - b.at);
   }
 
-  async function doSave(): Promise<SaveOutcome> {
+  // TASK 12.3: `allowDownload` is true for operator-driven saves (manual button, save on Dừng) where
+  // a local download is the right safety net, and false for the 30s auto-save tick — a failing server
+  // must not turn into a download every thirty seconds on the projected screen.
+  async function doSave(allowDownload: boolean): Promise<SaveOutcome> {
     const o = opts;
     const gen = sessionGen;
     const versionAtSave = sessionLinesVersion;
@@ -322,11 +334,12 @@ export function createOnlineLane(events: LaneEvents, config: OnlineLaneConfig = 
       sourceLanguage: o?.sourceLanguage ?? 'vi',
       targetLanguage: o?.targetLanguage ?? 'ja',
     });
-    const outcome = await saveSessionExport(exp);
+    const outcome = await saveSessionExport(exp, allowDownload);
     // A save from a prior session must not stamp the new session's save-state (rare stop→start race).
     if (gen === sessionGen) {
       lastSaveAt = Date.now();
       lastSaveDownloaded = outcome.downloaded;
+      lastSaveOk = outcome.saved; // false if the server rejected — diagnostics show it even when nothing downloaded
       lastSavedVersion = versionAtSave;
     }
     return outcome;
@@ -358,7 +371,7 @@ export function createOnlineLane(events: LaneEvents, config: OnlineLaneConfig = 
 
   // Fire a final transcript save + usage report (synchronous build, fire-and-forget POST).
   function finalizeSession(): void {
-    if (sessionLines.size > 0) void doSave();
+    if (sessionLines.size > 0) void doSave(true); // save on Dừng: a download is the right safety net (12.3)
     void sendUsageReport();
   }
 
@@ -409,7 +422,21 @@ export function createOnlineLane(events: LaneEvents, config: OnlineLaneConfig = 
           // Only send audio while the WS is OPEN and the upstream session is ready. Audio produced while
           // not OPEN is discarded here — no unbounded buffering. Direct transport → JSON frame via codec;
           // proxy → raw binary as before (11.2).
-          if (ws && ws.readyState === WebSocket.OPEN && sessionReady) ws.send(codec ? codec.encodeAudio(pcm) : pcm);
+          if (ws && ws.readyState === WebSocket.OPEN && sessionReady) {
+            // TASK 12.5: watch the browser's own send buffer. On a weak uplink ws.send() queues silently
+            // and the subtitle drifts while the UI still says "connected" — the single most confusing
+            // failure there is. Surface the backlog (diagnostics), and past a larger threshold treat the
+            // connection as unusable and reconnect. NEVER drop audio to keep up: a hole mid-sentence is
+            // worse than a late sentence, so we still send below the reconnect threshold.
+            const backlog = ws.bufferedAmount;
+            // Only surface a backlog worth acting on (≥ WARN ≈ 8s of audio); below that it is noise.
+            sendBacklogBytes = backlog >= SEND_BACKLOG_WARN_BYTES ? backlog : 0;
+            if (backlog > SEND_BACKLOG_RECONNECT_BYTES) {
+              forceReconnect('send backlog too high (uplink cannot keep up)', false);
+            } else {
+              ws.send(codec ? codec.encodeAudio(pcm) : pcm);
+            }
+          }
         },
         (v: number) => {
           events.onLevel(v);
@@ -859,12 +886,21 @@ export function createOnlineLane(events: LaneEvents, config: OnlineLaneConfig = 
     // previous_text rides the FIRST chunk on a RECONNECT only (never a fresh session); a partial is never
     // fed back (a mistake fed back propagates).
     codec = session.transport === 'direct' ? createAsrCodec(initial ? undefined : (lastFinalForReconnect || undefined)) : null;
+    // TASK 12.6: on the proxied (qwen3) path the session terms travel as the FIRST WS message, not in the
+    // URL query string (query strings land in access logs and hit proxy length limits). On the direct
+    // path terms are keyterms in the vendor's own handshake — not ours to move. `codec === null` ⇒ proxy.
+    const proxyTerms = codec ? null : (opts?.terms ?? '').slice(0, CORPUS_MAX_CHARS);
 
     const socket = new WebSocket(session.url);
     socket.binaryType = 'arraybuffer';
     ws = socket;
 
-    socket.onopen = () => setStatus('ready');
+    socket.onopen = () => {
+      if (proxyTerms !== null) {
+        try { socket.send(JSON.stringify({ type: 'session.terms', corpus: proxyTerms })); } catch { /* ignore */ }
+      }
+      setStatus('ready');
+    };
     socket.onmessage = (ev: MessageEvent) => {
       if (typeof ev.data !== 'string') return; // JSON text frames only (both transports)
       if (codec) {
@@ -1093,6 +1129,8 @@ export function createOnlineLane(events: LaneEvents, config: OnlineLaneConfig = 
     silentReconnects = 0;
     lastSaveAt = null;
     lastSaveDownloaded = false;
+    lastSaveOk = true;
+    sendBacklogBytes = 0;
     lastUsageReportAt = null;
     latency.reset();
     setTtsPlaybackStartHandler((subtitleId) => {
@@ -1103,7 +1141,9 @@ export function createOnlineLane(events: LaneEvents, config: OnlineLaneConfig = 
     sessionStartedISO = new Date(now).toISOString();
     if (autoSaveTimer) clearInterval(autoSaveTimer);
     autoSaveTimer = setInterval(() => {
-      if (sessionLinesVersion !== lastSavedVersion && sessionLines.size > 0) void doSave();
+      // TASK 12.3: auto-save NEVER downloads on failure — a bad endpoint must not fire a download
+      // every 30s onto the projected screen. The failure is recorded (lastSaveOk) and the next tick retries.
+      if (sessionLinesVersion !== lastSavedVersion && sessionLines.size > 0) void doSave(false);
     }, AUTO_SAVE_INTERVAL_MS);
     if (usageReportTimer) clearInterval(usageReportTimer);
     usageReportTimer = setInterval(() => void sendUsageReport(), USAGE_REPORT_INTERVAL_MS);
@@ -1152,7 +1192,7 @@ export function createOnlineLane(events: LaneEvents, config: OnlineLaneConfig = 
   }
 
   async function saveSession(): Promise<SaveOutcome> {
-    return doSave();
+    return doSave(true); // manual "Lưu transcript": download on failure is the right safety net (12.3)
   }
 
   function getDiagnostics(): OnlineDiagnostics {
@@ -1173,6 +1213,8 @@ export function createOnlineLane(events: LaneEvents, config: OnlineLaneConfig = 
       lastUsageReportAt,
       lastSaveAt,
       lastSaveDownloaded,
+      lastSaveOk,
+      sendBacklogBytes,
     };
   }
 
