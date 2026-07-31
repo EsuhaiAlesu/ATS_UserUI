@@ -88,6 +88,18 @@ const SCRIBE_MIN_SILENCE_MS = num('SCRIBE_MIN_SILENCE_MS', 100);
 const SCRIBE_FILTER_BACKGROUND = env('SCRIBE_FILTER_BACKGROUND', ''); // empty = do not send (demo parity); fallback only — the console switch (11.13) outranks it
 const SCRIBE_NO_VERBATIM = env('SCRIBE_NO_VERBATIM', ''); // empty = send nothing; 'true' → recogniser drops fillers/disfluencies
 const SCRIBE_SEND_LANGUAGE_CODE = env('SCRIBE_SEND_LANGUAGE_CODE', 'false');
+// Narrow auto-detect to the languages this event actually uses. A WHITELIST is not the pin that broke
+// TASK 6: `language_code` names the primary and `secondary_languages` the others the session is allowed
+// to hear, so a two-way microphone stays two-way while Chinese/Thai/Italian stop being possible answers.
+// Comma-separated. Set empty to restore free auto-detect (instant rollback, no code change).
+//
+// Verified against a live session on 2026-07-30, both directions: the vendor echoes back
+// `language_code: "ja", secondary_languages: ["vi"]` — it ACCEPTS the pair — and Vietnamese speech
+// still returns as Vietnamese with Japanese as the primary, so a two-way microphone stays two-way.
+// Without it the same handshake echoes `language_code: null`, which is how a Vietnamese sentence came
+// back as Chinese and was translated and read to the hall.
+const SCRIBE_LANGUAGE_WHITELIST = env('SCRIBE_LANGUAGE_WHITELIST', 'ja,vi');
+const SCRIBE_SECONDARY_LANGUAGE_FORMAT = env('SCRIBE_SECONDARY_LANGUAGE_FORMAT', 'repeat');
 const SCRIBE_TOKEN_TTL_MS = 15 * 60 * 1000;
 const SCRIBE_KEYTERM_MAX_LEN = 20;
 const SCRIBE_KEYTERM_MAX = 30;
@@ -260,7 +272,42 @@ function targetLanguageTermPolicy(targetLanguage) {
   return '';
 }
 
-export function buildRefinePrompt({ sourceText, previewText, sourceLanguage, targetLanguage, sourceEmotion, sourcePace, recentFinals, sessionBrief, sessionTerms }) {
+// M12 — the fragment block. The recogniser ends a turn on SILENCE, not on meaning, so a transcript can
+// arrive as half a thought ("Chúng tôi rất vinh dự được đón tiếp"). Translated as if it were a whole
+// sentence, Japanese closes it with a polite sentence ending and the audience is told something the
+// speaker never finished saying — then the second half arrives and is read out as a second sentence.
+// The client now waits for the rest of the thought where it can (livePipelinePolicy: the continuation
+// window) and, when a ceiling forces the cut anyway, says so here. Only the honest options remain:
+// translate exactly the clause that arrived, and leave it grammatically open.
+function fragmentPolicy(targetLanguage) {
+  return [
+    'IMPORTANT — the source transcript below is an UNFINISHED FRAGMENT: the recogniser closed it on a pause, not at the end of the thought. The rest of the sentence is still being spoken and will arrive as the next subtitle.',
+    '- Translate ONLY the words that are actually present. Never complete, round off, or guess the ending.',
+    '- Keep target_final grammatically open, exactly as open as the source is: a clause stays a clause.',
+    targetLanguage.startsWith('ja')
+      ? '- In Japanese: do NOT close the fragment with です/ます/だ or a sentence-final particle, and do not add 。 at the end. Use the continuing form (て/で, が, ので, 連用形) that a speaker would use mid-sentence.'
+      : '- In Vietnamese: do not add a closing particle or a full stop, and do not add a subject, verb, or object that the fragment does not contain.',
+    '- Use the recent subtitles above only to keep terminology and register consistent — never to fill in the missing half.',
+  ].join('\n');
+}
+
+// The other half of the same problem. The recogniser closes a turn after ~1.5 s of silence, so when a
+// speaker pauses mid-sentence to think, the second half arrives seconds later — far too late for the
+// client to glue it back on. It can only say WHERE it belongs. Told that, the model translates this text
+// as the continuation of a half the audience has already read, instead of restarting the sentence and
+// repeating what was just said.
+function continuationPolicy(previousFragment) {
+  return [
+    'IMPORTANT — the subtitle immediately before this one was cut off mid-thought, and the transcript below is its CONTINUATION (the speaker paused, then carried on).',
+    `First half, already translated and shown to the audience:\n${previousFragment}`,
+    '- Translate the transcript below as the continuation of that half: read one after the other, the two subtitles must form one natural sentence.',
+    '- Do NOT repeat, re-translate, or summarise the first half — it is already on screen and has already been spoken aloud.',
+    '- Do not restart the sentence: begin exactly where the first half stopped, and keep its grammatical thread (subject, tense, register).',
+    '- Use the first half only to continue it correctly. It is not evidence for any content that is missing from the transcript below.',
+  ].join('\n');
+}
+
+export function buildRefinePrompt({ sourceText, previewText, sourceLanguage, targetLanguage, sourceEmotion, sourcePace, recentFinals, sessionBrief, sessionTerms, sourceIsFragment, previousFragment }) {
   return [
     'Refine a realtime translated subtitle for a live company event. Use the source transcript, preview translation, recent context, and provided terms to produce one accurate final subtitle in the target language. Preserve names, numbers, times, acronyms, tone, and meaning. Return only valid JSON.',
     [
@@ -291,6 +338,8 @@ export function buildRefinePrompt({ sourceText, previewText, sourceLanguage, tar
       ? `Session terms for this meeting (highest priority):\n${sessionTerms.map((term) => term.target ? `- ${term.source} → ${term.target}` : `- ${term.source} (keep exact)`).join('\n')}`
       : '',
     recentFinals.length > 0 ? `Recent final subtitles:\n${recentFinals.join('\n')}` : '',
+    previousFragment ? continuationPolicy(previousFragment) : '',
+    sourceIsFragment ? fragmentPolicy(targetLanguage) : '',
     `Source transcript:\n${sourceText || '(not available)'}`,
     `Realtime preview translation:\n${previewText || '(not available)'}`,
     sourceEmotion ? `Source speaker emotion (detected from audio): ${sourceEmotion}` : '',
@@ -488,15 +537,63 @@ async function mintScribeToken() {
 // Split session terms into keyterms; drop any over 20 chars — a single over-long keyterm makes the
 // recogniser reject the ENTIRE session (observed 14/07 with "Chương trình Vinh danh"). Cap at 30. A
 // dropped term still reaches the refine stage, so no meaning is lost.
+//
+// A glossary line has the shape `nguồn = đích`, and "Lê Long Sơn = レ・ロン・ソン" is 25 characters — so the
+// whole line was dropped, and proper nouns, the one thing the recogniser most needs help with, were
+// exactly what never reached it. Split on `=` and take both sides; each is a real spoken form in its own
+// language. Interleaved per line (source, target, source, target…), NOT all-sources-then-all-targets:
+// the operator ranks the glossary, so the top lines must keep both forms before the 30-term cap bites.
 export function pickScribeKeyterms(corpus) {
-  const all = String(corpus || '').split(/[,\n;·]/).map((t) => t.trim()).filter(Boolean);
+  const lines = String(corpus || '').split(/[,\n;·]/).map((t) => t.trim()).filter(Boolean);
+  const all = [];
+  for (const line of lines) {
+    const eq = line.indexOf('=');
+    if (eq < 0) { all.push(line); continue; }
+    for (const side of [line.slice(0, eq), line.slice(eq + 1)]) {
+      const s = side.trim();
+      if (s) all.push(s);
+    }
+  }
   const kept = [];
+  const seen = new Set();
   let dropped = 0;
   for (const t of all) {
+    if (seen.has(t)) continue;            // the same name on two lines is one keyterm, not two
     if (t.length > SCRIBE_KEYTERM_MAX_LEN || kept.length >= SCRIBE_KEYTERM_MAX) { dropped += 1; continue; }
+    seen.add(t);
     kept.push(t);
   }
   return { kept, dropped };
+}
+
+/**
+ * Which languages this session is allowed to hear.
+ *
+ * Three cases, in order:
+ *  1. a whitelist is configured → the session's own language leads (or the first entry, for a two-way
+ *     session that has none) and the rest ride as secondaries. Auto-detect still happens — it just
+ *     cannot wander outside the list.
+ *  2. no whitelist, SCRIBE_SEND_LANGUAGE_CODE=true, one-way session → the old hard pin.
+ *  3. otherwise → nothing at all: free auto-detect, exactly as before.
+ *
+ * Secondaries are never sent without a primary: the vendor leaves that undefined, and half-applying a
+ * language restriction is worse than not restricting, because it looks applied.
+ */
+function applyLanguageRestriction(p, language) {
+  const whitelist = SCRIBE_LANGUAGE_WHITELIST.split(',').map((c) => c.trim().toLowerCase()).filter(Boolean);
+  const sessionLang = language && language !== 'auto' ? language : '';
+  if (whitelist.length) {
+    const primary = sessionLang && whitelist.includes(sessionLang) ? sessionLang : whitelist[0];
+    p.set('language_code', primary);
+    const secondary = whitelist.filter((c) => c !== primary);
+    if (secondary.length) {
+      if (SCRIBE_SECONDARY_LANGUAGE_FORMAT === 'csv') p.set('secondary_languages', secondary.join(','));
+      else for (const code of secondary) p.append('secondary_languages', code);
+    }
+    return;
+  }
+  // Do NOT send language_code unless explicitly enabled: pinning a language alone is exactly what breaks TASK 6.
+  if (SCRIBE_SEND_LANGUAGE_CODE === 'true' && sessionLang) p.set('language_code', sessionLang);
 }
 
 // Build the handshake query. `roomFilter` is THREE-STATE (TASK 11.13): true → set the parameter; false →
@@ -521,8 +618,7 @@ export function buildScribeWsParams({ token, language, keyterms, roomFilter }) {
   else if (roomFilter === false) filterApplied = false; // explicit OFF beats the env
   else filterApplied = SCRIBE_FILTER_BACKGROUND === 'true' || SCRIBE_FILTER_BACKGROUND === '1';
   if (filterApplied) p.set('filter_background_audio', 'true');
-  // Do NOT send language_code unless explicitly enabled: pinning a language is exactly what breaks TASK 6.
-  if (SCRIBE_SEND_LANGUAGE_CODE === 'true' && language && language !== 'auto') p.set('language_code', language);
+  applyLanguageRestriction(p, language);
   // Do NOT send audio_format (pcm_16000 is the default — fewer params, closer to the demo).
   return { params: p, filterApplied };
 }
@@ -817,6 +913,10 @@ export function installOnlineApi(server, { requireAuth } = {}) {
           sendJson(res, 400, { error: 'sourceText or previewText is required.' });
           return true;
         }
+        // M12: only an explicit true counts — an older client that never sends the field keeps exactly the
+        // whole-sentence behaviour it was written against.
+        const sourceIsFragment = body?.sourceIsFragment === true;
+        const previousFragment = limitText(body?.previousFragment, MAX_TEXT_CHARS);
         try {
           const result = await refineWithLlm({
             sourceText,
@@ -830,9 +930,11 @@ export function installOnlineApi(server, { requireAuth } = {}) {
               : [],
             sessionBrief: limitText(body?.sessionBrief, SESSION_BRIEF_MAX_CHARS),
             sessionTerms: parseSessionTerms(typeof body?.sessionTerms === 'string' ? body.sessionTerms : ''),
+            sourceIsFragment,
+            previousFragment,
           });
           const { outputFormat, ...payload } = result;
-          logLine('refine.ok', { outputFormat, sourceLength: payload.sourceText.length, translatedLength: payload.translatedText.length, ttsSpeed: payload.ttsSpeed, traceId: traceId || null });
+          logLine('refine.ok', { outputFormat, sourceLength: payload.sourceText.length, translatedLength: payload.translatedText.length, ttsSpeed: payload.ttsSpeed, fragment: sourceIsFragment, continues: Boolean(previousFragment), traceId: traceId || null });
           sendJson(res, 200, { ...payload, traceId: traceId || undefined });
         } catch (error) {
           logLine('refine.fail', { message: String(error?.message ?? error).slice(0, 300) });

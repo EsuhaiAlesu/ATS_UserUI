@@ -22,9 +22,13 @@ export interface AsrSession {
 // The lane's EXISTING event vocabulary — the shapes `onlineLane` already handles. `decode()`
 // translates the vendor's names into exactly these so nothing downstream has to change.
 export type DecodedEvent =
-  | { type: 'session.created' }
-  | { type: 'conversation.item.input_audio_transcription.text'; text: ''; stash: string; language?: string }
-  | { type: 'conversation.item.input_audio_transcription.completed'; transcript: string; language?: string }
+  // `asrLanguages` is the handshake ECHO: the languages the recogniser confirms it will listen for.
+  // Absent means it accepted no restriction and is free to hear anything — including the Chinese and
+  // Italian it produced from Vietnamese speech at the ceremony. Reporting the accepted value (never the
+  // requested one) is the only way to tell "we asked" from "it agreed".
+  | { type: 'session.created'; asrLanguages?: string[]; languageDetection?: boolean }
+  | { type: 'conversation.item.input_audio_transcription.text'; text: ''; stash: string; detectedLanguage?: string }
+  | { type: 'conversation.item.input_audio_transcription.completed'; transcript: string; detectedLanguage?: string }
   | { type: 'asr.commit_throttled' }
   | { type: 'error'; error: { message: string } };
 
@@ -99,6 +103,17 @@ export function createAsrCodec(previousText?: string): AsrCodec {
   // Final-dedup memory: the last emitted `completed` transcript and when it was emitted.
   let lastFinalText: string | null = null;
   let lastFinalAt = 0;
+  // Set once this session has actually delivered a timestamped final with words in it — the twin that
+  // carries the detected language. Until then the plain twin is all we have and must be used.
+  let sawTimestampedFinal = false;
+  // Set when the handshake itself promised language detection, which is the vendor saying the tagged
+  // twin is coming. Measured against a live session: the plain twin always arrives FIRST and always
+  // WITHOUT a tag, so waiting for the twin from the very first sentence is what keeps sentence one from
+  // being routed blind. Partials carry no tag either — the tagged final is the only source there is.
+  let expectTaggedFinal = false;
+  // A plain final withheld while its tagged twin is expected. Kept so a broken promise can be detected
+  // (see below) instead of silently swallowing the session.
+  let heldPlainFinal: string | null = null;
 
   return {
     encodeAudio(pcm: ArrayBuffer): string {
@@ -136,18 +151,31 @@ export function createAsrCodec(previousText?: string): AsrCodec {
       const type = strOf(msg.message_type) ?? strOf(msg.type) ?? '';
 
       switch (type) {
-        case 'session_started':
-          return { event: { type: 'session.created' }, fatal: false };
+        case 'session_started': {
+          const cfg = (msg.config && typeof msg.config === 'object' ? msg.config : {}) as Record<string, unknown>;
+          const primary = strOf(cfg.language_code);
+          const languages = [...codeList(primary), ...codeList(cfg.secondary_languages)];
+          const detection = cfg.include_language_detection;
+          if (detection === true || detection === 'true') expectTaggedFinal = true;
+          return {
+            event: {
+              type: 'session.created',
+              ...(languages.length ? { asrLanguages: languages } : {}),
+              ...(detection === undefined ? {} : { languageDetection: detection === true || detection === 'true' }),
+            },
+            fatal: false,
+          };
+        }
 
         case 'partial_transcript': {
           const stash = pickText(msg) ?? '';
-          const language = strOf(msg.language);
+          const detectedLanguage = pickDetectedLanguage(msg);
           return {
             event: {
               type: 'conversation.item.input_audio_transcription.text',
               text: '',
               stash,
-              ...(language ? { language } : {}),
+              ...(detectedLanguage ? { detectedLanguage } : {}),
             },
             fatal: false,
           };
@@ -158,6 +186,29 @@ export function createAsrCodec(previousText?: string): AsrCodec {
         case 'final_transcript':
         case 'final_transcript_with_timestamps': {
           const transcript = pickText(msg) ?? '';
+          // Every committed sentence arrives TWICE: a plain final and a timestamped one. Only the
+          // timestamped twin carries the detected language, and the plain one always arrives FIRST — so
+          // the dedup below would emit the plain twin and throw the label away, which is precisely how
+          // "我是海空啊" (kanji, no kana) kept being routed as Japanese. Hold the plain twin when a tagged
+          // one is expected. Adaptive, not assumed: a session that never delivers a timestamped final
+          // keeps working exactly as before, so a vendor change can never silence the transcript.
+          const timestamped = type.endsWith('_with_timestamps');
+          if (timestamped) {
+            if (transcript.trim()) sawTimestampedFinal = true;
+            heldPlainFinal = null;
+          } else if (sawTimestampedFinal || expectTaggedFinal) {
+            // Self-healing: a SECOND plain final while the first is still waiting means the promised
+            // twin never came. Stop waiting for good and let this one through, so a vendor that changes
+            // its mind costs one sentence rather than the entire session's transcript.
+            if (heldPlainFinal !== null && heldPlainFinal !== transcript) {
+              expectTaggedFinal = false;
+              sawTimestampedFinal = false;
+              heldPlainFinal = null;
+            } else {
+              heldPlainFinal = transcript;
+              return null;
+            }
+          }
           const now = Date.now();
           // Swallow the timestamped twin: identical text seen again within the window.
           if (lastFinalText !== null && transcript === lastFinalText && now - lastFinalAt < FINAL_DEDUP_MS) {
@@ -165,12 +216,12 @@ export function createAsrCodec(previousText?: string): AsrCodec {
           }
           lastFinalText = transcript;
           lastFinalAt = now;
-          const language = strOf(msg.language);
+          const detectedLanguage = pickDetectedLanguage(msg);
           return {
             event: {
               type: 'conversation.item.input_audio_transcription.completed',
               transcript,
-              ...(language ? { language } : {}),
+              ...(detectedLanguage ? { detectedLanguage } : {}),
             },
             fatal: false,
           };
@@ -214,6 +265,25 @@ function strOf(v: unknown): string | undefined {
 /** The vendor may name the transcript `text` OR `transcript`; accept either. */
 function pickText(msg: Record<string, unknown>): string | undefined {
   return strOf(msg.text) ?? strOf(msg.transcript);
+}
+
+/**
+ * The recogniser's OWN verdict on the language it just heard — present because the session is opened
+ * asking for language detection.
+ *
+ * Deliberately NOT the bare `language` field. That one exists too, and it carries the language the
+ * OPERATOR selected in the console: reading it would make every utterance "detected" as whatever the
+ * console is set to, which is the opposite of a check. Reading the wrong one of these two is exactly
+ * why the foreign-language guard never fired and Chinese kept being routed as Japanese.
+ */
+function pickDetectedLanguage(msg: Record<string, unknown>): string | undefined {
+  return strOf(msg.language_code) ?? strOf(msg.detectedLanguage) ?? strOf(msg.detected_language);
+}
+
+/** A handshake echo may be one code or a list of them; normalise to a list of lowercase codes. */
+function codeList(v: unknown): string[] {
+  const raw = typeof v === 'string' ? v.split(',') : Array.isArray(v) ? v : [];
+  return raw.map((c) => String(c).trim().toLowerCase()).filter(Boolean);
 }
 
 function isErrorShaped(msg: Record<string, unknown>, type: string): boolean {

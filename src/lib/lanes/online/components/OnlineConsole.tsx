@@ -669,6 +669,18 @@ const OnlineConsole: React.FC = () => {
                   <div className="font-label-caps text-label-caps text-on-surface-variant space-y-1" style={{ fontFamily: 'ui-monospace, monospace' }}>
                     <div>reconnects {diag.reconnectAttempts} · silent {diag.silentReconnects} · sinceEvent {diag.secondsSinceLastEvent.toFixed(1)}s</div>
                     <div>voiced {diag.voicedMsRecent}ms · ghosts {diag.droppedGhosts}</div>
+                    {/* M11 — turn handling. `cắt` near zero during a busy hall means the client-side
+                        commit is not firing and the long stalls are back; `bỏ lạ` and `đổi tiếng` are
+                        the two-way guards, and both being zero in a bilingual session is also a signal. */}
+                    <div>cắt {diag.manualCommits} · bỏ tiếng lạ {diag.foreignDrops} · đổi tiếng {diag.languageTurns}</div>
+                    {/* M12 — chờ trọn ý. `ghép ý` là số mảnh câu đã được nối lại trước khi dịch (trước
+                        đây mỗi mảnh này là một câu dịch nửa vời đọc lên loa); `mảnh` là số câu vẫn phải
+                        gửi đi khi chưa có dấu kết — cao bất thường nghĩa là đang chạm trần chờ; `nối tiếp`
+                        là số câu được dịch như phần nối của nửa câu ngay trước nó. */}
+                    <div>ghép ý {diag.continuationMerges} · mảnh {diag.fragmentRefines} · nối tiếp {diag.fragmentLinks}</div>
+                    {/* What the recogniser AGREED to listen for, in its own handshake reply. "tự do" means
+                        it accepted no restriction and any language on earth can still come back. */}
+                    <div>máy nghe: {diag.asrLanguages ?? 'tự do (mọi thứ tiếng)'} · nhãn {diag.vendorTags}</div>
                     <div>draft {diag.draftCalls} (dup {diag.draftSkipped.duplicate}·rate {diag.draftSkipped['rate-limit']}·infl {diag.draftSkipped['in-flight']})</div>
                     <div>refine {diag.refineCalls} · retries {diag.refineRetries}</div>
                     <div>ttsQueue {diag.ttsQueueLength} · gate {diag.gateActive ? 'on' : 'off'} · gatedMs {diag.gatedMs}</div>

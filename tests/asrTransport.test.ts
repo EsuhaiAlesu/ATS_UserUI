@@ -72,19 +72,131 @@ describe('createAsrCodec — decode maps the vendor vocabulary', () => {
     expect(r!.fatal).toBe(false)
   })
 
-  it('accepts transcript OR text, and carries language when present', () => {
+  it('accepts transcript OR text, and carries the DETECTED language when present', () => {
     const r = createAsrCodec().decode(
-      JSON.stringify({ message_type: 'final_transcript', transcript: 'こんにちは', language: 'ja' }),
+      JSON.stringify({ message_type: 'final_transcript', transcript: 'こんにちは', language_code: 'ja' }),
     )
-    const ev = r!.event as { type: string; transcript: string; language?: string }
+    const ev = r!.event as { type: string; transcript: string; detectedLanguage?: string }
     expect(ev.type).toBe('conversation.item.input_audio_transcription.completed')
     expect(ev.transcript).toBe('こんにちは')
-    expect(ev.language).toBe('ja')
+    expect(ev.detectedLanguage).toBe('ja')
   })
 
   it('commit_throttled → asr.commit_throttled (diagnostic)', () => {
     const r = createAsrCodec().decode(JSON.stringify({ message_type: 'commit_throttled' }))
     expect(r).toEqual({ event: { type: 'asr.commit_throttled' }, fatal: false })
+  })
+})
+
+// M11 — the vendor's own language verdict, and the twin that carries it.
+describe('createAsrCodec — nhãn ngôn ngữ của máy nhận dạng', () => {
+  it('BỎ QUA trường `language` trần — đó là lựa chọn của người vận hành, không phải kết quả nhận diện', () => {
+    const r = createAsrCodec().decode(
+      JSON.stringify({ message_type: 'final_transcript', transcript: 'Xin chào', language_code: 'vi', language: 'ja' }),
+    )
+    const ev = r!.event as { detectedLanguage?: string }
+    expect(ev.detectedLanguage).toBe('vi') // đọc nhầm trường kia là lý do bộ lọc tiếng lạ không bao giờ nổ
+  })
+
+  it('đọc được nhãn trên cả bản nháp (partial)', () => {
+    const r = createAsrCodec().decode(
+      JSON.stringify({ message_type: 'partial_transcript', text: 'đang nói', language_code: 'vi' }),
+    )
+    const ev = r!.event as { detectedLanguage?: string }
+    expect(ev.detectedLanguage).toBe('vi')
+  })
+
+  it('session_started báo đúng những thứ tiếng máy ĐÃ CHẤP NHẬN, tiếng chính đứng đầu', () => {
+    const r = createAsrCodec().decode(JSON.stringify({
+      message_type: 'session_started',
+      config: { language_code: 'ja', secondary_languages: ['vi'], include_language_detection: true },
+    }))
+    const ev = r!.event as { asrLanguages?: string[]; languageDetection?: boolean }
+    expect(ev.asrLanguages).toEqual(['ja', 'vi'])
+    expect(ev.languageDetection).toBe(true)
+  })
+
+  it('echo dạng csv đọc y hệt dạng danh sách', () => {
+    const r = createAsrCodec().decode(JSON.stringify({
+      message_type: 'session_started',
+      config: { language_code: 'ja', secondary_languages: 'vi,en' },
+    }))
+    const ev = r!.event as { asrLanguages?: string[] }
+    expect(ev.asrLanguages).toEqual(['ja', 'vi', 'en'])
+  })
+
+  it('echo KHÔNG có thứ tiếng nào → không báo gì: giới hạn đã KHÔNG được áp dụng', () => {
+    const r = createAsrCodec().decode(JSON.stringify({
+      message_type: 'session_started',
+      config: { language_code: null, include_language_detection: false },
+    }))
+    const ev = r!.event as { asrLanguages?: string[]; languageDetection?: boolean }
+    expect(ev.asrLanguages).toBeUndefined()
+    expect(ev.languageDetection).toBe(false)
+  })
+})
+
+// M11 — the plain twin always arrives first and always without a tag; hold it when a tagged one is due.
+describe('createAsrCodec — giữ bản twin mang nhãn', () => {
+  afterEach(() => vi.useRealTimers())
+
+  const started = (detection: boolean) => JSON.stringify({
+    message_type: 'session_started',
+    config: { language_code: 'ja', secondary_languages: ['vi'], include_language_detection: detection },
+  })
+  const plain = (text: string) => JSON.stringify({ message_type: 'committed_transcript', text })
+  const tagged = (text: string, code?: string) => JSON.stringify({
+    message_type: 'committed_transcript_with_timestamps', text, ...(code ? { language_code: code } : {}),
+  })
+
+  it('khi bản có timestamp đã tự chứng minh, bản trơn thôi thắng cuộc đua', () => {
+    vi.useFakeTimers(); vi.setSystemTime(0)
+    const codec = createAsrCodec()
+    expect(codec.decode(plain('Câu một.'))).not.toBeNull() // câu đầu chưa có bằng chứng → vẫn dùng
+    vi.setSystemTime(100)
+    expect(codec.decode(tagged('Câu một.', 'vi'))).toBeNull() // dedup nuốt bản trùng
+    vi.setSystemTime(5_000)
+    expect(codec.decode(plain('Câu hai.'))).toBeNull() // giờ thì chờ bản mang nhãn
+    const r = codec.decode(tagged('Câu hai.', 'vi'))
+    expect((r!.event as { detectedLanguage?: string }).detectedLanguage).toBe('vi')
+  })
+
+  it('khi handshake đã hứa có nhận diện ngôn ngữ, NGAY câu đầu tiên đã chờ bản mang nhãn', () => {
+    vi.useFakeTimers(); vi.setSystemTime(0)
+    const codec = createAsrCodec()
+    codec.decode(started(true))
+    expect(codec.decode(plain('我是海空啊'))).toBeNull() // câu 1 không còn bị định tuyến mù
+    const r = codec.decode(tagged('我是海空啊', 'zh'))
+    expect((r!.event as { detectedLanguage?: string }).detectedLanguage).toBe('zh')
+  })
+
+  it('lời hứa bị bội chỉ mất MỘT câu, không mất cả phiên', () => {
+    vi.useFakeTimers(); vi.setSystemTime(0)
+    const codec = createAsrCodec()
+    codec.decode(started(true))
+    expect(codec.decode(plain('Câu bị mất.'))).toBeNull()
+    vi.setSystemTime(5_000)
+    const r = codec.decode(plain('Câu sau vẫn qua.')) // bản trơn thứ hai gỡ bỏ việc chờ
+    expect((r!.event as { transcript: string }).transcript).toBe('Câu sau vẫn qua.')
+  })
+
+  it('handshake KHÔNG hứa gì → bản trơn dùng y như trước', () => {
+    vi.useFakeTimers(); vi.setSystemTime(0)
+    const codec = createAsrCodec()
+    codec.decode(started(false))
+    const r = codec.decode(plain('Xin chào quý vị.'))
+    expect((r!.event as { transcript: string }).transcript).toBe('Xin chào quý vị.')
+  })
+
+  it('bản timestamp RỖNG không chứng minh được gì — bản trơn vẫn chạy', () => {
+    vi.useFakeTimers(); vi.setSystemTime(0)
+    const codec = createAsrCodec()
+    expect(codec.decode(plain('Câu một.'))).not.toBeNull()
+    vi.setSystemTime(100)
+    codec.decode(tagged('')) // twin rỗng: không có chữ nào thì không chứng minh gì
+    vi.setSystemTime(5_000)
+    const r = codec.decode(plain('Câu hai.'))
+    expect((r!.event as { transcript: string }).transcript).toBe('Câu hai.')
   })
 })
 

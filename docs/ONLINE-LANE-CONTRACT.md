@@ -1,4 +1,10 @@
-# Online Lane Contract — v0.4 (2026-07-29)
+# Online Lane Contract — v0.5 (2026-07-31)
+
+> **v0.5 changelog (PROMPT-10 PART 1 — M11/M12: hear it right, cut it right, translate whole thoughts):**
+> Two OPTIONAL, ADDITIVE request fields on `POST /online-api/refine-preview-translation` (§3):
+> `sourceIsFragment?: boolean` and `previousFragment?: string`. No new endpoint, no new WS event, no
+> response change. A server that ignores them and a client that never sends them both keep working
+> exactly as they do today; only the `refine` stage ever sends them, drafts never do.
 
 Source of truth for the ONLINE lane (Esuhai Realtime Translation core). Do not invent endpoints, events, or fields beyond this file. Model names are server-internal (configured via server env) — the client never depends on them; externally only friendly endpoint names exist.
 
@@ -32,6 +38,8 @@ Source of truth for the ONLINE lane (Esuhai Realtime Translation core). Do not i
    `{ sourceText, sourceLanguage, targetLanguage, recentFinals?: string[], sessionBrief?, sessionTerms?, sourceEmotion?, sourcePace?, traceId?, subtitleId?, refineStage?: 'draft'|'refine' }`
    → response `{ sourceText, translatedText, ttsText?, emotion?, ttsSpeed?, traceId? }`
    - The returned `sourceText` may already be ASR-corrected using the session terms — always display the returned version, not the raw transcript.
+   - `sourceIsFragment?: boolean` — `true` when the transcript was closed by a pause or by a client-side ceiling while the thought was still open, so the model must translate only the clause present and leave it grammatically open. Absent/`false` = a finished sentence, the previous behaviour. Only the `refine` stage sends it; drafts never do.
+   - `previousFragment?: string` — the previous subtitle's text when THAT one was itself cut mid-thought and this transcript resumes it. Absent when this transcript starts a thought of its own. Only the `refine` stage sends it; drafts never do.
 4. `POST /online-api/tts` body `{ text, language:'ja'|'vi', emotion?, speed?, traceId?, subtitleId? }` → response is an audio stream.
 5. `POST /online-api/save-session` body `{ filename, json, md }` → `{ saved:true, filename }`.
 6. `POST /online-api/usage-report` — free-form JSON body (the server just logs it for cost tracking; ~4000-char limit). The client sends it periodically (~every 5 min) and once on stop; it is best-effort (a 404/failure is silently ignored). Current body shape: `{ lane:'online', sessionStartedAt, finals, draftCalls, draftSkipped, refineCalls, refineRetries, ttsSentences, reconnects, droppedGhosts }`.

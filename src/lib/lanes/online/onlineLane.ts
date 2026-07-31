@@ -12,14 +12,15 @@
 import type { LaneController, LaneEvents, LaneLine, LaneStatus } from '../types';
 import { startPcm16Capture, type CaptureHandle, type CapturePacket } from './pcm16Capture';
 import { endsWithStrongSentenceBreak, findFirstCommaClauseBreak, findLastStrongSentenceBreak } from './transcriptSegmentation';
-import { ASR_FINAL_MIN_VOICED_MS, ASR_PARTIAL_MIN_VOICED_MS, hasClearSpeechEvidence } from './asrSpeechEvidence';
+import { ASR_FINAL_MIN_VOICED_MS, ASR_PARTIAL_MIN_VOICED_MS, hasClearSpeechEvidence, isNonSpeechAnnotation } from './asrSpeechEvidence';
 import { isStableDraftPrefix, joinLiveDraftSource, stripPromotedPrefix } from './liveDraftTranslation';
-import { DRAFT_RATE_WINDOW_MS, decideDraftAdmission, getAdaptiveShortUtteranceFlushDelay } from './livePipelinePolicy';
+import { DRAFT_RATE_WINDOW_MS, decideDraftAdmission, getContinuationWaitMs } from './livePipelinePolicy';
+import { nextScribeForceCommitDelay, planStableScribeCommit, type ScribeManualCommitReason } from './scribeManualCommit';
 import { estimateSourceSpeechPace } from './sourceSpeechPace';
 import { enqueueTtsSentence, getTtsQueueLength, resetTtsPlayback, setTtsPlaybackStartHandler, stopTtsPlayback, subscribeTtsSpeaking } from './ttsPlayback';
 import { buildSessionExport, saveSessionExport, type SaveOutcome, type SessionLine } from './sessionExport';
 import { createLatencyTracker, type LatencyReport } from './latencyTracker';
-import { classifyUtterance, createDirectionTracker, directionOf, type DirectionTracker, type Lang } from './utteranceDirection';
+import { classifyInterimUtterance, createDirectionTracker, decideFinalLanguage, directionOf, type DirectionTracker, type Lang } from './utteranceDirection';
 import { fetchAsrSession, createAsrCodec, type AsrCodec } from './asrTransport';
 
 const ONLINE_BASE = '/online-api';
@@ -38,7 +39,13 @@ const WATCHDOG_INTERVAL_MS = 5_000;
 // M3 — sentence segmentation
 const SEGMENT_MAX_CHARS = 120; // longer finalized text -> cut at the last strong break
 const SEGMENT_MIN_CHARS = 18; // shorter fragments wait to merge with the next one
-const UTTERANCE_MIN_FLUSH_CHARS = 40; // finals shorter than this wait for a companion
+// M12 — the two hard ceilings on the continuation window (livePipelinePolicy). A buffer past either one
+// is flushed even mid-thought: a late sentence is recoverable, a sentence that never appears is not.
+const SEGMENT_MAX_HOLD_MS = 3_000; // how long finalised text may keep waiting for the rest of its thought
+// M12 — how long an unfinished head stays available as "the first half" for the NEXT line. Long enough to
+// cover the recogniser's 1.5s silence close plus a real thinking pause, short enough that a genuinely new
+// thought is never translated as the continuation of something the speaker had already abandoned.
+const FRAGMENT_LINK_MAX_GAP_MS = 10_000;
 
 // M4 — ghost-transcript guard
 const VOICED_WINDOW_MS = 4_000; // sliding window over which voiced evidence is summed
@@ -91,6 +98,23 @@ type StartOpts = {
 // LaneLine — src/lib/lanes/types.ts stays untouched), alongside events.onLine rather than instead of it.
 export type DirectedLaneLine = LaneLine & { dir: 'vi2ja' | 'ja2vi' };
 
+// M12: why a buffer was closed. Only `ceiling` means "cut while the thought was still open and more may
+// still be coming" — the others have all had their full chance to grow, which is what lets refine run on
+// the short idle instead of adding its wait on top of the continuation window.
+type FlushReason =
+  | 'complete' // the buffer already reads as a finished sentence
+  | 'waited' // the continuation window expired: nothing more of this thought arrived
+  | 'ceiling' // character cap or hold cap hit mid-thought
+  | 'turn-end' // the other language started, so this speaker's turn is over
+  | 'stop'; // Dừng — drain whatever is left
+
+// M12: everything refine needs to know about where this sentence sits inside the speaker's thought.
+type ContinuationContext = {
+  fragment: boolean;         // this head was closed by silence/a ceiling, not by the speaker
+  previousFragment: string;  // the half this head resumes, '' when it starts a thought of its own
+  alreadyWaited: boolean;    // it has sat out a full continuation window, so refine skips the long idle
+};
+
 export interface OnlineLaneConfig {
   // The shared LaneController.start() signature (the treaty) carries no device/gate options,
   // so the host page supplies them here; all are read live at the relevant moment.
@@ -123,6 +147,16 @@ export interface OnlineDiagnostics {
   lastSaveDownloaded: boolean;
   lastSaveOk: boolean; // TASK 12.3 — false when the last save failed (even if nothing downloaded)
   sendBacklogBytes: number; // TASK 12.5 — the WS send buffer at the last audio frame
+  // M11 — turn handling and the two-way guards.
+  manualCommits: number; // turns the CLIENT closed instead of waiting for the vendor's silence
+  foreignDrops: number; // finals discarded because neither signal called them Vietnamese or Japanese
+  languageTurns: number; // buffers closed because the other language started speaking
+  vendorTags: number; // finals that arrived carrying the recogniser's own language verdict
+  asrLanguages: string | null; // what the recogniser AGREED to listen for; null = free auto-detect
+  // M12 — waiting for whole thoughts.
+  continuationMerges: number; // fragments glued onto a thought that was already waiting
+  fragmentRefines: number; // heads sent to refine without a closing punctuation mark
+  fragmentLinks: number; // heads translated as the continuation of the half before them
 }
 
 // Concrete online controller = the treaty + a diagnostics readout + a manual transcript save.
@@ -202,6 +236,30 @@ export function createOnlineLane(events: LaneEvents, config: OnlineLaneConfig = 
   let segmentFirstPartialAt = 0;
   let lastPartialAt = 0;
   let segmentSilentGapsMs = 0;
+  // M12: when the FIRST finalised fragment entered the current buffer — the clock for SEGMENT_MAX_HOLD_MS.
+  let segmentFirstFinalAt = 0;
+  // M12: the unfinished head the NEXT line may be continuing, and when it was closed.
+  let pendingFragmentTail = '';
+  let pendingFragmentAt = 0;
+
+  // M11 turn-handling state. `scribeLastPartial` is the vendor's UNCOMMITTED text for the current turn
+  // (not segmentBuffer, which already holds committed sentences) — the commit planner must judge the turn
+  // upstream is actually holding. `scribeCommitPending` stops a second commit going out while the first
+  // has not been answered; it clears on the completed transcript, on commit_throttled, and on reconnect.
+  let scribeLastPartial = '';
+  let scribePartialChangedAt = 0;
+  let scribeLastCommitAt = 0;
+  let scribeCommitPending = false;
+  let scribeCommitTimer: ReturnType<typeof setTimeout> | null = null;
+  let scribeForceCommitTimer: ReturnType<typeof setTimeout> | null = null;
+  let manualCommits = 0;
+  let foreignDrops = 0;
+  let languageTurns = 0;
+  let vendorTags = 0;
+  let asrLanguages: string | null = null;
+  let continuationMerges = 0;
+  let fragmentRefines = 0;
+  let fragmentLinks = 0;
 
   // diagnostics counters
   let draftCalls = 0;
@@ -253,7 +311,9 @@ export function createOnlineLane(events: LaneEvents, config: OnlineLaneConfig = 
     const settled = settledDir.get(lid);
     let source: Lang;
     if (settled) source = settled === 'vi2ja' ? 'vi' : 'ja';
-    else if (interim) source = classifyUtterance(sourceText, tracker.current()).language;
+    // M12: a draft INHERITS the direction the last finalised sentence settled on (tracker.current(), which
+    // handleFinal realigns from the vendor's own tag) and only leaves it on unambiguous script evidence.
+    else if (interim) source = classifyInterimUtterance(sourceText, tracker.current()).language;
     else { source = tracker.next(sourceText).language; settledDir.set(lid, directionOf(source)); }
     return { source, target: source === 'vi' ? 'ja' : 'vi', dir: directionOf(source) };
   }
@@ -381,6 +441,24 @@ export function createOnlineLane(events: LaneEvents, config: OnlineLaneConfig = 
     if (!a) return b;
     if (!b) return a;
     return /\s$/.test(a) ? a + b : `${a} ${b}`;
+  }
+
+  // M12: how fast the person speaking right now is actually speaking, for the continuation window. Same
+  // window flushSegment uses for `sourcePace`: speaking time minus silent gaps, plus the recogniser lead.
+  function currentSegmentUnitsPerSecond(text: string): number | undefined {
+    if (!segmentFirstPartialAt) return undefined;
+    const rawDurationMs = Date.now() - segmentFirstPartialAt;
+    if (rawDurationMs <= 0) return undefined;
+    const durationMs = Math.max(0, rawDurationMs - segmentSilentGapsMs) + FIRST_PARTIAL_LEAD_MS;
+    return estimateSourceSpeechPace(text, durationMs)?.unitsPerSecond;
+  }
+
+  // Hold an unfinished buffer for one continuation window; the next final clears this timer and re-arms it.
+  function armContinuationWait(text: string): void {
+    segmentTimer = setTimeout(() => {
+      segmentTimer = null;
+      flushSegment('waited');
+    }, getContinuationWaitMs({ text, sessionTerms: opts?.terms, unitsPerSecond: currentSegmentUnitsPerSecond(text) }));
   }
 
   function clearSegmentTimer(): void {
@@ -622,6 +700,90 @@ export function createOnlineLane(events: LaneEvents, config: OnlineLaneConfig = 
     // session-wide and intentionally NOT reset here.
   }
 
+  // ---- M11: client-side sentence commit (the cure for long stalls) ----
+
+  function clearScribeCommitTimer(): void {
+    if (scribeCommitTimer) {
+      clearTimeout(scribeCommitTimer);
+      scribeCommitTimer = null;
+    }
+  }
+
+  /** Ask upstream to close the current turn now. Returns false when there is nothing to close. */
+  function sendManualCommit(reason: ScribeManualCommitReason): boolean {
+    if (scribeCommitPending) return false;
+    if (!codec || !ws || ws.readyState !== WebSocket.OPEN || !sessionReady) return false;
+    if (!scribeLastPartial.trim()) return false;
+    try {
+      ws.send(codec.encodeCommit());
+    } catch {
+      return false; // the socket is going down; the reconnect path will re-arm everything
+    }
+    scribeCommitPending = true;
+    scribeLastCommitAt = Date.now();
+    manualCommits += 1;
+    // eslint-disable-next-line no-console
+    console.debug(`[onlineLane][commit] ${reason} len=${scribeLastPartial.trim().length}`);
+    armForceCommit();
+    return true;
+  }
+
+  // The hard ceiling. Nothing — not applause, not a speaker who never pauses — may hold the microphone
+  // for more than SCRIBE_MANUAL_FORCE_COMMIT_MS. With nothing to commit, restart the window rather than
+  // poll a quiet room every tick.
+  function armForceCommit(): void {
+    if (scribeForceCommitTimer) {
+      clearTimeout(scribeForceCommitTimer);
+      scribeForceCommitTimer = null;
+    }
+    const now = Date.now();
+    if (!scribeLastCommitAt) scribeLastCommitAt = now;
+    scribeForceCommitTimer = setTimeout(() => {
+      scribeForceCommitTimer = null;
+      if (!sendManualCommit('max-duration')) {
+        scribeLastCommitAt = Date.now();
+        armForceCommit();
+      }
+    }, nextScribeForceCommitDelay(scribeLastCommitAt, now));
+  }
+
+  // Drive the planner from the vendor's live partial. Called on every partial: the planner is cheap and
+  // it is the CHANGE timestamp, not the arrival timestamp, that decides — a speaker holding a pause
+  // keeps re-sending identical text, and that stillness is the signal.
+  function scheduleStableCommit(partial: string): void {
+    const text = partial.trim();
+    if (text !== scribeLastPartial) {
+      scribeLastPartial = text;
+      scribePartialChangedAt = Date.now();
+    }
+    clearScribeCommitTimer();
+    if (!text || scribeCommitPending) return;
+    const plan = planStableScribeCommit(text, scribePartialChangedAt, scribeLastCommitAt, Date.now());
+    if (!plan) return; // no punctuation and not long yet — the VAD backstop still owns this turn
+    scribeCommitTimer = setTimeout(() => {
+      scribeCommitTimer = null;
+      sendManualCommit(plan.reason);
+    }, plan.delayMs);
+  }
+
+  /** Forget the turn. Called when a final lands, on reconnect, and at start/teardown. */
+  function resetScribeCommitState(rearm: boolean): void {
+    clearScribeCommitTimer();
+    scribeLastPartial = '';
+    scribePartialChangedAt = 0;
+    scribeCommitPending = false;
+    if (rearm) {
+      scribeLastCommitAt = Date.now();
+      armForceCommit();
+    } else {
+      scribeLastCommitAt = 0;
+      if (scribeForceCommitTimer) {
+        clearTimeout(scribeForceCommitTimer);
+        scribeForceCommitTimer = null;
+      }
+    }
+  }
+
   // ---- events ----
 
   function handlePartial(msg: Record<string, unknown>): void {
@@ -631,6 +793,9 @@ export function createOnlineLane(events: LaneEvents, config: OnlineLaneConfig = 
     if (!hasClearSpeechEvidence(pruneVoiced(), ASR_PARTIAL_MIN_VOICED_MS)) return;
     if (Date.now() - lastLoudAt >= LONG_SILENCE_MS) return;
     noteSpeechTiming();
+    // M11: judge the turn upstream is still HOLDING — not segmentBuffer, whose earlier sentences are
+    // already committed and would make every partial look finished.
+    scheduleStableCommit((text + stash).trim());
     if (!segmentLid) segmentLid = `online-${++counter}`;
     latency.markFirstPartial(segmentLid, performance.now());
     currentInterimSource = joinSeg(segmentBuffer, (text + stash).trim());
@@ -639,6 +804,8 @@ export function createOnlineLane(events: LaneEvents, config: OnlineLaneConfig = 
   }
 
   function handleFinal(msg: Record<string, unknown>): void {
+    // M11: the turn upstream was holding is closed, whatever closed it — clock a fresh window.
+    resetScribeCommitState(true);
     const transcript = (typeof msg.transcript === 'string' ? msg.transcript : '').trim();
     if (!transcript) return;
     // M4 ghost guards (drop finals, count them).
@@ -654,36 +821,84 @@ export function createOnlineLane(events: LaneEvents, config: OnlineLaneConfig = 
       dropGhost('repeat', transcript);
       return;
     }
+    // M11: the transcriber's own "I could not hear that" marker is not something anybody said.
+    if (isNonSpeechAnnotation(transcript)) {
+      dropGhost('non-speech annotation', transcript);
+      return;
+    }
     previousFinalTranscript = transcript;
 
+    // M11: what language was this, really? The vendor tags every completed transcript (the session is
+    // opened with include_language_detection) and until now nothing read it.
+    const vendorLanguage = typeof msg.detectedLanguage === 'string' ? msg.detectedLanguage : undefined;
+    if (vendorLanguage) vendorTags += 1;
+    const decided = decideFinalLanguage(transcript, vendorLanguage);
+    if (decided.foreign) {
+      // Neither our two languages by EITHER signal. In the ceremony logs this was Chinese and Italian
+      // transcripts of Vietnamese speech, and the vendor's own "（聞き取り不能）" marker — all of which were
+      // faithfully translated and read aloud to the hall. Better a missing sentence than a fictional one.
+      foreignDrops += 1;
+      dropGhost('foreign-language', transcript);
+      return;
+    }
+
+    // M11: one microphone, two languages. A final in the OTHER language must not be glued onto the
+    // buffer: the whole buffer settles its direction ONCE, so "Xin chào quý vị" + "皆様こんにちは" becomes a
+    // single Japanese line and the Vietnamese half is translated as if it were Japanese. Closing the
+    // buffer at the turn also removes the wait — the previous speaker's tail no longer sits out the whole
+    // continuation window waiting for a continuation that will never come, which is most of the pause the
+    // operator sees whenever the two languages alternate.
+    if (twoWay && decided.language && segmentBuffer.trim()) {
+      const held = decideFinalLanguage(segmentBuffer).language;
+      if (held && held !== decided.language) {
+        languageTurns += 1;
+        flushSegment('turn-end');
+      }
+    }
+
     // M3: append to the segment buffer; the finalized sentence is not yet its own line.
+    const hadWaitingText = segmentBuffer.trim().length > 0;
     segmentBuffer = joinSeg(segmentBuffer, transcript);
     if (!segmentLid) segmentLid = `online-${++counter}`;
+    // M11: settle the direction from the strongest evidence available rather than letting dirLangs guess
+    // from the script at flush time. This is what finally routes toneless Vietnamese correctly — the
+    // vendor heard it, we can only read it. The tracker is realigned too, so the next sticky fallback
+    // (an "OK", a number) inherits the language actually being spoken.
+    if (twoWay && tracker && decided.language && decided.basis !== 'none') {
+      settledDir.set(segmentLid, directionOf(decided.language));
+      tracker.reset(decided.language);
+    }
     currentInterimSource = segmentBuffer;
     emitLine({ lid: segmentLid, sourceText: segmentBuffer, targetText: lastInterimTarget, interim: true, corrected: false });
 
     clearSegmentTimer();
     const buf = segmentBuffer.trim();
-    const strongBreak = endsWithStrongSentenceBreak(buf, true) && buf.length >= SEGMENT_MIN_CHARS;
-    const longEnough = buf.length >= UTTERANCE_MIN_FLUSH_CHARS;
-    if (strongBreak || longEnough) {
-      flushSegment();
-    } else {
-      // M6: fillers wait ~2.5s; meaningful clauses flush in 0.85–1.5s.
-      segmentTimer = setTimeout(() => {
-        segmentTimer = null;
-        flushSegment();
-      }, getAdaptiveShortUtteranceFlushDelay({ text: buf, sessionTerms: opts?.terms }));
+    if (!segmentFirstFinalAt) segmentFirstFinalAt = Date.now();
+    // M12: a buffer that already READS as a finished sentence goes straight through. Everything else is
+    // treated as half a thought and waits one continuation window — the "≥40 characters ⇒ translate it
+    // now" rule that used to sit here is what put half-sentences on the loudspeaker. Two ceilings bound
+    // the wait: the buffer is already a full line's worth, or it has been held long enough.
+    const complete = endsWithStrongSentenceBreak(buf, true) && buf.length >= SEGMENT_MIN_CHARS;
+    if (complete) {
+      flushSegment('complete');
+      return;
     }
+    if (buf.length >= SEGMENT_MAX_CHARS || Date.now() - segmentFirstFinalAt >= SEGMENT_MAX_HOLD_MS) {
+      flushSegment('ceiling');
+      return;
+    }
+    if (hadWaitingText) continuationMerges += 1; // this fragment was glued onto a thought already waiting
+    armContinuationWait(buf);
   }
 
-  function flushSegment(): void {
+  function flushSegment(reason: FlushReason): void {
     clearSegmentTimer();
     const text = segmentBuffer.trim();
     if (!text) {
       segmentBuffer = '';
       segmentLid = null;
       currentInterimSource = '';
+      segmentFirstFinalAt = 0;
       resetDraftState();
       return;
     }
@@ -726,7 +941,26 @@ export function createOnlineLane(events: LaneEvents, config: OnlineLaneConfig = 
     // Record NOW (provisional draft translation) so a Stop before refine resolves still keeps the
     // sentence in the transcript deliverable; refine upgrades this same lid in place when it returns.
     recordSessionLine(lid, finalizedAt, head, draftFallback);
-    scheduleRefine(lid, head, priorFinals, sourcePace, draftFallback, finalizedAt);
+    // M12: was this head closed by the speaker, or by us? Anything not ending on strong punctuation was
+    // closed by silence or by a ceiling, so refine is TOLD it is a fragment instead of being left to
+    // invent a finished sentence around half a thought.
+    const fragment = !endsWithStrongSentenceBreak(head, true);
+    // M12: and is this head itself the SECOND half of the previous one? `recentFinals` already carries the
+    // previous line, but only as neighbouring context — the model has no way to know it was cut mid-thought
+    // and that this text resumes it. Naming it is what makes the two subtitles join up when read in a row.
+    const previousFragment =
+      pendingFragmentTail && finalizedAt - pendingFragmentAt <= FRAGMENT_LINK_MAX_GAP_MS ? pendingFragmentTail : '';
+    // A turn-end hands the microphone to the other language, so whatever comes next belongs to a different
+    // speaker and can never be the rest of this sentence.
+    pendingFragmentTail = fragment && reason !== 'turn-end' ? head : '';
+    pendingFragmentAt = finalizedAt;
+    if (fragment) fragmentRefines += 1;
+    if (previousFragment) fragmentLinks += 1;
+    scheduleRefine(lid, head, priorFinals, sourcePace, draftFallback, finalizedAt, {
+      fragment,
+      previousFragment,
+      alreadyWaited: reason !== 'ceiling',
+    });
 
     // Reset per-segment draft + timing state (this segment is done).
     resetDraftState();
@@ -734,31 +968,34 @@ export function createOnlineLane(events: LaneEvents, config: OnlineLaneConfig = 
     lastPartialAt = 0;
     segmentSilentGapsMs = 0;
 
-    // Carry any post-cut remainder into a fresh interim line with its own adaptive flush timer.
+    // Carry any post-cut remainder into a fresh interim line with its own continuation window.
     segmentBuffer = remainder;
     if (remainder) {
       segmentLid = `online-${++counter}`;
       currentInterimSource = remainder;
+      segmentFirstFinalAt = Date.now(); // the remainder starts its own hold clock
       emitLine({ lid: segmentLid, sourceText: remainder, targetText: '', interim: true, corrected: false });
-      segmentTimer = setTimeout(() => {
-        segmentTimer = null;
-        flushSegment();
-      }, getAdaptiveShortUtteranceFlushDelay({ text: remainder, sessionTerms: opts?.terms }));
+      armContinuationWait(remainder);
     } else {
       segmentLid = null;
       currentInterimSource = '';
+      segmentFirstFinalAt = 0;
     }
   }
 
   // ---- M6: refine tier ----
 
-  function scheduleRefine(lid: string, head: string, priorFinals: string[], sourcePace: string | undefined, draftFallback: string, finalizedAt: number): void {
-    const idleDelay = endsWithStrongSentenceBreak(head, true) ? PUNCTUATION_REFINE_IDLE_MS : REFINE_IDLE_MS;
+  function scheduleRefine(lid: string, head: string, priorFinals: string[], sourcePace: string | undefined, draftFallback: string, finalizedAt: number, cont: ContinuationContext): void {
+    // M12: the long idle exists to let a late revision settle. A head that ends on strong punctuation
+    // never needed it, and a head that has ALREADY sat out a full continuation window has had exactly
+    // that chance — so only a ceiling cut (more of this thought may still be arriving) keeps the 950ms.
+    // Without this, the completeness gate would stack its wait on top of the refine wait.
+    const idleDelay = !cont.fragment || cont.alreadyWaited ? PUNCTUATION_REFINE_IDLE_MS : REFINE_IDLE_MS;
     const existing = pendingRefineTimers.get(lid);
     if (existing) clearTimeout(existing.timer);
     // Store the invocation as a thunk so stop() (11.4) can fire the last pending refine immediately and
     // await it before teardown, instead of losing it to teardown's timer-clear.
-    const run = () => refine(lid, head, priorFinals, sourcePace, draftFallback, finalizedAt);
+    const run = () => refine(lid, head, priorFinals, sourcePace, draftFallback, finalizedAt, cont);
     const timer = setTimeout(() => { pendingRefineTimers.delete(lid); void run(); }, idleDelay);
     pendingRefineTimers.set(lid, { timer, run });
   }
@@ -778,7 +1015,7 @@ export function createOnlineLane(events: LaneEvents, config: OnlineLaneConfig = 
     }
   }
 
-  async function refine(lid: string, head: string, priorFinals: string[], sourcePace: string | undefined, draftFallback: string, finalizedAt: number): Promise<void> {
+  async function refine(lid: string, head: string, priorFinals: string[], sourcePace: string | undefined, draftFallback: string, finalizedAt: number, cont: ContinuationContext): Promise<void> {
     const o = opts!;
     const dl = dirLangs(lid, head, false); // settled at finalisation — never changes again
     const gen = sessionGen;
@@ -792,6 +1029,8 @@ export function createOnlineLane(events: LaneEvents, config: OnlineLaneConfig = 
       sessionTerms: o.terms,
       sourcePace,
       sourceEmotion: latestEmotion,
+      sourceIsFragment: cont.fragment,
+      previousFragment: cont.previousFragment || undefined,
       traceId: `${lid}-r`,
       subtitleId: lid,
     });
@@ -836,10 +1075,24 @@ export function createOnlineLane(events: LaneEvents, config: OnlineLaneConfig = 
       case 'session.created': {
         sessionReady = true;
         reconnectAttempts = 0; // upstream ready again → reset the backoff ladder
+        // The recogniser's own reply to the handshake. If a two-language restriction was requested and
+        // this comes back empty, the vendor IGNORED it — the session is still free auto-detect, and the
+        // operator can see that on the console instead of discovering it from a Chinese subtitle.
+        const langs = Array.isArray(msg.asrLanguages) ? msg.asrLanguages.filter((l) => typeof l === 'string') : [];
+        asrLanguages = langs.length ? langs.join('+') : null;
+        // M11: the commit clock starts here on EVERY dial, including reconnects — the first moment a
+        // commit could actually reach upstream.
+        resetScribeCommitState(true);
         setStatus('listening');
         void ensureCapture();
         break;
       }
+      case 'asr.commit_throttled':
+        // Upstream refused (too soon). The turn is still open, so let the planner re-schedule — its
+        // MIN_COMMIT_GAP arithmetic pushes the retry past the throttle window instead of hammering it.
+        scribeCommitPending = false;
+        scheduleStableCommit(scribeLastPartial);
+        break;
       case 'conversation.item.input_audio_transcription.text':
         handlePartial(msg);
         break;
@@ -938,6 +1191,7 @@ export function createOnlineLane(events: LaneEvents, config: OnlineLaneConfig = 
       if (ws === socket) ws = null;
       if (!running) return; // intentional stop
       sessionReady = false;
+      resetScribeCommitState(false); // the turn dies with the socket; session.created re-arms
       scheduleReconnect();
     };
   }
@@ -965,6 +1219,7 @@ export function createOnlineLane(events: LaneEvents, config: OnlineLaneConfig = 
     const s = ws;
     ws = null;
     sessionReady = false;
+    resetScribeCommitState(false); // the turn dies with the socket; session.created re-arms
     s.onopen = s.onmessage = s.onerror = s.onclose = null; // detach so its onclose can't double-fire
     try {
       s.close();
@@ -1018,6 +1273,7 @@ export function createOnlineLane(events: LaneEvents, config: OnlineLaneConfig = 
     }
     stopWatchdog();
     clearSegmentTimer();
+    resetScribeCommitState(false); // no commit may be sent, or armed, after the session ends
     resetDraftState();
     for (const t of pendingRefineTimers.values()) clearTimeout(t.timer);
     pendingRefineTimers.clear();
@@ -1146,6 +1402,19 @@ export function createOnlineLane(events: LaneEvents, config: OnlineLaneConfig = 
     sendBacklogBytes = 0;
     lastBacklogToastAt = 0;
     lastUsageReportAt = null;
+    // M11/M12: the force-commit clock starts at session.created, not at Start.
+    resetScribeCommitState(false);
+    manualCommits = 0;
+    foreignDrops = 0;
+    languageTurns = 0;
+    vendorTags = 0;
+    asrLanguages = null;
+    continuationMerges = 0;
+    fragmentRefines = 0;
+    fragmentLinks = 0;
+    segmentFirstFinalAt = 0;
+    pendingFragmentTail = '';
+    pendingFragmentAt = 0;
     latency.reset();
     setTtsPlaybackStartHandler((subtitleId) => {
       if (subtitleId) latency.markTtsStart(subtitleId, performance.now());
@@ -1198,7 +1467,7 @@ export function createOnlineLane(events: LaneEvents, config: OnlineLaneConfig = 
       await delay(STOP_COMMIT_WAIT_MS);
     }
     // Flush the FULL residual (loop: a >120-char buffer cuts head+remainder each pass, so this terminates).
-    while (segmentBuffer.trim()) flushSegment();
+    while (segmentBuffer.trim()) flushSegment('stop');
     await awaitLastRefine(STOP_REFINE_WAIT_MS); // last line → finished translation before we checkpoint
     finalizeSession();
     teardown();
@@ -1229,6 +1498,14 @@ export function createOnlineLane(events: LaneEvents, config: OnlineLaneConfig = 
       lastSaveDownloaded,
       lastSaveOk,
       sendBacklogBytes,
+      manualCommits,
+      foreignDrops,
+      languageTurns,
+      vendorTags,
+      asrLanguages,
+      continuationMerges,
+      fragmentRefines,
+      fragmentLinks,
     };
   }
 
