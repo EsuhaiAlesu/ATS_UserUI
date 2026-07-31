@@ -13,6 +13,50 @@ export const clampSubtitleFont = (n: number): number =>
 const MERGE_GAP_MS = 7_000
 const MERGE_MAX_CHARS = 200
 
+// ── M10: how the wall window lays itself out at the size it actually IS ──
+// The same page serves a hall projector and a phone-shaped strip docked beside the operator's other apps.
+// Pure maths, kept next to the other subtitle rules so the wall page stays presentation-only.
+export const WALL_SCALE = 2.6      // read from thirty metres — the console slider is laptop-calibrated
+const HALL_COLUMN_MIN = 760        // a column at least this wide keeps hall size, unchanged, forever
+const COMPACT_BASE = 400           // narrower than that: the column width at which text is 1× console size
+const STACK_MAX_WIDTH = 720        // two columns stop being readable well before they stop fitting
+
+export function wallLayout(vw: number, vh: number, view: 'vi2ja' | 'ja2vi' | 'both'): { stacked: boolean; scale: number } {
+  const stacked = view === 'both' && (vw < STACK_MAX_WIDTH || vh > vw)
+  const columnWidth = view === 'both' && !stacked ? vw / 2 : vw
+  const scale = columnWidth >= HALL_COLUMN_MIN
+    ? WALL_SCALE
+    : Math.max(1, Math.min(WALL_SCALE, columnWidth / COMPACT_BASE))
+  return { stacked, scale }
+}
+
+/** Below this the wall's keyboard hint is both too wide and useless (no keyboard) — show buttons. */
+export const wallNeedsTouchControls = (vw: number): boolean => vw < STACK_MAX_WIDTH
+
+/**
+ * Everything the audience should read IN one language, in the order it was said: the translations INTO
+ * that language, plus the utterances originally SPOKEN in it.
+ *
+ * The two-way window normally splits by DIRECTION — one half is "translated into Japanese", the other
+ * "translated into Vietnamese" — and each half shows only translations. That leaves a Vietnamese reader
+ * seeing nothing when a Vietnamese person speaks: their words exist only as the source of the Japanese
+ * half. Splitting by LANGUAGE instead fixes it without adding a third panel: the Vietnamese half becomes
+ * the whole conversation in Vietnamese, the Japanese half the whole conversation in Japanese, and every
+ * sentence appears exactly once in each.
+ *
+ * Order is the caller's array order, deliberately not re-sorted: the lines already arrive interleaved
+ * from one lane over one channel, and sorting on `at` would let a live line that keeps re-stamping
+ * itself jump over a sentence that has just finalised.
+ */
+export function languageThread(lines: AudienceLine[], lang: 'vi' | 'ja'): AudienceLine[] {
+  const want: 'vi2ja' | 'ja2vi' = lang === 'ja' ? 'vi2ja' : 'ja2vi'
+  return lines
+    // A line already going INTO this language keeps its translation; the others contribute their source,
+    // which IS this language — and the direction is rewritten so the renderer treats it as such.
+    .map((l) => (l.dir === want ? l : { ...l, targetText: l.sourceText, dir: want }))
+    .filter((l) => l.targetText.trim() !== '')
+}
+
 export interface SubtitleParagraph {
   key: string
   dir: 'vi2ja' | 'ja2vi'

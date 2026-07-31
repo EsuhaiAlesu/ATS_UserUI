@@ -103,7 +103,9 @@ const DocumentsLibraryInner: React.FC<{ eventId: string }> = ({ eventId }) => {
         if (window.confirm(`Xoá tài liệu "${d.name}"? Không thể hoàn tác.`)) { setDocs(removeDoc(scope, d.id)); toast.success('Đã xoá tài liệu'); }
     };
 
-    const accept = useMemo(() => `.md,.markdown,.txt,.csv,.srt,.docx,.docm,.dotx,.dotm${session.backendOnline ? ',.pdf' : ''}`, [session.backendOnline]);
+    // `.tsv` — see the same list in ScriptPrep: readImportFile has always read it as plain text and a
+    // dropped .tsv always worked; it was missing only from the picker.
+    const accept = useMemo(() => `.md,.markdown,.txt,.tsv,.csv,.srt,.docx,.docm,.dotx,.dotm${session.backendOnline ? ',.pdf' : ''}`, [session.backendOnline]);
 
     return (
         <div className="h-full flex flex-col text-on-background overflow-hidden relative">

@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import {
   decideDraftAdmission,
+  decideCaptureFrame,
   endsOpenEnded,
   getContinuationWaitMs,
   CONTINUATION_MIN_WAIT_MS,
@@ -107,5 +108,33 @@ describe('livePipelinePolicy — M12: cửa sổ chờ phần tiếp (getContinu
         expect(wait).toBeLessThanOrEqual(CONTINUATION_MAX_WAIT_MS)
       }
     }
+  })
+})
+
+// M13 — the one place that decides what the microphone puts on the wire. Muting means sending SILENCE,
+// never sending NOTHING, and a muted frame must teach the voice-shape monitor nothing.
+describe('livePipelinePolicy — M13: khung tiếng rời micro (decideCaptureFrame)', () => {
+  it('khung bình thường đi thẳng ra và dạy được bộ theo dõi hình dạng giọng', () => {
+    expect(decideCaptureFrame({ listenPaused: false, gateActive: false })).toEqual({
+      mute: false, countPaused: false, countGated: false, observeShape: true,
+    })
+  })
+
+  it('"Ngưng nghe" bịt khung lại và không dạy gì cả', () => {
+    expect(decideCaptureFrame({ listenPaused: true, gateActive: false })).toEqual({
+      mute: true, countPaused: true, countGated: false, observeShape: false,
+    })
+  })
+
+  it('cổng bán song công (chống hú) cũng bịt khung lại', () => {
+    expect(decideCaptureFrame({ listenPaused: false, gateActive: true })).toEqual({
+      mute: true, countPaused: false, countGated: true, observeShape: false,
+    })
+  })
+
+  it('khi cả hai cùng bật thì CHỈ đồng hồ "Ngưng nghe" bị tính — đó là chủ ý của kỹ thuật viên', () => {
+    expect(decideCaptureFrame({ listenPaused: true, gateActive: true })).toEqual({
+      mute: true, countPaused: true, countGated: false, observeShape: false,
+    })
   })
 })

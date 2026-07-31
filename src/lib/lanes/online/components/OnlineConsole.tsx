@@ -13,10 +13,13 @@
 
 import React, { useCallback, useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { useOnlineLane, fetchOnlineConfigStatus, ONLINE_SPEED_RANGE, SUBTITLE_FONT, type LaneStatus, type OnlineVoice, type AudienceLine, type WallOutput } from '../index'
+import { useOnlineLane, fetchOnlineConfigStatus, summarizePrepDocs, ONLINE_SPEED_RANGE, SUBTITLE_FONT, type LaneStatus, type OnlineVoice, type AudienceLine, type WallOutput, type WallDock, type ScriptMatcherEntry } from '../index'
 import { useConferenceMode } from '../../../ConferenceModeContext'
 import { useActiveEvent } from '../../../ActiveEventContext'
-import { collectPrepPack, type PrepPack } from '../../../prepData'
+import { collectPrepPack, collectPrepDocuments, collectPrepHeader, type PrepPack } from '../../../prepData'
+import { savePrepSummary, clearPrepSummary, getPrepSummary, type PrepSummary } from '../../../prepSummary'
+import { kbScopeId } from '../../../kbscope'
+import { getScriptLocal } from '../../../script'
 import SubtitleParagraphs from '../../../../components/SubtitleParagraphs'
 
 type CfgStatus = Awaited<ReturnType<typeof fetchOnlineConfigStatus>>
@@ -27,6 +30,25 @@ const SELECT_CLS =
 const TEXTAREA_CLS =
   'w-full bg-surface text-on-surface border border-outline-variant rounded-DEFAULT py-2 px-3 text-sm ' +
   'focus:ring-0 focus:border-secondary field-lux resize-none disabled:opacity-50'
+
+// M9 — the approved script the live matcher is allowed to speak from. Only rows a human APPROVED and
+// that carry BOTH sides qualify: a draft row is somebody's unchecked guess, and a row with an empty
+// translation would put a blank line on the audience wall. Read-only use of the Chuẩn bị store, the
+// same arrangement as collectPrepPack above.
+function scriptCountLine(c: { approved: number; total: number }): string {
+  if (c.approved > 0) return `Kịch bản: ${c.approved}/${c.total} dòng đã duyệt — câu nào trùng kịch bản sẽ đọc đúng câu đã duyệt.`
+  if (c.total > 0) return `Kịch bản: có ${c.total} dòng nhưng chưa dòng nào được duyệt — máy vẫn tự dịch toàn bộ.`
+  return 'Kịch bản: chưa có dòng nào — máy tự dịch toàn bộ.'
+}
+
+function loadScriptForLane(eventId: string): { rows: ScriptMatcherEntry[]; total: number } {
+  try {
+    const all = getScriptLocal(eventId)
+    return { rows: all.filter((r) => r.status === 'approved' && r.src.trim() !== '' && r.dst.trim() !== ''), total: all.length }
+  } catch {
+    return { rows: [], total: 0 } // corrupt/absent local script → translate everything, never crash the console
+  }
+}
 
 // Map LaneStatus onto the OFFLINE console's annunciator vocabulary + dot colours/animations (§1.1).
 const ANN: Record<LaneStatus, { label: string; text: string; dot: string; anim: string }> = {
@@ -108,6 +130,7 @@ const OnlineConsole: React.FC = () => {
   const [isFs, setIsFs] = useState(false)
   const [elapsed, setElapsed] = useState(0)
   const [prep, setPrep] = useState<PrepPack | null>(null)
+  const [scriptCount, setScriptCount] = useState({ approved: 0, total: 0 })
   const prepLoadedRef = useRef('')
 
   // Report running state + register the stop function to the neutral context, so the head-bar DỪNG can
@@ -153,11 +176,73 @@ const OnlineConsole: React.FC = () => {
     try { await lane.start() } catch { /* lane surfaces the error via lane.error */ }
   }, [lane])
 
+  // M9: the script rides along. There is no box for it to overwrite — it is data, not typing — so it is
+  // reloaded on every Nạp, which is also how a script edited in Chuẩn bị reaches a console already open.
+  // Stable identity (useCallback) so the auto-load effect below can depend on it honestly instead of
+  // hiding it from the dependency array — the effect's own `prepLoadedRef` guard is what keeps it to one
+  // run per (event × direction), not a short dependency list.
+  const applyScript = useCallback(() => {
+    const { rows, total } = loadScriptForLane(event?.id ?? '')
+    lane.setScript(rows)
+    setScriptCount({ approved: rows.length, total })
+  }, [event, lane])
+
   // ── TASK 4: fill the Thuật ngữ / Bối cảnh boxes from the Chuẩn bị stores ──
   const loadPrep = async (overwrite: boolean) => {
     const pack = await collectPrepPack(event, lane.direction)
     setPrep(pack)
     if (overwrite) { lane.setTerms(pack.terms); lane.setBrief(pack.brief) }
+    applyScript()
+  }
+
+  // ── M14: let the model read the imported documents and WRITE the Bối cảnh ──
+  // The mechanical brief above can only paste the opening of each file, so a 40-page gala script arrives
+  // as its cover page. This sends the documents to the server (the same model that refines every line
+  // already lives there) and gets back a real brief plus a list of proper nouns.
+  //
+  // Off the live path on purpose: the button is disabled while a session runs, the answer takes tens of
+  // seconds, and it lands in a box the operator reads, edits and approves before pressing Bắt đầu. The
+  // result is saved per event+direction so it survives a reload and is not paid for twice.
+  const [ai, setAi] = useState<{ busy: boolean; error: string; note: string }>({ busy: false, error: '', note: '' })
+  // Held in state, not read during render: this component re-renders on every subtitle line, and a
+  // localStorage read per line during a live session is a cost for nothing. It is refreshed when the
+  // session or its direction changes, and after a generate or a drop — the only moments it can change.
+  const [savedSummary, setSavedSummary] = useState<PrepSummary | undefined>(undefined)
+  const refreshSummary = useCallback(() => {
+    setSavedSummary(event ? getPrepSummary(kbScopeId(event), lane.direction) : undefined)
+  }, [event, lane.direction])
+  useEffect(() => { refreshSummary() }, [refreshSummary])
+  const runAiSummary = async () => {
+    if (!event) { setAi({ busy: false, error: 'Chưa chọn buổi nào.', note: '' }); return }
+    const documents = collectPrepDocuments(event)
+    if (!documents.length) { setAi({ busy: false, error: 'Buổi này chưa có tài liệu nào trong phần Chuẩn bị.', note: '' }); return }
+    setAi({ busy: true, error: '', note: `Đang đọc ${documents.length} tài liệu…` })
+    try {
+      const result = await summarizePrepDocs({
+        sourceLanguage: lane.direction === 'vi2ja' ? 'vi' : 'ja',
+        targetLanguage: lane.direction === 'vi2ja' ? 'ja' : 'vi',
+        header: collectPrepHeader(event),
+        documents,
+      })
+      savePrepSummary(kbScopeId(event), {
+        brief: result.brief, terms: result.terms, dir: lane.direction,
+        docNames: documents.map((d) => d.name), usedChars: result.usedChars, at: new Date().toISOString(),
+      })
+      refreshSummary()
+      // Reload through the ONE existing path, so the AI terms are merged with the glossary and the
+      // speaker roster under the same 40-line budget instead of replacing them.
+      await loadPrep(true)
+      setAi({ busy: false, error: '', note: `Xong — đã đọc ${result.documents} tài liệu (${result.usedChars.toLocaleString('vi-VN')} ký tự). Đọc lại và sửa nếu cần.` })
+    } catch (error) {
+      setAi({ busy: false, error: String((error as Error)?.message ?? error), note: '' })
+    }
+  }
+  const dropAiSummary = async () => {
+    if (!event) return
+    clearPrepSummary(kbScopeId(event), lane.direction)
+    refreshSummary()
+    setAi({ busy: false, error: '', note: 'Đã bỏ bản tóm tắt AI — quay lại bối cảnh ghép sẵn.' })
+    await loadPrep(true)
   }
   // Auto-load once per (event × direction), and only into boxes that are still empty — auto-fill must
   // never overwrite something the technician typed.
@@ -171,9 +256,10 @@ const OnlineConsole: React.FC = () => {
       setPrep(pack)
       if (!lane.terms.trim()) lane.setTerms(pack.terms)
       if (!lane.brief.trim()) lane.setBrief(pack.brief)
+      applyScript()
     })
     return () => { cancelled = true }
-  }, [event, lane.direction, lane])
+  }, [event, lane.direction, lane, applyScript])
 
   const voiceOptions = (list: OnlineVoice[]) => {
     const personal = list.filter((v) => v.category === 'personal')
@@ -186,13 +272,25 @@ const OnlineConsole: React.FC = () => {
     )
   }
 
-  const prepCounts = prep ? (
+  const prepCounts = (
     <div className="text-[11px] text-on-surface-variant leading-relaxed">
-      {prep.stats.termLines} thuật ngữ · {prep.stats.glossary} mục từ điển · {prep.stats.speakers} diễn giả
-      {prep.stats.dropped > 0 ? ` · còn ${prep.stats.dropped} mục vượt hạn mức 40 dòng` : ''}
-      {!prep.glossaryReachable ? ' · chưa với tới Từ điển trên máy chủ nội bộ' : ''}
+      {prep && (
+        <div>
+          {prep.stats.termLines} thuật ngữ · {prep.stats.glossary} mục từ điển · {prep.stats.speakers} diễn giả
+          {prep.stats.documents > 0 ? ` · ${prep.stats.documents} tài liệu` : ' · chưa có tài liệu nào'}
+          {prep.stats.dropped > 0 ? ` · còn ${prep.stats.dropped} mục vượt hạn mức 40 dòng` : ''}
+          {!prep.glossaryReachable ? ' · chưa với tới Từ điển trên máy chủ nội bộ' : ''}
+          {/* M14 — say which brief is in the box. An operator who cannot tell the AI summary from the
+              pasted-together one cannot judge whether it is worth generating again. */}
+          {prep.stats.aiBrief ? ' · bối cảnh do AI tóm tắt từ tài liệu' : ''}
+          {prep.stats.aiTerms > 0 ? ` · ${prep.stats.aiTerms} thuật ngữ AI gợi ý từ tài liệu` : ''}
+        </div>
+      )}
+      {/* M9 — an empty or unapproved script behaves exactly like a script that never matches, so it must
+          be said out loud here; nothing else on this screen would tell the operator before going live. */}
+      <div>{scriptCountLine(scriptCount)}</div>
     </div>
-  ) : null
+  )
 
   // ── TASK 7.4: audience wall placement ──
   const [wallNote, setWallNote] = useState<{ msg: string; atCount: number } | null>(null)
@@ -257,6 +355,18 @@ const OnlineConsole: React.FC = () => {
               title={keysReady ? 'Bắt đầu phiên dịch' : 'Chưa nhập khoá dịch vụ (API Key) — mở Cài đặt'}
               onClick={() => { void handleStart() }} />
           )}
+          {/* M13 · NGƯNG NGHE — for the parts of a gala nobody is speaking at: a performance, a musical
+              number, a video. The microphone keeps its socket but puts silence on the wire, so the
+              recogniser cannot invent lyrics out of the music. Only while running, right under Dừng, so
+              the technician never has to hunt for it mid-show. */}
+          {lane.running && (
+            <RailBtn icon={lane.listenPaused ? 'hearing_disabled' : 'hearing'}
+              label={lane.listenPaused ? 'ĐANG NGƯNG NGHE' : 'Ngưng nghe'}
+              tone={lane.listenPaused ? 'danger' : 'default'}
+              ariaLabel={lane.listenPaused ? 'Đang ngưng nghe — bấm để nghe lại' : 'Ngưng nghe'}
+              title="Bấm khi có tiết mục / nhạc / chiếu video — máy ngưng nghe, không ghi chữ nào. Bấm lại để nghe tiếp."
+              onClick={() => lane.setListenPaused(!lane.listenPaused)} />
+          )}
 
           {/* B · MÀN KHÁN GIẢ */}
           <div className="space-y-0.5">
@@ -312,6 +422,17 @@ const OnlineConsole: React.FC = () => {
             <span className={`font-label-caps text-label-caps tracking-wide truncate ${ann.text}`}>{ann.label}{lane.statusDetail ? ` · ${lane.statusDetail}` : ''}</span>
             {lane.running && <span className="font-label-caps text-label-caps text-on-surface-variant tabular-nums ml-1" style={{ fontFamily: 'ui-monospace, monospace' }}>{mmss}</span>}
           </div>
+          {/* M13: a microphone that was told to stop listening looks EXACTLY like a broken one. The one
+              way this feature can cost the ceremony a speech is a technician who forgets to release it,
+              so while it is held the state is unmissable in the monitor strip, not only on the rail. */}
+          {lane.running && lane.listenPaused && (
+            <button type="button" onClick={() => lane.setListenPaused(false)}
+              className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-error text-on-error font-label-caps text-label-caps animate-pulse shrink-0"
+              title="Bấm để nghe lại">
+              <span className="material-symbols-outlined text-base" aria-hidden="true">hearing_disabled</span>
+              ĐANG NGƯNG NGHE — bấm để nghe lại
+            </button>
+          )}
           <div className="mx-auto flex items-center gap-2 px-3 py-1.5 rounded-full border border-outline-variant bg-surface-container-lowest">
             <span className={`font-label-caps text-label-caps ${lane.direction === 'vi2ja' ? 'text-secondary' : 'text-on-surface-variant'}`}>VI</span>
             <span className="material-symbols-outlined text-base text-primary" aria-hidden="true">swap_horiz</span>
@@ -479,6 +600,31 @@ const OnlineConsole: React.FC = () => {
                 </div>
                 <textarea value={lane.brief} onChange={(e) => lane.setBrief(e.target.value)} rows={6} disabled={lane.running}
                   className={TEXTAREA_CLS} placeholder="Bối cảnh buổi dịch để bản dịch sát nghĩa hơn…" />
+                {/* M14 — the AI summariser. Disabled while a session runs, like every other box on this
+                    panel: the brief is latched by start() and the model must never be asked to re-read a
+                    40-page script in the middle of a ceremony. */}
+                <div className="flex items-center gap-2 flex-wrap">
+                  <button onClick={() => { void runAiSummary() }} disabled={lane.running || ai.busy}
+                    title="Đọc toàn bộ tài liệu đã nhập ở Chuẩn bị rồi tự viết bối cảnh"
+                    className="inline-flex items-center gap-1 rounded-lg border border-primary/60 text-primary px-2.5 py-1 text-xs hover:bg-primary/10 transition-colors disabled:opacity-50">
+                    <span className={`material-symbols-outlined text-[15px] ${ai.busy ? 'animate-spin' : ''}`} aria-hidden="true">{ai.busy ? 'progress_activity' : 'auto_awesome'}</span>
+                    {ai.busy ? 'Đang tóm tắt…' : 'Tóm tắt tài liệu bằng AI'}
+                  </button>
+                  {savedSummary && !ai.busy && (
+                    <button onClick={() => { void dropAiSummary() }} disabled={lane.running} title="Quay lại bối cảnh ghép sẵn từ Chuẩn bị"
+                      className="inline-flex items-center gap-1 rounded-lg border border-outline-variant text-on-surface-variant px-2.5 py-1 text-xs hover:text-error hover:border-error transition-colors disabled:opacity-50">
+                      <span className="material-symbols-outlined text-[15px]" aria-hidden="true">undo</span>Bỏ bản AI
+                    </button>
+                  )}
+                </div>
+                {ai.busy && <p className="text-[11px] text-primary leading-relaxed">{ai.note} Việc này mất vài chục giây — đừng đóng cửa sổ.</p>}
+                {!ai.busy && ai.note && <p className="text-[11px] text-secondary leading-relaxed">{ai.note}</p>}
+                {ai.error && <p className="text-[11px] text-error leading-relaxed">{ai.error}</p>}
+                {savedSummary && !ai.busy && (
+                  <p className="text-[11px] text-on-surface-variant leading-relaxed">
+                    Bản AI lưu lúc {new Date(savedSummary.at).toLocaleString('vi-VN')} · {savedSummary.docNames.length} tài liệu: {savedSummary.docNames.join(' · ')}
+                  </p>
+                )}
                 {prepCounts}
               </div>
             )}
@@ -507,7 +653,14 @@ const OnlineConsole: React.FC = () => {
                               <option value="vi2ja">Chỉ 日本語</option>
                               <option value="ja2vi">Chỉ Tiếng Việt</option>
                             </select>
-                            {lane.wallScreens.length > 1 && (
+                            {/* M10: chỗ đặt cửa sổ. "Góc phải/trái" là dải dọc hẹp trên chính màn hình
+                                đang ngồi — dùng khi cần vừa dịch vừa mở ứng dụng khác. */}
+                            <select value={o.dock ?? 'full'} onChange={(e) => updateWallOutput(o.id, { dock: e.target.value as WallDock })} className={`${SELECT_CLS} w-auto text-xs py-1`}>
+                              <option value="full">Cả màn hình</option>
+                              <option value="right">Dải dọc góc phải</option>
+                              <option value="left">Dải dọc góc trái</option>
+                            </select>
+                            {lane.wallScreens.length > 1 && (o.dock ?? 'full') === 'full' && (
                               <select value={o.screenIdx ?? ''} onChange={(e) => updateWallOutput(o.id, { screenIdx: e.target.value === '' ? undefined : Number(e.target.value) })} className={`${SELECT_CLS} w-auto text-xs py-1`}>
                                 <option value="">— màn —</option>
                                 {lane.wallScreens.map((s, i) => <option key={i} value={i}>{s.label || `Màn ${i + 1}`}</option>)}
@@ -517,6 +670,7 @@ const OnlineConsole: React.FC = () => {
                           </div>
                         )}
                         {o.enabled && o.view === 'both' && !lane.twoWay && <p className="text-[10px] text-error/80">Phiên một-chiều: một cột của "cả 2" sẽ trống.</p>}
+                        {o.enabled && (o.dock ?? 'full') !== 'full' && <p className="text-[10px] text-on-surface-variant/80">Cửa sổ hẹp: "cả 2" sẽ tự xếp trên–dưới thay vì 2 cột.</p>}
                       </div>
                     )
                   })}
@@ -669,10 +823,23 @@ const OnlineConsole: React.FC = () => {
                   <div className="font-label-caps text-label-caps text-on-surface-variant space-y-1" style={{ fontFamily: 'ui-monospace, monospace' }}>
                     <div>reconnects {diag.reconnectAttempts} · silent {diag.silentReconnects} · sinceEvent {diag.secondsSinceLastEvent.toFixed(1)}s</div>
                     <div>voiced {diag.voicedMsRecent}ms · ghosts {diag.droppedGhosts}</div>
+                    {/* M13 — hai chốt chống "có tiếng to nhưng không phải giọng người". `ngưng nghe` là
+                        do kỹ thuật viên tự bấm (tổng thời gian đã ngưng trong buổi); `bỏ tiếng không
+                        phải giọng` là máy tự bỏ, kèm lý do của chính nó. Cả hai bằng 0 suốt buổi nghĩa
+                        là chưa lần nào cần đến — không phải là hỏng. */}
+                    <div>ngưng nghe {diag.listenPaused ? 'ĐANG BẬT' : 'tắt'} · tổng {Math.round(diag.pausedMs / 1000)}s</div>
+                    {diag.nonSpeechDrops > 0 && (
+                      <div>bỏ tiếng không phải giọng {diag.nonSpeechDrops} · {diag.lastNonSpeechReason}</div>
+                    )}
                     {/* M11 — turn handling. `cắt` near zero during a busy hall means the client-side
                         commit is not firing and the long stalls are back; `bỏ lạ` and `đổi tiếng` are
                         the two-way guards, and both being zero in a bilingual session is also a signal. */}
                     <div>cắt {diag.manualCommits} · bỏ tiếng lạ {diag.foreignDrops} · đổi tiếng {diag.languageTurns}</div>
+                    {/* M13 — ngưỡng cắt đang dùng cho người đang nói. "mặc định" là con số cố định
+                        600/800ms; "theo người nói" nghĩa là máy đã đo đủ (từ 8 nhịp ngắt trở lên) và
+                        đang dùng nhịp của chính người đó. Số nhịp đứng yên suốt buổi = người nói
+                        không ngắt giữa câu, và ngưỡng mặc định vẫn đang giữ việc. */}
+                    <div>ngưỡng cắt {diag.pauseWindowMs || '—'}{diag.pauseWindowMs ? 'ms' : ''} · {diag.pauseAdaptive ? 'theo người nói' : 'mặc định'} · {diag.pauseSamples} nhịp</div>
                     {/* M12 — chờ trọn ý. `ghép ý` là số mảnh câu đã được nối lại trước khi dịch (trước
                         đây mỗi mảnh này là một câu dịch nửa vời đọc lên loa); `mảnh` là số câu vẫn phải
                         gửi đi khi chưa có dấu kết — cao bất thường nghĩa là đang chạm trần chờ; `nối tiếp`
@@ -683,7 +850,18 @@ const OnlineConsole: React.FC = () => {
                     <div>máy nghe: {diag.asrLanguages ?? 'tự do (mọi thứ tiếng)'} · nhãn {diag.vendorTags}</div>
                     <div>draft {diag.draftCalls} (dup {diag.draftSkipped.duplicate}·rate {diag.draftSkipped['rate-limit']}·infl {diag.draftSkipped['in-flight']})</div>
                     <div>refine {diag.refineCalls} · retries {diag.refineRetries}</div>
+                    {/* M9 — snaps vs gần-khớp, and where the script thinks it is. `lastScriptReason` is the
+                        matcher's own words for why the last sentence did not snap. */}
+                    {diag.scriptLines > 0 && (
+                      <div>kịch bản {diag.scriptSnaps} khớp · {diag.scriptSuggests} gần khớp · dòng {diag.scriptPosition}/{diag.scriptLines}{diag.lastScriptReason ? ` · ${diag.lastScriptReason}` : ''}</div>
+                    )}
                     <div>ttsQueue {diag.ttsQueueLength} · gate {diag.gateActive ? 'on' : 'off'} · gatedMs {diag.gatedMs}</div>
+                    {/* M13 — câu ĐÃ hiện phụ đề nhưng KHÔNG đọc lên loa, vì chữ không đúng thứ tiếng của
+                        giọng đọc (thường là một câu tiếng Anh). Hiện ra để người vận hành biết vì sao có
+                        câu im lặng, thay vì tưởng loa hỏng. */}
+                    {diag.ttsLanguageSkips > 0 && (
+                      <div>không đọc {diag.ttsLanguageSkips} câu · {diag.lastTtsSkipReason}</div>
+                    )}
                     {/* TASK 12.5 — the lane reports a backlog only once it is worth acting on (≈8s of audio). */}
                     {diag.sendBacklogBytes > 0 && (
                       <div className="text-error">⇡ backlog gửi {(diag.sendBacklogBytes / 1024).toFixed(0)} KB · mạng chậm, phụ đề đang trễ</div>

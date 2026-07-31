@@ -18,6 +18,16 @@ import {
 } from '../lib/lanes/online'
 ```
 
+### `summarizePrepDocs(input): Promise<PrepBriefResult>` (M14)
+
+Not part of the hook, on purpose. `summarizePrepDocs({ sourceLanguage, targetLanguage, header?, documents })`
+posts the event's imported documents to `POST /online-api/summarize-prep-docs` and returns
+`{ brief, terms, documents, usedChars }` — the Bối cảnh text plus suggested term lines. It is a
+**pre-session** call: tens of seconds, a whole script on the wire, and its result is a SUGGESTION the
+operator reads and edits in the box before pressing Bắt đầu. Never call it while a session runs. It
+rejects with an operator-facing Vietnamese message; the console shows it verbatim. Also exported:
+`PREP_DOCS_MAX`, `PREP_DOC_MAX_CHARS`, and the `PrepBriefInput` / `PrepBriefResult` / `PrepBriefDoc` types.
+
 ### `useOnlineLane(): UseOnlineLane`
 
 Returns state + config (state & setters) + controls. Committed signature:
@@ -28,6 +38,11 @@ Returns state + config (state & setters) + controls. Committed signature:
 - **devices**: `inputDevices`, `outputDevices`, `refreshDevices()`.
 - **config (state + setter each)**: `deviceId`, `outputDeviceId` (setter also routes TTS output),
   `nearMicGate`, `speakEnabled`, `gateMode: TtsGateMode`, `direction: OnlineDirection`, `terms`, `brief`.
+- **live control (the exception)**: `listenPaused` / `setListenPaused(v)` — every other config value above
+  is latched by `start()`; this one is read on every captured audio frame precisely so it can be flipped
+  MID-SESSION. While true the microphone puts equal-length digital silence on the wire (the socket and the
+  recogniser's own 1.5s close keep running; there is simply nothing in the audio to transcribe), which is
+  what a performance, a video or a musical number needs. `start()` always releases it.
 - **controls**: `start()` (reads the config above), `stop()`, `saveSession()`.
 
 **Lifecycle safety**: `stop()` and React unmount fully release the session — mic tracks stopped

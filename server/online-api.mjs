@@ -64,6 +64,19 @@ const openaiApiKey = () => getOnlineConfig('OPENAI_API_KEY');
 const REFINE_MODEL = env('OPENAI_PREVIEW_REFINE_MODEL', 'gpt-4.1');
 const REFINE_TIMEOUT_MS = num('PREVIEW_REFINE_TIMEOUT_MS', 10_000);
 
+// M14 "Tóm tắt bằng AI" — build the session brief from the event's imported documents. Same key and the
+// same model as refine; only the ceilings and the timeout differ, because this call runs ONCE, BEFORE a
+// session, with a whole event script as its input instead of one sentence during it. Nothing here is on
+// the live path: the operator reads the result, edits it, and may throw it away.
+const PREP_SUMMARY_TIMEOUT_MS = num('PREP_SUMMARY_TIMEOUT_MS', 60_000);
+/** Ceilings on what one call may read. The gala script alone is larger than all of them together. */
+const PREP_DOCS_MAX = 12;
+const PREP_DOC_MAX_CHARS = 12_000;
+const PREP_DOCS_MAX_CHARS = 48_000;
+/** …and on what it may return: exactly the console's own two boxes. */
+const PREP_BRIEF_MAX_CHARS = 1_500;
+const PREP_TERMS_MAX = 40;
+
 const elevenApiKey = () => getOnlineConfig('ELEVENLABS_API_KEY');
 const jaVoiceId = () => getOnlineConfig('ELEVENLABS_VOICE_ID');
 const viVoiceId = () => getOnlineConfig('VI_ELEVENLABS_VOICE_ID');
@@ -423,6 +436,121 @@ async function refineWithLlm(params) {
     logLine('refine.retry', { reason: 'timeout' });
     return await requestOnce();
   }
+}
+
+// ---------- prep brief from the imported documents (M14) ----------
+//
+// The Bối cảnh box is the one piece of context the refine model holds for the WHOLE event, and until now
+// the app filled it mechanically: the conference header, the speaker list, then the opening paragraph of
+// each imported file, cut at 1500 characters. For a 40-page gala script the opening paragraph is the
+// cover page, so the box described the title and nothing that is actually said on stage.
+//
+// This reads the documents properly and writes the brief a human would have written. It is deliberately
+// OFF the live path (see PREP_SUMMARY_TIMEOUT_MS above) and its output is a SUGGESTION: the console puts
+// it in an editable box and the operator approves it before the session starts.
+
+/** Trim the document set to the ceilings, longest-first-fair: every file gets an equal share. */
+export function clipPrepDocuments(list, { maxDocs = PREP_DOCS_MAX, perDoc = PREP_DOC_MAX_CHARS, total = PREP_DOCS_MAX_CHARS } = {}) {
+  const docs = (Array.isArray(list) ? list : [])
+    .map((d) => ({ name: limitText(d?.name, 120) || '(không tên)', text: normalizeText(d?.text) }))
+    .filter((d) => d.text.length > 0)
+    .slice(0, maxDocs);
+  if (!docs.length) return { docs: [], usedChars: 0 };
+  // An equal share, so one 200-page file cannot swallow the budget of the four that matter. A file
+  // shorter than its share leaves the remainder to the others (recomputed as we go).
+  const out = [];
+  let left = total;
+  let remaining = docs.length;
+  for (const d of docs) {
+    const share = Math.min(perDoc, Math.floor(left / remaining));
+    const text = d.text.slice(0, share);
+    remaining -= 1;
+    if (!text) continue;
+    out.push({ name: d.name, text });
+    left -= text.length;
+  }
+  return { docs: out, usedChars: out.reduce((n, d) => n + d.text.length, 0) };
+}
+
+export function buildPrepBriefPrompt({ sourceLanguage, targetLanguage, header, docs }) {
+  const srcName = sourceLanguage === 'ja' ? 'Japanese' : 'Vietnamese';
+  const tgtName = targetLanguage === 'ja' ? 'Japanese' : 'Vietnamese';
+  return [
+    'You prepare the CONTEXT BRIEF for a live conference interpreter system.',
+    [
+      'Read the event documents below and write the brief that the translation model will hold in context',
+      'for the entire event. Rules:',
+      `- Write the brief in Vietnamese, at most ${PREP_BRIEF_MAX_CHARS} characters. This is a hard budget: when short of room, drop the least useful lines, never truncate mid-sentence.`,
+      '- One fact per line. No markdown, no headings, no numbering; a list item starts with "- ".',
+      '- Cover, in this order and ONLY where the documents support it: what the event is (name, host, date, place, purpose); the running order of the programme; who speaks and in what capacity; the recurring proper nouns and set phrases.',
+      '- Keep every proper noun EXACTLY as the documents spell it. Where a document gives both a Vietnamese and a Japanese form of the same name, keep both, e.g. "Kagami Biraki (鏡開き)".',
+      '- Never state a fact the documents do not contain, and never guess a date, a title or a name. Thin documents must produce a short brief.',
+      '- This is a brief, not a translation and not a sentence-by-sentence summary. Skip stage directions, cue numbers, lighting and sound notes.',
+    ].join('\n'),
+    [
+      `Also return terms: at most ${PREP_TERMS_MAX} lines naming what the recogniser and the translator must not mangle.`,
+      `- The session runs ${srcName} → ${tgtName}. The left-hand side must be the ${srcName} form — that is what the speaker will actually say.`,
+      `- Write "source = target" when the documents give the ${tgtName} form of the same name; otherwise write the source form alone.`,
+      '- Only proper nouns and fixed expressions: people, companies, places, ceremonies, awards, song titles, programme segments, job titles, product names.',
+      '- No ordinary vocabulary, no full sentences, no duplicates. One term per line, no bullet marks.',
+    ].join('\n'),
+    header ? `What the operator already knows about this session:\n${header}` : '',
+    docs.map((d) => `--- Document: ${d.name} ---\n${d.text}`).join('\n\n'),
+    'Return JSON only with keys: brief, terms.',
+  ].filter(Boolean).join('\n\n');
+}
+
+async function summarizePrepDocsWithLlm(params) {
+  const apiKey = openaiApiKey();
+  if (!apiKey) throw new Error('OPENAI_API_KEY is not configured.');
+  const response = await withTimeout(
+    fetch('https://api.openai.com/v1/responses', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: REFINE_MODEL,
+        input: buildPrepBriefPrompt(params),
+        max_output_tokens: 4_000,
+        temperature: 0.2,
+        text: {
+          format: {
+            type: 'json_schema',
+            name: 'prep_brief_result',
+            strict: true,
+            schema: {
+              type: 'object',
+              properties: {
+                brief: { type: 'string' },
+                terms: { type: 'array', items: { type: 'string' } },
+              },
+              required: ['brief', 'terms'],
+              additionalProperties: false,
+            },
+          },
+        },
+      }),
+    }),
+    PREP_SUMMARY_TIMEOUT_MS,
+    'prep brief',
+  );
+  const raw = await response.text();
+  if (!response.ok) throw new Error(`Prep brief failed: ${response.status} ${raw.slice(0, 300)}`);
+  const text = extractResponseText(JSON.parse(raw));
+  let parsed = {};
+  try { parsed = JSON.parse(text); } catch { throw new Error('Prep brief returned malformed JSON.'); }
+  // Enforce the ceilings on the way out too — a schema constrains the SHAPE, never the length.
+  const brief = limitText(parsed?.brief, PREP_BRIEF_MAX_CHARS);
+  const seen = new Set();
+  const terms = [];
+  for (const line of Array.isArray(parsed?.terms) ? parsed.terms : []) {
+    const term = limitText(line, 160).replace(/^[-•*\s]+/, '');
+    const key = term.toLowerCase();
+    if (!term || seen.has(key)) continue;
+    seen.add(key);
+    terms.push(term);
+    if (terms.length >= PREP_TERMS_MAX) break;
+  }
+  return { brief, terms };
 }
 
 // ---------- TTS (streamed) ----------
@@ -939,6 +1067,33 @@ export function installOnlineApi(server, { requireAuth } = {}) {
         } catch (error) {
           logLine('refine.fail', { message: String(error?.message ?? error).slice(0, 300) });
           sendJson(res, 502, { error: 'Preview refine failed.' });
+        }
+        return true;
+      }
+
+      // M14 — one pre-session call: the event's documents in, the Bối cảnh + suggested terms out.
+      // 4 MB body: the documents are the payload here, unlike every other route in this file.
+      if (pathname === '/online-api/summarize-prep-docs' && req.method === 'POST') {
+        const body = await readJsonBody(req, 4 * 1024 * 1024);
+        const sourceLanguage = normalizeLanguage(body?.sourceLanguage, 'vi');
+        const targetLanguage = normalizeLanguage(body?.targetLanguage, 'ja');
+        const { docs, usedChars } = clipPrepDocuments(body?.documents);
+        if (!docs.length) {
+          sendJson(res, 400, { error: 'documents is required.' });
+          return true;
+        }
+        try {
+          const result = await summarizePrepDocsWithLlm({
+            sourceLanguage,
+            targetLanguage,
+            header: limitText(body?.header, SESSION_BRIEF_MAX_CHARS),
+            docs,
+          });
+          logLine('prep.brief.ok', { documents: docs.length, usedChars, briefLength: result.brief.length, terms: result.terms.length });
+          sendJson(res, 200, { ...result, documents: docs.length, usedChars });
+        } catch (error) {
+          logLine('prep.brief.fail', { message: String(error?.message ?? error).slice(0, 300) });
+          sendJson(res, 502, { error: 'Prep brief failed.' });
         }
         return true;
       }

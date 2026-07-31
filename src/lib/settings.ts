@@ -49,7 +49,10 @@ export const LOCAL_KEYS = ['proyaku_settings', 'proyaku_tts', 'proyaku_prep', 'p
     // Cấu hình âm thanh + định tuyến phụ đề đa màn (nếu thiếu ở đây, sao lưu/mang sang máy gala sẽ MẤT
     // định tuyến loa VI/JA, âm lượng, nhãn vùng, phân màn phụ đề → phải đấu lại tay dưới áp lực).
     'proyaku_audio_profiles', 'proyaku_audio_vol', 'proyaku_audio_labels', 'proyaku_subtitle_outputs'];
-const LOCAL_PREFIXES = ['proyaku_script:', 'proyaku_script_sync:', 'proyaku_glossary:', 'proyaku_glossary_sync:', 'proyaku_docs:'];
+const LOCAL_PREFIXES = ['proyaku_script:', 'proyaku_script_sync:', 'proyaku_glossary:', 'proyaku_glossary_sync:', 'proyaku_docs:',
+    // M14 — bối cảnh do AI tóm tắt từ tài liệu (proyaku_prep_ai:<scope>). Thiếu ở đây thì bản sao lưu
+    // mang sang máy gala sẽ mất bối cảnh, và phải gọi lại model (mất tiền, mất thời gian) ngay tại chỗ.
+    'proyaku_prep_ai:'];
 
 // Every proyaku key currently present: the static list + anything matching a per‑event prefix.
 function allLocalKeys(): string[] {

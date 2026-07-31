@@ -173,7 +173,11 @@ const ImportDrawer: React.FC<{
     };
 
     const commit = () => { if (parsed && parsed.entries.length) onCommit(parsed.entries); };
-    const accept = `.md,.markdown,.txt,.csv,.srt,.docx,.docm,.dotx,.dotm${backendOnline ? ',.pdf' : ''}`;
+    // `.tsv` is the format a bilingual script is actually exported in (one line = nguồn⇥đích), and it is
+    // the one the delimiter detector reads best. It was missing only from this picker: readImportFile
+    // already handles it as plain text, and a dropped .tsv always worked. Adding it here means the
+    // operator can pick the same file with the button instead of discovering drag-and-drop.
+    const accept = `.md,.markdown,.txt,.tsv,.csv,.srt,.docx,.docm,.dotx,.dotm${backendOnline ? ',.pdf' : ''}`;
     const delimLabel = parsed ? (parsed.delim === 'none' ? 'chỉ câu nguồn' : parsed.delim === 'tab' ? 'Tab' : parsed.delim === 'pipe' ? '|' : '=> / -> / ::') : '';
 
     return (

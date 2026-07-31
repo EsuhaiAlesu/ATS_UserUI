@@ -7,7 +7,11 @@
 // the windows themselves — a browser never tells the parent that a child window was closed. TASK 7.3.
 
 export type WallView = 'vi2ja' | 'ja2vi' | 'both'
-export interface WallOutput { id: string; label: string; enabled: boolean; view: WallView; showSource: boolean; screenIdx?: number }
+// `dock` (M10) — a narrow PORTRAIT strip pinned to one edge of the current screen, for the operator who
+// keeps the two-way window beside their other apps instead of on a hall monitor. It is a placement, not a
+// view: the /wall page itself reflows to one column when the window is this shape.
+export type WallDock = 'full' | 'right' | 'left'
+export interface WallOutput { id: string; label: string; enabled: boolean; view: WallView; showSource: boolean; screenIdx?: number; dock?: WallDock }
 export type ScreenSupport = 'idle' | 'unsupported' | 'single' | 'multi' | 'denied'
 export interface WallScreen { left: number; top: number; width: number; height: number; label: string }
 
@@ -20,10 +24,17 @@ const STORAGE_KEY = 'proyaku_online_wall_outputs'
 
 // Gala default: Màn giữa = cả hai chiều · Màn trái = VI→JA · Màn phải = JA→VI. Nguồn ẩn mặc định.
 export const DEFAULT_WALL_OUTPUTS: WallOutput[] = [
-  { id: 'center', label: 'Màn giữa', enabled: true, view: 'both', showSource: false },
-  { id: 'left', label: 'Màn trái', enabled: true, view: 'vi2ja', showSource: false },
-  { id: 'right', label: 'Màn phải', enabled: true, view: 'ja2vi', showSource: false },
+  { id: 'center', label: 'Màn giữa', enabled: true, view: 'both', showSource: false, dock: 'full' },
+  { id: 'left', label: 'Màn trái', enabled: true, view: 'vi2ja', showSource: false, dock: 'full' },
+  { id: 'right', label: 'Màn phải', enabled: true, view: 'ja2vi', showSource: false, dock: 'full' },
 ]
+
+// A docked strip is sized like a phone held beside the operator's other windows: about a quarter of the
+// screen, never so thin that a Japanese line cannot hold a few characters (min 320) and never so wide that
+// it stops being a strip (max 520).
+export const DOCK_MIN_W = 320
+export const DOCK_MAX_W = 520
+export const DOCK_FRACTION = 0.26
 
 // localStorage is absent in SSR/tests and can throw in locked-down browsers — reach it defensively.
 function safeStorage(): Storage | null {
@@ -31,6 +42,7 @@ function safeStorage(): Storage | null {
 }
 
 const isView = (v: unknown): v is WallView => v === 'vi2ja' || v === 'ja2vi' || v === 'both'
+const isDock = (v: unknown): v is WallDock => v === 'full' || v === 'right' || v === 'left'
 
 // Merge one stored entry (which may be partial or corrupt) over its default, field by field, so a stale
 // value can never break the console: any field that is missing or the wrong type falls back to the default.
@@ -44,6 +56,7 @@ function mergeStored(def: WallOutput, stored: Record<string, unknown> | undefine
     view: isView(stored.view) ? stored.view : def.view,
     showSource: typeof stored.showSource === 'boolean' ? stored.showSource : def.showSource,
     screenIdx: typeof idx === 'number' && Number.isInteger(idx) && idx >= 0 ? idx : undefined,
+    dock: isDock(stored.dock) ? stored.dock : (def.dock ?? 'full'),
   }
 }
 
@@ -116,6 +129,38 @@ function isClosed(win: Window): boolean {
   try { return win.closed } catch { return true }
 }
 
+export interface WallGeometry { left: number; top: number; width: number; height: number }
+
+/**
+ * Where ONE window goes. Three placements, in priority order:
+ *  1. `dock` right/left — a narrow portrait strip on the CURRENT screen's edge, so the operator can keep
+ *     working next to it. Deliberately outranks `screenIdx`: docking is a choice about this desk, and a
+ *     stale monitor assignment must not drag the strip onto a projector.
+ *  2. an assigned monitor (`screenIdx` resolving to a detected screen) — the hall wall.
+ *  3. the fallback slice — the current screen divided evenly between the enabled windows.
+ * Pure: takes the available area instead of reading `window`, so the geometry is testable.
+ */
+export function wallWindowGeometry(
+  output: WallOutput,
+  screens: WallScreen[],
+  index: number,
+  total: number,
+  avail: { width: number; height: number },
+): WallGeometry {
+  const availW = Math.max(1, avail.width)
+  const availH = Math.max(1, avail.height)
+  const dock = output.dock ?? 'full'
+  if (dock === 'right' || dock === 'left') {
+    // Clamp to the screen too: on a small laptop DOCK_MIN_W could otherwise exceed the whole width.
+    const width = Math.min(availW, Math.max(DOCK_MIN_W, Math.min(DOCK_MAX_W, Math.round(availW * DOCK_FRACTION))))
+    return { left: dock === 'right' ? availW - width : 0, top: 0, width, height: availH }
+  }
+  const scr = (output.screenIdx != null && screens[output.screenIdx]) ? screens[output.screenIdx] : null
+  if (scr) return { left: scr.left, top: scr.top, width: scr.width, height: scr.height }
+  const colW = total > 0 ? Math.max(320, Math.round(availW / total)) : availW
+  return { left: index * colW, top: 0, width: colW, height: availH }
+}
+
 // Open (or re-place) one popup per ENABLED output. An already-open window is re-navigated ONLY when its URL
 // changed, then always steered back onto its assigned screen. Returns { opened, total, blocked } so the UI
 // can say something true — `blocked` is the popups the blocker ate (window.open returned null).
@@ -129,17 +174,11 @@ export function openWallWindows(outputs: WallOutput[], screens: WallScreen[], fo
   // (Bước 1) — the operator drags each onto its hall monitor and presses F.
   const availW = window.screen.availWidth || window.innerWidth || 1280
   const availH = window.screen.availHeight || window.innerHeight || 720
-  const colW = total > 0 ? Math.max(320, Math.round(availW / total)) : availW
 
   enabled.forEach((o, i) => {
     const src = o.showSource ? '&src=1' : ''
     const url = `/wall?dir=${o.view}&font=${fontSize}${src}`
-    // Assigned monitor (Bước 2) if screenIdx resolves to a detected screen, else the fallback slice.
-    const scr = (o.screenIdx != null && screens[o.screenIdx]) ? screens[o.screenIdx] : null
-    const left = scr ? scr.left : i * colW
-    const top = scr ? scr.top : 0
-    const width = scr ? scr.width : colW
-    const height = scr ? scr.height : availH
+    const { left, top, width, height } = wallWindowGeometry(o, screens, i, total, { width: availW, height: availH })
 
     const existing = wallWindows.get(o.id)
     if (existing && !isClosed(existing)) {

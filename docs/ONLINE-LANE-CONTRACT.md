@@ -1,4 +1,6 @@
-# Online Lane Contract — v0.5 (2026-07-31)
+# Online Lane Contract — v0.6 (2026-07-31)
+
+> **v0.6 changelog (M14 — the brief is written, not pasted):** one new endpoint, `POST /online-api/summarize-prep-docs` (§7). It is the only route in this contract that is NOT on the live path: it is pressed during Chuẩn bị, reads the event's imported documents, and returns a session brief + suggested terms for the operator to edit. Nothing else changes — no new event, no change to any existing request or response.
 
 > **v0.5 changelog (PROMPT-10 PART 1 — M11/M12: hear it right, cut it right, translate whole thoughts):**
 > Two OPTIONAL, ADDITIVE request fields on `POST /online-api/refine-preview-translation` (§3):
@@ -43,6 +45,12 @@ Source of truth for the ONLINE lane (Esuhai Realtime Translation core). Do not i
 4. `POST /online-api/tts` body `{ text, language:'ja'|'vi', emotion?, speed?, traceId?, subtitleId? }` → response is an audio stream.
 5. `POST /online-api/save-session` body `{ filename, json, md }` → `{ saved:true, filename }`.
 6. `POST /online-api/usage-report` — free-form JSON body (the server just logs it for cost tracking; ~4000-char limit). The client sends it periodically (~every 5 min) and once on stop; it is best-effort (a 404/failure is silently ignored). Current body shape: `{ lane:'online', sessionStartedAt, finals, draftCalls, draftSkipped, refineCalls, refineRetries, ttsSentences, reconnects, droppedGhosts }`.
+7. `POST /online-api/summarize-prep-docs` (v0.6) — **pre-session only, never during a live session.** Body `{ sourceLanguage:'vi'|'ja', targetLanguage:'vi'|'ja', header?, documents:[{ name, text }] }` → `{ brief, terms:[string], documents, usedChars }`.
+   - `documents` are the files imported in Chuẩn bị → Tài liệu, resolved through the session's knowledge scope (a session in a series sees the series' shelf). The server clips them to at most 12 files / 12 000 chars each / 48 000 chars total, sharing the total budget evenly, and reports what it actually read as `documents` + `usedChars`. Request body limit 4 MB — the only route in this contract whose payload is the documents themselves.
+   - `header` is what the operator already knows (conference title · date · venue, agenda, speaker roster). It exists so the model never has to guess a date or a venue the script does not state.
+   - `brief` is Vietnamese, ≤1500 chars, line-oriented — the same shape and budget as the `sessionBrief` field of §3, because that is where it ends up. `terms` is ≤40 lines of `source = target` (or a bare source form), source side = `sourceLanguage`; they are SUGGESTIONS that the client merges under its own 40-line budget, always behind the curated glossary and the speaker roster.
+   - Slow by design (server budget 60 s, client 90 s) and **not retried**: the operator presses the button again. `502 { error }` on any vendor failure; `400` when no document carries text.
+   - The result is the operator's to accept — the client puts it in an editable box, saves it per event+direction, and never sends it anywhere on its own.
 
 ## What the core does NOT provide
 

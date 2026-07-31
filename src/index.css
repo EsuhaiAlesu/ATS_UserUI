@@ -509,3 +509,27 @@
 .sub-append { animation: subAppend 0.45s ease-out both; }
 @keyframes subAppend { from { opacity: 0.25; } to { opacity: 1; } }
 @media (prefers-reduced-motion: reduce) { .sub-append { animation: none; } }
+
+/* Subtitle weight + the brand gold.
+   A hall screen is read from 20–30 m away, off-axis, over a projector's washed-out black. Regular
+   weight loses its thin strokes at that distance, so EVERY paragraph is bold and the one being spoken
+   right now is heavier still and carries the gold (--color-secondary #f4d06a) — the same gold the
+   design system already uses for the live marker on its left border, so the accent and the text agree.
+   Gold is reserved for the LIVE paragraph on purpose: a whole wall of gold would flatten the page and
+   the eye would have nothing to land on. Finished paragraphs stay in the light on-surface tone and
+   simply recede.
+   Only `color` transitions — a font-weight transition reflows the text mid-sentence, and a subtitle
+   line must never move under someone who is reading it. */
+.sub-para {
+    font-weight: 700;
+    transition: color 260ms ease;
+    /* Lifts the glyph edges off a projector's grey black without smearing the counters. */
+    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.55);
+}
+.sub-para--live {
+    font-weight: 800;
+    /* A whisper of the gold behind the glyphs, so the live line still separates when a projector
+       crushes the colour difference. Deliberately weaker than the text shadow — never a halo. */
+    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.55), 0 0 18px rgba(244, 208, 106, 0.18);
+}
+@media (prefers-reduced-motion: reduce) { .sub-para { transition: none; } }

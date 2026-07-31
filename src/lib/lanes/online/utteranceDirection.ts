@@ -21,6 +21,17 @@ const count = (s: string, re: RegExp) => (s.match(re) || []).length
 const clampConf = (c: number) => Math.max(0, Math.min(0.99, c))
 
 /**
+ * The raw script evidence in a piece of text, for a caller that must WEIGH it rather than be handed a
+ * verdict: the TTS guard needs to know how much of a line is Japanese, not merely whether any of it is —
+ * a Vietnamese sentence quoting エスハイ is still Vietnamese. Exported from here so there is exactly one
+ * copy of these three character classes in the lane.
+ */
+export function scriptSignals(text: string): { kana: number; kanji: number; vnMarks: number; chars: number } {
+  const t = (text || '').trim()
+  return { kana: count(t, KANA), kanji: count(t, KANJI), vnMarks: count(t, VN_MARKS), chars: t.replace(/\s+/g, '').length }
+}
+
+/**
  * Classify a single utterance by its script. `previous` is the sticky fallback when there is not enough
  * evidence (undiacriticised Latin such as "OK", "2026", "Esuhai", or Vietnamese typed without tones):
  * people rarely switch language on a filler word, and flipping direction on a guess is far worse than

@@ -14,7 +14,11 @@ import { startPcm16Capture, type CaptureHandle, type CapturePacket } from './pcm
 import { endsWithStrongSentenceBreak, findFirstCommaClauseBreak, findLastStrongSentenceBreak } from './transcriptSegmentation';
 import { ASR_FINAL_MIN_VOICED_MS, ASR_PARTIAL_MIN_VOICED_MS, hasClearSpeechEvidence, isNonSpeechAnnotation } from './asrSpeechEvidence';
 import { isStableDraftPrefix, joinLiveDraftSource, stripPromotedPrefix } from './liveDraftTranslation';
-import { DRAFT_RATE_WINDOW_MS, decideDraftAdmission, getContinuationWaitMs } from './livePipelinePolicy';
+import { DRAFT_RATE_WINDOW_MS, decideCaptureFrame, decideDraftAdmission, getContinuationWaitMs } from './livePipelinePolicy';
+import { createSpeechPauseProfile } from './speechPauseProfile';
+import { createSpeechShapeMonitor } from './speechShape';
+import { checkTtsLanguage } from './ttsLanguageGuard';
+import { createScriptMatcher, type ScriptMatch, type ScriptMatcher, type ScriptMatcherEntry } from './scriptMatcher';
 import { nextScribeForceCommitDelay, planStableScribeCommit, type ScribeManualCommitReason } from './scribeManualCommit';
 import { estimateSourceSpeechPace } from './sourceSpeechPace';
 import { enqueueTtsSentence, getTtsQueueLength, resetTtsPlayback, setTtsPlaybackStartHandler, stopTtsPlayback, subscribeTtsSpeaking } from './ttsPlayback';
@@ -86,6 +90,14 @@ const BACKLOG_TOAST_THROTTLE_MS = 60_000; // at most one backlog-reconnect toast
 const STOP_COMMIT_WAIT_MS = 700;
 const STOP_REFINE_WAIT_MS = 2_000;
 
+// M9 — script snap. A snapped line is ready the instant the sentence finalises, while a refined line
+// takes 1–2s. If an EARLIER sentence is still at refine, speaking the snap straight away would put the
+// two sentences on the loudspeaker in the wrong order. The subtitle still snaps at once (it is addressed
+// by lid, so it cannot land out of order) — only the VOICE waits, and only this long: past that the
+// earlier line has effectively failed and holding the hall in silence is worse than one inverted pair.
+const SNAP_TTS_ORDER_WAIT_MS = 1_500;
+const SNAP_TTS_ORDER_POLL_MS = 60;
+
 type StartOpts = {
   sourceLanguage: 'vi' | 'ja';
   targetLanguage: 'vi' | 'ja';
@@ -121,11 +133,22 @@ export interface OnlineLaneConfig {
   getDeviceId?: () => string | undefined;
   getNearMicGate?: () => boolean;
   getSpeakEnabled?: () => boolean; // Phase 3: speak refined translations via TTS
+  // M13 "Ngưng nghe" — read LIVE on every captured frame, because its whole purpose is to be flipped
+  // mid-ceremony: the technician holds it down for a performance, a video or a musical number, and the
+  // microphone goes silent on the wire until they release it. Never latched at start().
+  getListenPaused?: () => boolean;
   // TASK 6.2: one mic, two directions — read ONCE at start() and latched for the whole session.
   getTwoWay?: () => boolean;
   onDirectedLine?: (line: DirectedLaneLine) => void;
   // TASK 11.13: hall-babble rejection — read at TICKET time (baked into the single-use asrWsUrl).
   getRoomFilter?: () => boolean;
+  // M9: the approved event script (Chuẩn bị → Kịch bản). It rides here, NOT in start(): the treaty in
+  // src/lib/lanes/types.ts is shared with the offline lane and only changes by explicit decision, while
+  // this config object is the sanctioned home for lane-private options (same as the device/gate getters
+  // above). Read ONCE at start() and latched for the session, like getTwoWay — a script edited under a
+  // running ceremony would move the cursor mid-sentence. Rows in either direction are fine: the matcher
+  // only considers rows whose source language is the one actually being spoken.
+  getScript?: () => readonly ScriptMatcherEntry[] | undefined;
 }
 
 export interface OnlineDiagnostics {
@@ -141,18 +164,48 @@ export interface OnlineDiagnostics {
   ttsQueueLength: number;
   gateActive: boolean;
   gatedMs: number;
+  // M13 — "Ngưng nghe". `listenPaused` is the only way to tell a deliberately deaf microphone from a
+  // broken one, and `pausedMs` says how much of the ceremony was spent that way (a technician who forgets
+  // to release it is the one failure this feature can cause, so it must be visible at a glance).
+  listenPaused: boolean;
+  pausedMs: number;
+  // M13 — finished sentences discarded because the sound behind them had the shape of music, applause or a
+  // hum rather than of a voice. Zero all evening means the guard never fired; a number that climbs during
+  // a musical number means it is doing exactly its job.
+  nonSpeechDrops: number;
+  lastNonSpeechReason: string;
   latency: LatencyReport;
   lastUsageReportAt: number | null;
   lastSaveAt: number | null;
   lastSaveDownloaded: boolean;
   lastSaveOk: boolean; // TASK 12.3 — false when the last save failed (even if nothing downloaded)
   sendBacklogBytes: number; // TASK 12.5 — the WS send buffer at the last audio frame
+  // M9 — script matching. `scriptLines` is 0 when no script was loaded, which is the one state the
+  // operator must be able to see before going live: everything else looks identical to a script that
+  // simply never matches.
+  scriptLines: number;
+  scriptSnaps: number; // sentences answered by the approved line (refine skipped entirely)
+  scriptSuggests: number; // close, but judged not safe enough to speak — translated as usual
+  scriptPosition: number; // 1-based script line expected next; 1 until something is accepted
+  lastScriptReason: string; // why the last finalised sentence did not snap — verbatim for the operator
   // M11 — turn handling and the two-way guards.
   manualCommits: number; // turns the CLIENT closed instead of waiting for the vendor's silence
   foreignDrops: number; // finals discarded because neither signal called them Vietnamese or Japanese
   languageTurns: number; // buffers closed because the other language started speaking
   vendorTags: number; // finals that arrived carrying the recogniser's own language verdict
   asrLanguages: string | null; // what the recogniser AGREED to listen for; null = free auto-detect
+  // M13 — the sentence-cut threshold in force for the speaker at the microphone right now.
+  // `pauseWindowMs` is what the last planned commit waited for (0 before the first one); `pauseSamples`
+  // is how many of this speaker's pauses the profile has collected, and stays under 8 — the point where
+  // it starts trusting itself — for a speaker who never pauses inside a sentence. `pauseAdaptive` says
+  // which of the two numbers is being used: false = the fixed 600/800ms guess, true = this speaker's own.
+  pauseWindowMs: number;
+  pauseSamples: number;
+  pauseAdaptive: boolean;
+  // M13 — sentences displayed but NOT spoken, because the text was not in the target language.
+  // `lastTtsSkipReason` is the guard's own words for the most recent one.
+  ttsLanguageSkips: number;
+  lastTtsSkipReason: string;
   // M12 — waiting for whole thoughts.
   continuationMerges: number; // fragments glued onto a thought that was already waiting
   fragmentRefines: number; // heads sent to refine without a closing punctuation mark
@@ -257,6 +310,37 @@ export function createOnlineLane(events: LaneEvents, config: OnlineLaneConfig = 
   let languageTurns = 0;
   let vendorTags = 0;
   let asrLanguages: string | null = null;
+  // M13 — the cut threshold this speaker earns for themselves. The 600/800ms stability windows in
+  // scribeManualCommit.ts are one guess for everybody; this measures the pauses the person at the
+  // microphone is actually taking and hands the planner their own numbers. `lastVoicedAt` is the last
+  // audio frame that carried voice, and the silence between two such frames is one pause. Keyed by the
+  // language being spoken, because the microphone is shared: a fast Japanese guest must not set the
+  // threshold for the slow Vietnamese MC. The key starts as the technician's chosen source language and
+  // follows the recogniser from there.
+  const pauseProfile = createSpeechPauseProfile();
+  let lastVoicedAt = 0;
+  let pauseKey: Lang = 'vi';
+  // What the LAST planned commit actually waited for, and whether that number was learned or the
+  // constant. The operator needs both: a window that never leaves 600ms means the profile is not
+  // learning, and a window that has moved is the single visible proof that it is.
+  let lastStableWindowMs = 0;
+  let lastStableWindowAdaptive = false;
+  // M13 — sentences whose VOICE was held back because the text was not in the target language (the
+  // subtitle was still shown). A number that climbs during a ceremony means the model is handing back
+  // English, and the operator should know it rather than wonder why some lines are silent.
+  let ttsLanguageSkips = 0;
+  let lastTtsSkipReason = '';
+
+  // M13 — the hall's OWN sound, judged by shape rather than by loudness. The near-mic gate cannot tell
+  // applause from a voice, so the ghost guards above (which only count "voiced ms") all agree that music
+  // is somebody speaking. This monitor is the second opinion, and it only ever drops a finished sentence —
+  // never a byte of audio. See speechShape.ts.
+  const speechShape = createSpeechShapeMonitor();
+  let nonSpeechDrops = 0;
+  let lastNonSpeechReason = '';
+  // M13 — "Ngưng nghe": the technician tells us a performance/video is running. While it is held the
+  // microphone puts silence on the wire, so nothing at all can be transcribed out of the music.
+  let pausedMs = 0;
   let continuationMerges = 0;
   let fragmentRefines = 0;
   let fragmentLinks = 0;
@@ -266,6 +350,18 @@ export function createOnlineLane(events: LaneEvents, config: OnlineLaneConfig = 
   const draftSkipped = { duplicate: 0, 'rate-limit': 0, 'in-flight': 0 };
   let refineCalls = 0;
   let refineRetries = 0;
+
+  // M9 script-snap state. The matcher is built once per session from the script handed to start();
+  // `flushSeq` + `outstandingRefine` exist only to keep the loudspeaker in speaking order (see
+  // SNAP_TTS_ORDER_WAIT_MS): a line goes into the map when it is sent to refine and comes out when
+  // refine settles, so a snap can tell whether anything said EARLIER is still unspoken.
+  let scriptMatcher: ScriptMatcher | null = null;
+  let scriptRows = 0; // approved rows this session; the matcher's own `size` counts candidates, not lines
+  let scriptSnaps = 0;
+  let scriptSuggests = 0;
+  let lastScriptReason = '';
+  let flushSeq = 0;
+  const outstandingRefine = new Map<string, number>();
 
   // M7 half-duplex gate state
   let ttsGateMode: TtsGateMode = 'auto';
@@ -490,15 +586,21 @@ export function createOnlineLane(events: LaneEvents, config: OnlineLaneConfig = 
         (packet: CapturePacket) => {
           let pcm = packet.pcm;
           let voicedMs = packet.voicedMs;
-          if (gateActive) {
-            // Half-duplex: while the app's own voice is audible, replace outgoing frames with
-            // equal-length silence (preserve server-VAD timing) so TTS never loops into the ASR.
-            gatedMs += packet.pcm.byteLength / 2 / 16; // samples / 16 = ms @16kHz
+          // One decision, one place (livePipelinePolicy.decideCaptureFrame): the half-duplex gate mutes
+          // our own voice, "Ngưng nghe" mutes a performance, and a muted frame is equal-length silence —
+          // never an absent frame, or the recogniser's 1.5s close would stop counting mid-sentence.
+          const frame = decideCaptureFrame({ listenPaused: config.getListenPaused?.() ?? false, gateActive });
+          const frameMs = packet.pcm.byteLength / 2 / 16; // samples / 16 = ms @16kHz
+          if (frame.countPaused) pausedMs += frameMs;
+          if (frame.countGated) gatedMs += frameMs;
+          if (frame.observeShape) speechShape.observe(packet.pcm);
+          if (frame.mute) {
             pcm = new ArrayBuffer(packet.pcm.byteLength);
             voicedMs = 0;
           }
           voicedWindow.push({ at: Date.now(), voicedMs });
           pruneVoiced();
+          notePausePace(voicedMs);
           // Only send audio while the WS is OPEN and the upstream session is ready. Audio produced while
           // not OPEN is discarded here — no unbounded buffering. Direct transport → JSON frame via codec;
           // proxy → raw binary as before (11.2).
@@ -549,6 +651,23 @@ export function createOnlineLane(events: LaneEvents, config: OnlineLaneConfig = 
       // otherwise a second session.created could slip a SECOND mic open (reviewer B, TASK 11.3 race).
       if (gen === sessionGen) capturingInFlight = false;
     }
+  }
+
+  // ---- M13: learn the speaker's own pauses ----
+
+  // Called on every captured audio frame. Only silence taken MID-TURN teaches anything: the quiet before
+  // somebody starts speaking, and the quiet after a turn was closed, is an empty room, and counting it
+  // would drag every threshold to the ceiling. `scribeLastPartial` being non-empty is exactly the
+  // condition "a turn is open right now", so it is the gate.
+  //
+  // A stretch of TTS needs no special case: the half-duplex gate zeroes `voicedMs` while the app's own
+  // voice plays, so the gap spanning it is longer than PAUSE_GAP_MAX_MS and the profile discards it.
+  function notePausePace(voicedMs: number): void {
+    if (!(voicedMs > 0)) return;
+    const now = Date.now();
+    const previous = lastVoicedAt;
+    lastVoicedAt = now;
+    if (previous > 0 && scribeLastPartial) pauseProfile.observe(now - previous, pauseKey);
   }
 
   // ---- timing helper for source pace ----
@@ -758,8 +877,18 @@ export function createOnlineLane(events: LaneEvents, config: OnlineLaneConfig = 
     }
     clearScribeCommitTimer();
     if (!text || scribeCommitPending) return;
-    const plan = planStableScribeCommit(text, scribePartialChangedAt, scribeLastCommitAt, Date.now());
+    // M13: this speaker's own measured windows when the profile has enough pauses to be trusted; null
+    // until then, and the planner falls back to its constants.
+    const plan = planStableScribeCommit(
+      text,
+      scribePartialChangedAt,
+      scribeLastCommitAt,
+      Date.now(),
+      pauseProfile.windows(pauseKey),
+    );
     if (!plan) return; // no punctuation and not long yet — the VAD backstop still owns this turn
+    lastStableWindowMs = plan.stableMs;
+    lastStableWindowAdaptive = plan.adaptive;
     scribeCommitTimer = setTimeout(() => {
       scribeCommitTimer = null;
       sendManualCommit(plan.reason);
@@ -792,6 +921,9 @@ export function createOnlineLane(events: LaneEvents, config: OnlineLaneConfig = 
     // M4: only display partials backed by clear speech evidence / recent sound.
     if (!hasClearSpeechEvidence(pruneVoiced(), ASR_PARTIAL_MIN_VOICED_MS)) return;
     if (Date.now() - lastLoudAt >= LONG_SILENCE_MS) return;
+    // M13: loud is not the same as spoken. Keep the lyrics of the song playing in the hall off the
+    // audience wall — where an interim line is the most visible thing in the room.
+    if (!speechShape.verdict().speechLike) return;
     noteSpeechTiming();
     // M11: judge the turn upstream is still HOLDING — not segmentBuffer, whose earlier sentences are
     // already committed and would make every partial look finished.
@@ -815,6 +947,17 @@ export function createOnlineLane(events: LaneEvents, config: OnlineLaneConfig = 
     }
     if (Date.now() - lastLoudAt >= LONG_SILENCE_MS) {
       dropGhost('long-silence', transcript);
+      return;
+    }
+    // M13: the guards above ask "was there sound?", and during a musical number the answer is yes, which
+    // is how a song became a sentence that was translated and READ ALOUD. This one asks whether the sound
+    // had the shape of a person speaking. It accuses only on unmistakable evidence (speechShape.ts), and
+    // the whole cost of being wrong is this one line.
+    const shape = speechShape.verdict();
+    if (!shape.speechLike) {
+      nonSpeechDrops += 1;
+      lastNonSpeechReason = shape.reason;
+      dropGhost(`non-speech sound · ${shape.reason}`, transcript);
       return;
     }
     if (transcript.length >= REPEAT_GUARD_MIN_CHARS && transcript === previousFinalTranscript) {
@@ -841,6 +984,10 @@ export function createOnlineLane(events: LaneEvents, config: OnlineLaneConfig = 
       dropGhost('foreign-language', transcript);
       return;
     }
+
+    // M13: the recogniser has just named the language that was at the microphone. Point the pause profile
+    // at that speaker's bucket, so the next turn is measured against pauses taken in the same language.
+    if (decided.language) pauseKey = decided.language;
 
     // M11: one microphone, two languages. A final in the OTHER language must not be glued onto the
     // buffer: the whole buffer settles its direction ONCE, so "Xin chào quý vị" + "皆様こんにちは" becomes a
@@ -954,13 +1101,19 @@ export function createOnlineLane(events: LaneEvents, config: OnlineLaneConfig = 
     // speaker and can never be the rest of this sentence.
     pendingFragmentTail = fragment && reason !== 'turn-end' ? head : '';
     pendingFragmentAt = finalizedAt;
-    if (fragment) fragmentRefines += 1;
-    if (previousFragment) fragmentLinks += 1;
-    scheduleRefine(lid, head, priorFinals, sourcePace, draftFallback, finalizedAt, {
-      fragment,
-      previousFragment,
-      alreadyWaited: reason !== 'ceiling',
-    });
+    // M9: the approved script may answer this sentence outright — exact human wording, and no refine
+    // round trip. Only when it refuses does the sentence take the normal draft → refine path.
+    const order = ++flushSeq;
+    if (!trySnapToScript(lid, head, finalizedAt, order)) {
+      if (fragment) fragmentRefines += 1; // a snapped line came from the approved script — not a fragment
+      if (previousFragment) fragmentLinks += 1;
+      outstandingRefine.set(lid, order);
+      scheduleRefine(lid, head, priorFinals, sourcePace, draftFallback, finalizedAt, {
+        fragment,
+        previousFragment,
+        alreadyWaited: reason !== 'ceiling',
+      });
+    }
 
     // Reset per-segment draft + timing state (this segment is done).
     resetDraftState();
@@ -981,6 +1134,68 @@ export function createOnlineLane(events: LaneEvents, config: OnlineLaneConfig = 
       currentInterimSource = '';
       segmentFirstFinalAt = 0;
     }
+  }
+
+  // ---- M9: script snap ----
+
+  // Answer a finalised sentence from the approved script when the match is beyond doubt; return true
+  // when it did, so the caller skips refine.
+  //
+  // The source line keeps the words actually HEARD, not the script's own wording. If a snap ever lands
+  // on the wrong line, whoever is watching the console sees source and translation disagree — replacing
+  // the heard text with the script's would make a wrong snap look flawless on screen.
+  function trySnapToScript(lid: string, head: string, finalizedAt: number, order: number): boolean {
+    // A script whose every row is unusable (junk text, a language the matcher does not handle) builds
+    // zero candidates. That is deliberately NOT short-circuited here: letting the matcher answer puts
+    // its own "kịch bản trống" into the diagnostics line, where a script silently doing nothing would
+    // otherwise look exactly like a script that simply never matches.
+    if (!scriptMatcher) return false;
+    const dl = dirLangs(lid, head, false); // settled at finalisation — never changes again
+    let result: ScriptMatch;
+    try {
+      result = scriptMatcher.match(head, dl.source);
+    } catch {
+      return false; // a fault in the matcher must never cost the session a sentence
+    }
+    lastScriptReason = result.reason;
+    if (result.band !== 'snap') {
+      if (result.band === 'suggest') scriptSuggests += 1;
+      return false;
+    }
+    // The matched row must translate INTO the language this utterance is being shown in: the same row
+    // read from the other direction is a different sentence for this audience.
+    if (result.targetLanguage !== dl.target) return false;
+    const target = result.scriptTarget.trim();
+    if (!target) return false;
+
+    scriptMatcher.accept(result); // the script cursor advances only on a line actually used
+    scriptSnaps += 1;
+    emitLine({ lid, sourceText: head, targetText: target, interim: false, corrected: true });
+    latency.markRefineShown(lid, performance.now()); // final quality reached, just without the round trip
+    recordSessionLine(lid, finalizedAt, head, target);
+    if (config.getSpeakEnabled?.()) void speakSnap(target, dl.target, lid, order);
+    // eslint-disable-next-line no-console
+    console.info(`[onlineLane][script] snap lid=${lid} score=${result.score} line=${result.index + 1}/${scriptRows}`);
+    return true;
+  }
+
+  // Hold a snap's VOICE — never its subtitle — until every sentence spoken before it has left refine,
+  // so the hall hears the sentences in the order they were said. Bounded: see SNAP_TTS_ORDER_WAIT_MS.
+  async function speakSnap(text: string, language: Lang, lid: string, order: number): Promise<void> {
+    const gen = sessionGen;
+    const deadline = Date.now() + SNAP_TTS_ORDER_WAIT_MS;
+    while (Date.now() < deadline) {
+      let earlier = false;
+      for (const pending of outstandingRefine.values()) {
+        if (pending < order) { earlier = true; break; }
+      }
+      if (!earlier) break;
+      await delay(SNAP_TTS_ORDER_POLL_MS);
+      if (gen !== sessionGen) return; // stopped or restarted while waiting — this line is history
+    }
+    if (gen !== sessionGen) return;
+    enqueueTtsSentence(text, language, undefined, undefined, lid);
+    ttsSentences += 1;
   }
 
   // ---- M6: refine tier ----
@@ -1042,6 +1257,10 @@ export function createOnlineLane(events: LaneEvents, config: OnlineLaneConfig = 
       if (gen !== sessionGen) return;
       result = await attemptRefine(body);
     }
+    // M9: this sentence is no longer waiting on refine, so a later snap is free to speak. The delete
+    // MUST stay in the same synchronous run as the enqueueTtsSentence below — a snap released here and
+    // queued before this line's own voice is exactly the inversion the wait exists to prevent.
+    outstandingRefine.delete(lid);
     // Session ended (or restarted) while awaiting — never emit a stale line onto a reused lid.
     if (gen !== sessionGen) return;
     if (result.ok) {
@@ -1056,8 +1275,19 @@ export function createOnlineLane(events: LaneEvents, config: OnlineLaneConfig = 
       if (config.getSpeakEnabled?.()) {
         const speakText = data.ttsText || data.translatedText || '';
         if (speakText) {
-          enqueueTtsSentence(speakText, dl.target, data.emotion, data.ttsSpeed, lid);
-          ttsSentences += 1;
+          // M13: never hand the voice a language it cannot pronounce. The subtitle above has ALREADY been
+          // shown and saved — only the loudspeaker is held back, so a wrong skip costs one sentence the
+          // hall reads instead of hears, while a wrong speak is a burst of noise over the next sentence.
+          const guard = checkTtsLanguage(speakText, dl.target);
+          if (guard.speak) {
+            enqueueTtsSentence(speakText, dl.target, data.emotion, data.ttsSpeed, lid);
+            ttsSentences += 1;
+          } else {
+            ttsLanguageSkips += 1;
+            lastTtsSkipReason = guard.reason;
+            // eslint-disable-next-line no-console
+            console.debug(`[onlineLane][tts] skipped (${guard.reason}): ${speakText.slice(0, 40)}`);
+          }
         }
       }
     } else {
@@ -1277,6 +1507,7 @@ export function createOnlineLane(events: LaneEvents, config: OnlineLaneConfig = 
     resetDraftState();
     for (const t of pendingRefineTimers.values()) clearTimeout(t.timer);
     pendingRefineTimers.clear();
+    outstandingRefine.clear(); // M9: nothing is owed a turn on the loudspeaker any more
     // Phase 3: stop playing our own voice + release the speaking subscription + open the gate.
     if (unsubscribeSpeaking) {
       unsubscribeSpeaking();
@@ -1323,6 +1554,11 @@ export function createOnlineLane(events: LaneEvents, config: OnlineLaneConfig = 
     segmentLid = null;
     currentInterimSource = '';
     voicedWindow.length = 0;
+    // M13: the learned pauses SURVIVE a reconnect (same speaker, same room), but the open gap does not —
+    // the silence spanning a dropped socket is dead air, not a pause somebody took.
+    lastVoicedAt = 0;
+    // The sound the room was making before the socket dropped says nothing about the sound after it.
+    speechShape.reset();
     inFlightDraftSources.clear();
     segmentFirstPartialAt = 0;
     lastPartialAt = 0;
@@ -1368,6 +1604,17 @@ export function createOnlineLane(events: LaneEvents, config: OnlineLaneConfig = 
     draftSkipped['in-flight'] = 0;
     refineCalls = 0;
     refineRetries = 0;
+    // M9: build the session's script matcher. Rows are read ONCE here, like terms/brief — editing the
+    // script mid-session would move the cursor under a running ceremony. An absent or empty script
+    // leaves the matcher null and every sentence takes the normal path.
+    const scriptSeed = config.getScript?.() ?? [];
+    scriptMatcher = scriptSeed.length ? createScriptMatcher(scriptSeed) : null;
+    scriptRows = scriptSeed.length;
+    scriptSnaps = 0;
+    scriptSuggests = 0;
+    lastScriptReason = '';
+    flushSeq = 0;
+    outstandingRefine.clear();
     // Phase 3 gate + TTS setup
     ttsGateMode = startOpts.ttsGate ?? 'auto';
     gatedMs = 0;
@@ -1409,6 +1656,20 @@ export function createOnlineLane(events: LaneEvents, config: OnlineLaneConfig = 
     languageTurns = 0;
     vendorTags = 0;
     asrLanguages = null;
+    // M13: a new session is a new speaker in a new room — never inherit the previous event's pauses. The
+    // key starts at the technician's chosen source language, so the very first turn is already measured
+    // into the right bucket instead of into a nameless one.
+    pauseProfile.reset();
+    lastVoicedAt = 0;
+    pauseKey = startOpts.sourceLanguage;
+    lastStableWindowMs = 0;
+    lastStableWindowAdaptive = false;
+    ttsLanguageSkips = 0;
+    lastTtsSkipReason = '';
+    speechShape.reset();
+    nonSpeechDrops = 0;
+    lastNonSpeechReason = '';
+    pausedMs = 0;
     continuationMerges = 0;
     fragmentRefines = 0;
     fragmentLinks = 0;
@@ -1479,6 +1740,7 @@ export function createOnlineLane(events: LaneEvents, config: OnlineLaneConfig = 
   }
 
   function getDiagnostics(): OnlineDiagnostics {
+    const learned = pauseProfile.windows(pauseKey);
     return {
       reconnectAttempts,
       secondsSinceLastEvent: lastEventAt ? Math.max(0, (Date.now() - lastEventAt) / 1000) : 0,
@@ -1492,17 +1754,31 @@ export function createOnlineLane(events: LaneEvents, config: OnlineLaneConfig = 
       ttsQueueLength: getTtsQueueLength(),
       gateActive,
       gatedMs: Math.round(gatedMs),
+      listenPaused: config.getListenPaused?.() ?? false,
+      pausedMs: Math.round(pausedMs),
+      nonSpeechDrops,
+      lastNonSpeechReason,
       latency: latency.getReport(),
       lastUsageReportAt,
       lastSaveAt,
       lastSaveDownloaded,
       lastSaveOk,
       sendBacklogBytes,
+      scriptLines: scriptRows,
+      scriptSnaps,
+      scriptSuggests,
+      scriptPosition: (scriptMatcher?.position() ?? 0) + 1,
+      lastScriptReason,
       manualCommits,
       foreignDrops,
       languageTurns,
       vendorTags,
       asrLanguages,
+      pauseWindowMs: lastStableWindowMs,
+      pauseSamples: learned?.samples ?? 0,
+      pauseAdaptive: lastStableWindowAdaptive,
+      ttsLanguageSkips,
+      lastTtsSkipReason,
       continuationMerges,
       fragmentRefines,
       fragmentLinks,

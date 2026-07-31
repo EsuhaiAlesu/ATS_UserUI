@@ -12,6 +12,7 @@ import { createOnlineLane, type OnlineDiagnostics, type OnlineLaneController, ty
 import { setTtsSinkId, setTtsWarningHandler, setTtsVoice, setTtsManualSpeed } from './ttsPlayback'
 import type { SaveOutcome } from './sessionExport'
 import { createAudiencePublisher, type AudienceLine } from '../../audienceChannel'
+import type { ScriptMatcherEntry } from './scriptMatcher'
 import { SUBTITLE_FONT, clampSubtitleFont } from '../../audienceSubtitles'
 import {
   loadWallOutputs, saveWallOutputs, detectWallScreens, scanWallScreens, openWallWindows, getOpenWallIds, closeWallWindows,
@@ -22,8 +23,13 @@ export type { LaneLine, LaneStatus } from '../types'
 export type { OnlineDiagnostics, TtsGateMode } from './onlineLane'
 export type { SaveOutcome } from './sessionExport'
 export type { AudienceLine } from '../../audienceChannel'
-export type { WallOutput, WallView, ScreenSupport, WallScreen } from './audienceWindows'
+export type { ScriptMatcherEntry } from './scriptMatcher'
+export type { WallOutput, WallView, WallDock, ScreenSupport, WallScreen } from './audienceWindows'
 export { SUBTITLE_FONT } from '../../audienceSubtitles'
+// M14 — the pre-session document summariser. A plain async function, not part of the hook: it belongs to
+// Chuẩn bị, runs at most once per session, and must never be reachable from anything a live session does.
+export { summarizePrepDocs, PREP_DOCS_MAX, PREP_DOC_MAX_CHARS } from './prepBrief'
+export type { PrepBriefInput, PrepBriefResult, PrepBriefDoc } from './prepBrief'
 export type OnlineDirection = 'vi2ja' | 'ja2vi'
 export type SpeedMode = 'auto' | 'manual'
 export interface OnlineVoice { slug: string; name: string; language: string; category: string; labels: Record<string, string> }
@@ -117,12 +123,21 @@ export interface UseOnlineLane {
   setSpeakEnabled: (v: boolean) => void
   gateMode: TtsGateMode
   setGateMode: (v: TtsGateMode) => void
+  // M13 "Ngưng nghe" — the one control meant to be used WHILE a session runs: held during a performance,
+  // a video or a musical number so the recogniser is fed silence instead of music. Always released by
+  // start(), because a session that begins deaf looks exactly like a session that is broken.
+  listenPaused: boolean
+  setListenPaused: (v: boolean) => void
   direction: OnlineDirection
   setDirection: (v: OnlineDirection) => void
   terms: string
   setTerms: (v: string) => void
   brief: string
   setBrief: (v: string) => void
+  // Kịch bản (M9). The console hands over the approved rows from Chuẩn bị; the lane reads them once at
+  // Bắt đầu, exactly like terms/brief.
+  script: ScriptMatcherEntry[]
+  setScript: (rows: ScriptMatcherEntry[]) => void
   // voices + speed (TASK 5)
   voices: Record<'ja' | 'vi', OnlineVoice[]>
   voicesStatus: 'idle' | 'loading' | 'ready' | 'error'
@@ -172,6 +187,8 @@ export function useOnlineLane(): UseOnlineLane {
   const [direction, setDirection] = useState<OnlineDirection>('vi2ja')
   const [terms, setTerms] = useState('')
   const [brief, setBrief] = useState('')
+  const [listenPaused, setListenPaused] = useState(false)
+  const [script, setScript] = useState<ScriptMatcherEntry[]>([])
 
   // voices + speed (TASK 5) — persisted so the operator's choice survives a reload.
   const [voices, setVoices] = useState<Record<'ja' | 'vi', OnlineVoice[]>>({ ja: [], vi: [] })
@@ -215,6 +232,10 @@ export function useOnlineLane(): UseOnlineLane {
   briefRef.current = brief
   const gateModeRef = useRef<TtsGateMode>('auto')
   gateModeRef.current = gateMode
+  const scriptRef = useRef<ScriptMatcherEntry[]>([])
+  scriptRef.current = script
+  const listenPausedRef = useRef(false)
+  listenPausedRef.current = listenPaused
   const laneRef = useRef<OnlineLaneController | null>(null)
   // True while this hook is mounted — guards a start() that resolves its pre-start gate AFTER the
   // component unmounted (e.g. the operator switched modes during the config-status round-trip),
@@ -363,6 +384,9 @@ export function useOnlineLane(): UseOnlineLane {
     }
     setError('')
     setLines([])
+    // Never begin a session deaf: whatever the technician left "Ngưng nghe" on for is over.
+    setListenPaused(false)
+    listenPausedRef.current = false
     dirByLid.current.clear()
     publisherRef.current?.reset() // a new session never begins with the previous one's lines on the wall
     if (!laneRef.current) {
@@ -370,8 +394,13 @@ export function useOnlineLane(): UseOnlineLane {
         getDeviceId: () => deviceIdRef.current || undefined,
         getNearMicGate: () => nearMicGateRef.current,
         getSpeakEnabled: () => speakEnabledRef.current,
+        getListenPaused: () => listenPausedRef.current,
         getTwoWay: () => twoWayRef.current,
         getRoomFilter: () => roomFilterRef.current,
+        // M9: the approved script rides on the lane config, not on start() — start()'s shape is the
+        // two-lane treaty (src/lib/lanes/types.ts) and the offline lane has no script. The lane calls
+        // this once at Bắt đầu and latches the rows for the whole session.
+        getScript: () => scriptRef.current,
         onDirectedLine: (line) => {
           dirByLid.current.set(line.lid, line.dir)
           publisherRef.current?.publish({ lid: line.lid, sourceText: line.sourceText, targetText: line.targetText, interim: line.interim, corrected: line.corrected, at: line.at, dir: line.dir })
@@ -430,7 +459,8 @@ export function useOnlineLane(): UseOnlineLane {
     inputDevices, outputDevices, refreshDevices,
     deviceId, setDeviceId, outputDeviceId, setOutputDeviceId,
     nearMicGate, setNearMicGate, speakEnabled, setSpeakEnabled, gateMode, setGateMode,
-    direction, setDirection, terms, setTerms, brief, setBrief,
+    listenPaused, setListenPaused,
+    direction, setDirection, terms, setTerms, brief, setBrief, script, setScript,
     voices, voicesStatus, refreshVoices, voiceJa, setVoiceJa, voiceVi, setVoiceVi,
     speedMode, setSpeedMode, manualSpeed, setManualSpeed,
     twoWay, setTwoWay, roomFilter, setRoomFilter, directedLines, subtitleFont, setSubtitleFont,

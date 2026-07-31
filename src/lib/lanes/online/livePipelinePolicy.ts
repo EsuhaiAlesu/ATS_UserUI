@@ -122,3 +122,43 @@ export function getContinuationWaitMs(input: ContinuationWaitInput): number {
   }
   return clamp(wait, CONTINUATION_MIN_WAIT_MS, CONTINUATION_MAX_WAIT_MS);
 }
+
+// ---- M13: what leaves the microphone ----
+
+export type CaptureFrameInput = {
+  /** The operator pressed "Ngưng nghe" — a performance, a video or music is running. */
+  listenPaused: boolean;
+  /** The half-duplex anti-feedback gate: our own translated voice is audible right now. */
+  gateActive: boolean;
+};
+
+export type CaptureFrameDecision = {
+  /** Replace the frame with equal-length digital silence before sending it. */
+  mute: boolean;
+  /** Charge this frame to the "ngưng nghe" meter (takes precedence — it is the operator's own doing). */
+  countPaused: boolean;
+  /** Charge this frame to the anti-feedback meter. */
+  countGated: boolean;
+  /** Let the voice-shape monitor learn from this frame — only true audio the microphone really heard. */
+  observeShape: boolean;
+};
+
+/**
+ * The one place that decides what the microphone actually puts on the wire.
+ *
+ * Muting means sending SILENCE, never sending NOTHING: the recogniser closes a turn by counting 1.5s of
+ * quiet in the stream it is given, so a stream that stops flowing stops that clock and leaves the last
+ * sentence hanging. Equal-length digital zeros keep the clock honest while carrying nothing to transcribe.
+ *
+ * A muted frame teaches the voice-shape monitor nothing — it is our own silence, not the room's sound —
+ * and neither does a gated one, which is our own voice.
+ */
+export function decideCaptureFrame(input: CaptureFrameInput): CaptureFrameDecision {
+  const mute = input.listenPaused || input.gateActive;
+  return {
+    mute,
+    countPaused: input.listenPaused,
+    countGated: input.gateActive && !input.listenPaused,
+    observeShape: !mute,
+  };
+}

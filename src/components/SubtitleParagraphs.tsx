@@ -88,7 +88,7 @@ const SubtitleParagraphs: React.FC<Props> = ({ lines, direction, fontSize, scale
             const sep = p.volatile && (head || tail) ? (lang === 'ja' ? '' : ' ') : ''
             return (
               <p key={p.key} lang={lang}
-                className={`${lang === 'ja' ? 'jp-text' : ''} border-l-4 pl-[2vw] ${p.live ? 'border-secondary text-on-surface' : 'border-outline-variant text-on-surface/85'}`}
+                className={`${lang === 'ja' ? 'jp-text' : ''} sub-para border-l-4 pl-[2vw] ${p.live ? 'sub-para--live border-secondary text-secondary' : 'border-outline-variant text-on-surface/85'}`}
                 style={{ fontSize: `${px}px`, lineHeight: 1.32, lineBreak: lang === 'ja' ? 'strict' : undefined }}>
                 {head}
                 {tail && <span className="sub-append">{tail}</span>}
