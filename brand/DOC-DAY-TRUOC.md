@@ -12,7 +12,7 @@ cùng sổ tay quy chuẩn không thành công khai cho bất kỳ ai có link.
 | Dùng ở đâu | File |
 |---|---|
 | Logo trên head bar + ngăn điều hướng | `public/proyaku/svg/proyaku-chinh-nen-trong.svg` |
-| Bộ icon (đã sẵn, **app CHƯA nối**) | `public/proyaku/icon/` |
+| Favicon (thẻ `<link rel="icon">` trong `index.html`) | `public/proyaku/svg/proyaku-icon-vuong.svg` |
 
 `proyaku-chinh-nen-trong.svg` = y hệt `brand/svg/proyaku-chinh.svg`, **chỉ bỏ tấm nền
 đặc `#1C1D22`**. Bản gốc có nền đặc, mà head bar của app là `#080c18` (đậm hơn), nên
@@ -29,8 +29,29 @@ còn **tăng** tương phản chứ không giảm. Màu thương hiệu giữ ng
    ```
 3. Xem lại ở 390px và 1280px — head bar là chỗ chật nhất, logo rộng ra là đè chữ.
 
-## Còn treo
+## ⚠ LỖI TRONG BỘ KIT — cả bộ icon bị lệch khung
 
-Favicon vẫn đang là `public/favicon.svg` (bản cũ, trước khi có bộ nhận diện). Bộ icon
-thương hiệu đã nằm sẵn ở `public/proyaku/icon/` — muốn đổi thì sửa thẻ `<link rel="icon">`
-trong `index.html`.
+**Cả 3 bản SVG icon (`vuong`, `tron`, `trong`) và TẤT CẢ file PNG/`.ico` trong `brand/icon/`
+đều bị lệch: chữ P bị đẩy gần hết ra ngoài khung, chỉ còn một vệt xanh ở mép trên.**
+
+Nguyên nhân, đo bằng `getBBox()` trên trình duyệt chứ không đoán:
+
+| | Đúng phải là | Kit đang để |
+|---|---|---|
+| Khung chữ P | 463,85 × 614,40 | — |
+| `translate` x | `(1024−463,85)/2 = 280,08` | `280.08` ✅ đúng sẵn |
+| `translate` y | `(1024−614,40)/2 = 204,80` | `-409.60` ❌ |
+
+`-409,60 = 204,80 − 614,40` — người xuất đã **trừ nhầm nguyên chiều cao chữ**.
+
+**Đã xử lý tạm:** `public/proyaku/svg/proyaku-icon-vuong.svg` (bản app dùng) đã sửa thành
+`translate(280.08, 204.80)` và kiểm bằng mắt — chữ P cân giữa. `index.html` **chỉ khai bản SVG
+này**, cố ý KHÔNG khai `.ico` và `apple-touch-icon`, vì hai file đó vẫn hỏng: khai vào thì trình
+duyệt cũ hiện một ô đen với vệt xanh cụt, tệ hơn là không có gì.
+
+**Cần làm cho đúng:** xuất lại cả bộ icon từ nguồn với y = 204,80, rồi:
+1. thay `brand/svg/proyaku-icon-*.svg` + `brand/icon/*`,
+2. chép bản vuông sang `public/proyaku/svg/`,
+3. thêm lại 2 dòng `.ico` + `apple-touch-icon` vào `index.html`.
+
+Kit gốc trong `brand/` Em **giữ nguyên chưa sửa**, để còn đối chiếu khi xuất lại.
