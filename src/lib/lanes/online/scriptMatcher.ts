@@ -243,7 +243,8 @@ export function buildScriptCandidates(
         const dst_lang = entry.dst_lang;
 
         // Grow the run one line at a time, emitting a candidate at every length. A run stops at the first
-        // row that is missing, malformed, or points a different way — never merge across a direction flip.
+        // row that is missing, malformed, half-filled, or points a different way — never merge across a
+        // direction flip.
         const ids: string[] = [];
         const srcParts: string[] = [];
         const dstParts: string[] = [];
@@ -253,6 +254,12 @@ export function buildScriptCandidates(
             const row = run === 1 ? entry : entries[index + run - 1];
             if (!row || typeof row.src !== 'string' || typeof row.dst !== 'string') break;
             if (row.src_lang !== src_lang || row.dst_lang !== dst_lang) break;
+            // EVERY row must be filled in on both sides before it may join the run. Checking only the
+            // joined string is not enough: one good row carries a half-filled neighbour straight past the
+            // guard, because "ご来賓の皆様、ご列席の皆様。 N/A" is usable Japanese taken as a whole. The run
+            // has to stop here rather than grow through it, or "N/A" goes out over the ballroom speakers
+            // in an approved-sounding voice.
+            if (!isUsableText(row.src, src_lang) || !isUsableText(row.dst, dst_lang)) break;
             ids.push(row.id);
             srcParts.push(row.src);
             dstParts.push(row.dst);

@@ -1,0 +1,118 @@
+{
+  "ten": "PROYAKU",
+  "nghia": "Phien dich Viet - Nhat",
+  "slogan": "Professional Translate",
+  "phienBan": "2026-08-01",
+  "canhBao": "Hai mau xanh la va do-hong la MAU TAM, chua phai ma that cua app",
+  "mau": {
+    "xanhLa": {
+      "hex": "#4ADE80",
+      "vai": "chu tren nen toi",
+      "cmyk": [
+        67,
+        0,
+        42,
+        13
+      ],
+      "oklch": [
+        0.8003,
+        0.1821,
+        151.7
+      ],
+      "tuongPhanNenApp": 9.65,
+      "tuongPhanNenTrang": 1.74
+    },
+    "doHong": {
+      "hex": "#FB7185",
+      "vai": "slogan tren nen toi",
+      "cmyk": [
+        0,
+        55,
+        47,
+        2
+      ],
+      "oklch": [
+        0.7192,
+        0.169,
+        13.4
+      ],
+      "tuongPhanNenApp": 6.25,
+      "tuongPhanNenTrang": 2.69
+    },
+    "xanhLaDam": {
+      "hex": "#007639",
+      "vai": "chu tren nen sang",
+      "cmyk": [
+        100,
+        0,
+        52,
+        54
+      ],
+      "oklch": [
+        0.4954,
+        0.1314,
+        151.6
+      ],
+      "tuongPhanNenApp": 2.92,
+      "tuongPhanNenTrang": 5.75
+    },
+    "doHongDam": {
+      "hex": "#B42F4B",
+      "vai": "slogan tren nen sang",
+      "cmyk": [
+        0,
+        74,
+        58,
+        29
+      ],
+      "oklch": [
+        0.518,
+        0.1688,
+        13.5
+      ],
+      "tuongPhanNenApp": 2.76,
+      "tuongPhanNenTrang": 6.09
+    },
+    "nen": {
+      "hex": "#1C1D22",
+      "vai": "nen app",
+      "cmyk": [
+        18,
+        15,
+        0,
+        87
+      ],
+      "oklch": [
+        0.2318,
+        0.0097,
+        276.6
+      ],
+      "tuongPhanNenApp": 1.0,
+      "tuongPhanNenTrang": 16.82
+    }
+  },
+  "hinhHoc": {
+    "phongChu": "Outfit Bold — ung vien gan nhat, chua xac nhan",
+    "gianChu": 0.1355,
+    "tongBeRongChu": 7.625,
+    "phongSlogan": "Instrument Serif nghieng",
+    "beRongSlogan": 0.833,
+    "gianChuSlogan": 0.21,
+    "hoToiSlogan": 0.2553,
+    "lamDayNetSlogan": 1.4,
+    "canSlogan": "giua theo be rong chu",
+    "leBaoVe": 0.26
+  },
+  "chuaChac": [
+    "Ten phong that cua chu PROYAKU — ba ung vien chenh nhau trong sai so cua anh",
+    "Ma mau xanh la cua chu Hop Ban Quan Tri trong app",
+    "Ma mau do-hong-cam cua app"
+  ],
+  "khongDuoc": [
+    "doi mau ngoai bang da chot",
+    "to chu va slogan cung mot mau khi dung ban du mau",
+    "nghieng, keo gian, bop meo",
+    "them do bong, vien, anh kim",
+    "doi ty le giua chu va slogan"
+  ]
+}

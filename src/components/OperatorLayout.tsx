@@ -160,8 +160,13 @@ const OperatorLayout: React.FC = () => {
                     className="xl:hidden shrink-0 w-10 h-10 flex items-center justify-center rounded-lg text-on-surface-variant hover:text-on-surface hover:bg-surface-container transition-colors">
                     <span className="material-symbols-outlined" aria-hidden="true">menu</span>
                 </button>
-                {/* Thương hiệu — chữ Latin, dùng Sora; canh trái thẳng cột với tiêu đề sidebar */}
-                <span className="font-sora font-bold text-[18px] xl:text-[21px] 2xl:text-[25px] tracking-[0.12em] xl:tracking-[0.14em] 2xl:tracking-[0.16em] leading-none text-on-surface select-none shrink-0" style={{ textShadow: '0 0 18px rgba(244,208,106,0.20)' }}>PROYAKU</span>
+                {/* Thương hiệu — logo chính thức (bản CÓ slogan, phối màu cho nền tối, đã vector hoá hoàn
+                    toàn nên không gọi phông nào). Ảnh nằm trong public/ nên đi thẳng cùng bản build, không
+                    phụ thuộc mạng — hội trường có thể bị cô lập internet.
+                    `alt` mang tên thương hiệu để trình đọc màn hình và ảnh-hỏng vẫn đọc ra "PROYAKU". */}
+                <img src="/proyaku/svg/proyaku-chinh-nen-trong.svg" alt="PROYAKU — Phiên dịch Việt ⇄ Nhật"
+                    className="h-8 xl:h-9 2xl:h-11 w-auto select-none shrink-0" draggable={false}
+                    style={{ filter: 'drop-shadow(0 0 18px rgba(244,208,106,0.20))' }} />
                 {/* Menu chính — 3 tab full-height (Chuẩn bị · Báo cáo · Cài đặt), gạch chân vàng khi active (kiểu cũ).
                     Ẩn dưới xl → đưa vào ngăn điều hướng (hamburger).
                     "Dịch hội nghị" KHÔNG nằm ở đây — nó là pill riêng (kiểu tikme) đặt cạnh Sự kiện, xem bên dưới. */}
@@ -309,7 +314,8 @@ const OperatorLayout: React.FC = () => {
                     <div id="proyaku-mobile-drawer" ref={drawerRef} tabIndex={-1}
                         className="absolute inset-y-0 left-0 w-[86%] max-w-[320px] bg-surface-container-lowest border-r border-outline-variant shadow-2xl flex flex-col font-jakarta focus:outline-none">
                         <div className="shrink-0 flex items-center justify-between px-4 h-14 border-b border-outline-variant">
-                            <span className="font-sora font-bold text-[18px] tracking-[0.12em] text-on-surface">PROYAKU</span>
+                            <img src="/proyaku/svg/proyaku-chinh-nen-trong.svg" alt="PROYAKU — Phiên dịch Việt ⇄ Nhật"
+                                className="h-8 w-auto select-none" draggable={false} />
                             <button type="button" onClick={() => setDrawerOpen(false)} aria-label="Đóng menu"
                                 className="w-10 h-10 flex items-center justify-center rounded-lg text-on-surface-variant hover:text-on-surface hover:bg-surface-container">
                                 <span className="material-symbols-outlined" aria-hidden="true">close</span>

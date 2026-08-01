@@ -219,16 +219,20 @@ describe('the refusals — every way the matcher declines to speak', () => {
     }
     // On its own it produces no candidate at all — there is nothing that could be read out.
     expect(createScriptMatcher([halfFilled]).size).toBe(0)
-    // Beside a complete row it still never becomes a candidate in its own right…
+    // Beside a complete row it never enters ANY candidate — not on its own, and not swallowed into a
+    // merged run either. A run must stop at it rather than grow through it: the joined target
+    // ("…ご列席の皆様。 N/A") passes isUsableText as a whole, so only the row-by-row guard catches it.
     const candidates = buildScriptCandidates([GALA[0], halfFilled])
-    expect(candidates.some((c) => c.entryIds.join('+') === 'h2')).toBe(false)
+    expect(candidates.some((c) => c.entryIds.includes('h2'))).toBe(false)
+    expect(candidates.every((c) => !c.target.includes('N/A'))).toBe(true)
+    // Not vacuous, and the good row beside it is untouched: g01 still stands alone, both directions.
+    expect(candidates.filter((c) => c.entryIds.join('+') === 'g01')).toHaveLength(2)
     // …and reading it aloud matches nothing.
     expect(createScriptMatcher([GALA[0], halfFilled]).match(halfFilled.src, 'vi').band).toBe('none')
-    // NOTE (reported, not asserted as desired behaviour): the guarantee above is row-level only. A
-    // MERGED RUN that swallows a half-filled row is still built, because the joined target
-    // ("…皆様。 N/A") passes isUsableText as a whole. Reading g01 and this row in one breath snaps and
-    // would put "N/A" in front of the hall. Fixing that means changing buildScriptCandidates, which
-    // is out of scope for a test-only task.
+    // Nor does reading the complete row and the half-filled one in a single breath.
+    const breath = createScriptMatcher([GALA[0], halfFilled]).match(`${GALA[0].src} ${halfFilled.src}`, 'vi')
+    expect(breath.band).toBe('none')
+    expect(breath.entryIds).not.toContain('h2')
   })
 
   it('an empty script says kịch bản trống', () => {

@@ -1,0 +1,475 @@
+<!doctype html>
+<html lang="vi">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PROYAKU — Xưởng dựng logo</title>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&family=Playfair+Display:wght@700&family=Instrument+Serif:ital@0;1&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/opentype.js@1.3.4/dist/opentype.min.js"></script>
+
+<style>
+  :root{--ink:#16223C;--soft:#4A5872;--paper:#EDEFF3;--card:#FCFCFD;--line:#DADDE4;
+    --field:#F5F6F8;--brass:#96682A;--ok:#1E7A4C;--no:#B3261E}
+  *{box-sizing:border-box} html,body{margin:0}
+  body{background:var(--paper);color:var(--ink);font-family:"IBM Plex Sans",system-ui,sans-serif;
+    line-height:1.55;-webkit-font-smoothing:antialiased}
+  .wrap{max-width:1000px;margin:0 auto;padding:52px 22px 78px}
+  .eyebrow{font-family:"IBM Plex Mono",monospace;font-size:11.5px;letter-spacing:.3em;
+    text-transform:uppercase;color:var(--brass);margin:0 0 10px;text-align:center}
+  h1{font-family:"Playfair Display",serif;font-weight:700;font-size:31px;margin:0 0 8px;text-align:center}
+  .lede{text-align:center;font-size:14.5px;color:var(--soft);max-width:680px;margin:0 auto 34px}
+  h2{font-family:"Playfair Display",serif;font-weight:700;font-size:21px;margin:42px 0 5px}
+  p.sub{font-size:14px;color:var(--soft);margin:0 0 18px;max-width:720px}
+  p.sub b{color:var(--ink)}
+  .panel{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:24px}
+  .buoc{display:flex;gap:12px;align-items:flex-start;margin-bottom:18px}
+  .buoc:last-child{margin-bottom:0}
+  .buoc .so{flex:0 0 30px;height:30px;border-radius:50%;background:var(--ink);color:#fff;
+    display:flex;align-items:center;justify-content:center;font-family:"IBM Plex Mono",monospace;
+    font-size:13px;margin-top:1px}
+  .buoc.xong .so{background:var(--ok)}
+  .buoc .noi{flex:1;min-width:0}
+  .buoc .noi b{display:block;font-size:14.5px;margin-bottom:3px}
+  .buoc .noi p{font-size:13.5px;color:var(--soft);margin:0 0 10px}
+  pre{margin:0;background:#0F1B2B;color:#D6E2F0;border-radius:11px;padding:15px 17px;
+    font-family:"IBM Plex Mono",monospace;font-size:12px;line-height:1.5;overflow:auto;
+    white-space:pre-wrap;word-break:break-all}
+  .btn{font:inherit;font-size:13.5px;border:1px solid var(--line);background:var(--field);
+    color:var(--ink);border-radius:10px;padding:9px 16px;cursor:pointer}
+  .btn:hover{border-color:var(--brass)}
+  .btn.main{background:var(--ink);color:#fff;border-color:var(--ink)}
+  .btn:disabled{opacity:.45;cursor:not-allowed}
+  .row{display:flex;flex-wrap:wrap;gap:9px;align-items:center;margin-top:12px}
+  .o{flex:1;min-width:150px}
+  .o label{display:block;font-family:"IBM Plex Mono",monospace;font-size:10.5px;
+    letter-spacing:.14em;text-transform:uppercase;color:var(--soft);margin-bottom:5px}
+  .o input,.o select{font:inherit;font-size:13.5px;width:100%;padding:8px 11px;
+    border:1px solid var(--line);border-radius:9px;background:#fff}
+  .tha{border:2px dashed var(--line);border-radius:13px;padding:22px;text-align:center;
+    background:var(--field);cursor:pointer}
+  .tha:hover,.tha.dang{border-color:var(--brass);background:#FBF7F0}
+  .tha b{display:block;font-size:13.5px;margin-bottom:3px}
+  .tha span{font-size:12.5px;color:var(--soft)}
+  .stage{border:1px solid var(--line);border-radius:14px;min-height:180px;padding:30px;
+    display:flex;align-items:center;justify-content:center;overflow:hidden}
+  .stage.light{background:linear-gradient(180deg,#fff,#FAFBFC)}
+  .stage.dark{background:#0F1B2B;border-color:#243449}
+  .stage.clear{background:linear-gradient(45deg,#E4E6EA 25%,transparent 25%,transparent 75%,#E4E6EA 75%),
+    linear-gradient(45deg,#E4E6EA 25%,transparent 25%,transparent 75%,#E4E6EA 75%),#FBFBFC;
+    background-size:18px 18px;background-position:0 0,9px 9px}
+  #xem svg{max-width:100%;height:auto;display:block}
+  .seg{display:inline-flex;border:1px solid var(--line);border-radius:999px;overflow:hidden;
+    background:var(--field)}
+  .seg button{border:0;background:transparent;font:inherit;font-size:13px;padding:7px 15px;
+    cursor:pointer;color:var(--soft)}
+  .seg button.on{background:var(--ink);color:#fff}
+  .lbl{font-family:"IBM Plex Mono",monospace;font-size:11px;letter-spacing:.16em;
+    text-transform:uppercase;color:var(--soft);margin-right:2px}
+  .chip{display:inline-block;font-family:"IBM Plex Mono",monospace;font-size:12px;
+    background:var(--field);border:1px solid var(--line);border-radius:999px;padding:5px 13px;
+    color:var(--soft);margin:4px 6px 0 0}
+  .chip b{color:var(--brass);font-weight:500}
+  .chip.ok b{color:var(--ok)} .chip.bad b{color:var(--no)}
+  .note{background:var(--field);border:1px solid var(--line);border-radius:14px;padding:20px 22px;
+    margin-top:18px}
+  .note h4{font-family:"IBM Plex Mono",monospace;font-size:11px;font-weight:500;letter-spacing:.2em;
+    text-transform:uppercase;color:var(--brass);margin:0 0 12px}
+  .note.canh h4{color:var(--no)}
+  .note p{font-size:13.5px;color:var(--soft);margin:0 0 10px}
+  .note p:last-child{margin:0} .note b{color:var(--ink)}
+  .note code{font-family:"IBM Plex Mono",monospace;font-size:12.5px;color:var(--brass)}
+  .log{font-family:"IBM Plex Mono",monospace;font-size:12px;color:var(--soft);margin-top:10px;
+    min-height:18px}
+  .log b{color:var(--ok);font-weight:500} .log i{color:var(--no);font-style:normal}
+  table{width:100%;border-collapse:collapse;font-size:13.5px;margin-top:6px}
+  th,td{text-align:left;padding:9px 11px;border-bottom:1px solid var(--line);vertical-align:top}
+  th{font-family:"IBM Plex Mono",monospace;font-size:10.5px;letter-spacing:.15em;
+    text-transform:uppercase;color:var(--soft);font-weight:500}
+  td.n{font-family:"IBM Plex Mono",monospace}
+  tr:last-child td{border-bottom:0}
+  .foot{margin-top:46px;padding-top:22px;border-top:1px solid var(--line);display:flex;
+    justify-content:space-between;flex-wrap:wrap;gap:8px;font-family:"IBM Plex Mono",monospace;
+    font-size:12.5px;color:var(--soft)}
+  .foot b{color:var(--ink);font-weight:500}
+  @media(max-width:720px){.wrap{padding:38px 14px 56px}}
+</style>
+
+<div class="wrap">
+  <p class="eyebrow">Esuhai Group · PROYAKU</p>
+  <h1>Xưởng dựng logo</h1>
+  <p class="lede">Em không đọc được phông từ trang PROYAKU — nó là ứng dụng chạy bằng
+    JavaScript nên công cụ của em chỉ thấy mỗi tiêu đề. Trang này lấy đúng số đo từ máy Thầy.</p>
+
+  <div class="note canh">
+    <h4>Hai màu đang là màu tạm</h4>
+    <p>Em <b>chưa có mã màu thật</b> của chữ <i>Họp Ban Quản Trị</i> và của màu đỏ-hồng-cam
+      trong app — trang là ứng dụng JavaScript nên đọc từ ngoài không được.</p>
+    <p>Hai ô màu bên dưới đang để <b>màu tạm</b>: em chọn trong cùng bảng màu mà app dùng
+      (nền <code>#1C1D22</code>, chữ <code>#E7EAF3</code> — bảng tối kiểu Tailwind).
+      Thầy dán mã thật vào là logo đổi ngay.</p>
+  </div>
+
+  <h2>Ba bước lấy đúng phông</h2>
+  <div class="panel">
+    <div class="buoc" id="b1">
+      <div class="so">1</div>
+      <div class="noi">
+        <b>Dò số đo trên trang PROYAKU</b>
+        <p>Thầy mở <code>proyaku.up.railway.app/settings</code>, bấm <b>F12</b> rồi sang thẻ
+          <b>Console</b>, dán đoạn dưới đây vào và nhấn Enter. Nó quét cả trang rồi in ra
+          <b>mọi màu xanh lá</b> và <b>mọi màu đỏ, hồng, cam</b> kèm chữ mang màu ấy —
+          Thầy nhìn dòng nào có chữ <i>Họp Ban Quản Trị</i> là lấy mã màu ở đó.</p>
+        <pre id="ma">(()=&gt;{const ra=[],hex=c=&gt;{const m=c.match(/[0-9]+/g);return m?'#'+m.slice(0,3)
+  .map(v=&gt;(+v).toString(16).padStart(2,'0')).join('').toUpperCase():c};
+const goc=h=&gt;{const r=parseInt(h.substr(1,2),16)/255,g=parseInt(h.substr(3,2),16)/255,
+  b=parseInt(h.substr(5,2),16)/255,mx=Math.max(r,g,b),mn=Math.min(r,g,b),d=mx-mn;
+  if(d&lt;0.06)return -1;let x;
+  if(mx===r)x=((g-b)/d)%6;else if(mx===g)x=(b-r)/d+2;else x=(r-g)/d+4;
+  return (x*60+360)%360};
+document.querySelectorAll('*').forEach(e=&gt;{if(e.children.length)return;
+  const t=(e.textContent||'').trim();if(!t||t.length&gt;60)return;
+  const s=getComputedStyle(e),c=hex(s.color),h=goc(c);if(h&lt;0)return;
+  ra.push({chu:t.slice(0,32),mau:c,goc:Math.round(h),
+    phong:s.fontFamily.split(',')[0].replace(/["']/g,''),dam:s.fontWeight,
+    khoang:s.letterSpacing});});
+const la=ra.filter(x=&gt;x.goc&gt;=90&amp;&amp;x.goc&lt;=170);
+const dc=ra.filter(x=&gt;x.goc&lt;=45||x.goc&gt;=330);
+console.log('=== MAU XANH LA ===');la.slice(0,10).forEach(x=&gt;
+  console.log(x.mau,'| goc',x.goc,'|',x.phong,x.dam,'|',x.chu));
+console.log('=== MAU DO / HONG / CAM ===');dc.slice(0,10).forEach(x=&gt;
+  console.log(x.mau,'| goc',x.goc,'|',x.phong,x.dam,'|',x.chu));
+const py=ra.filter(x=&gt;/PROYAKU/i.test(x.chu));
+if(py.length)console.log('=== CHU PROYAKU ===',py[0].phong,py[0].dam,py[0].khoang,py[0].mau);})()</pre>
+        <div class="row">
+          <button class="btn" id="btnChep">Chép đoạn mã</button>
+        </div>
+        <div class="log" id="log1"></div>
+      </div>
+    </div>
+
+    <div class="buoc" id="b2">
+      <div class="so">2</div>
+      <div class="noi">
+        <b>Điền số đo vào đây</b>
+        <div class="row">
+          <div class="o"><label>Tên phông</label>
+            <input id="i-ff" value="Poppins" spellcheck="false"></div>
+          <div class="o"><label>Độ đậm</label>
+            <input id="i-w" type="number" value="700" min="100" max="900" step="100"></div>
+          <div class="o"><label>Khoảng chữ (em)</label>
+            <input id="i-ls" type="number" value="0" step="0.005"></div>
+          <div class="o"><label>Màu chữ — xanh lá</label>
+            <input id="i-c" value="#4ADE80" spellcheck="false"></div>
+        </div>
+        <div class="row">
+          <div class="o"><label>Chữ chính</label>
+            <input id="i-txt" value="PROYAKU" spellcheck="false"></div>
+          <div class="o"><label>Slogan — chữ đứng</label>
+            <input id="i-tag" value="Professional Translate" spellcheck="false"></div>
+          <div class="o"><label>Màu slogan — đỏ hồng cam</label>
+            <input id="i-ct" value="#FB7185" spellcheck="false"></div>
+          <div class="o"><label>Bề rộng slogan (%)</label>
+            <input id="i-fill" type="number" value="83.3" step="0.1"></div>
+        </div>
+        <div class="log" id="log2"></div>
+      </div>
+    </div>
+
+    <div class="buoc" id="b3">
+      <div class="so">3</div>
+      <div class="noi">
+        <b>Nạp phông để vector hoá</b>
+        <p>Trang tự thử tải phông từ Google Fonts theo tên ở trên. Nếu phông riêng của web app
+          thì Thầy thả file <code>.ttf</code> vào ô dưới.</p>
+        <div class="tha" id="tha">
+          <b>Thả file phông chữ chính vào đây</b>
+          <span>hoặc bấm để chọn · nhận .ttf và .otf</span>
+          <input type="file" id="file" accept=".ttf,.otf" hidden>
+        </div>
+        <div class="row">
+          <button class="btn" id="btnTai">Thử tải tự động</button>
+        </div>
+        <div class="log" id="log3"></div>
+      </div>
+    </div>
+  </div>
+
+  <h2>Xem trước</h2>
+  <div class="panel">
+    <div class="row" style="margin:0 0 14px">
+      <span class="lbl">Nền</span>
+      <span class="seg" id="segNen">
+        <button data-v="light" class="on">Sáng</button>
+        <button data-v="dark">Tối</button>
+        <button data-v="clear">Trong suốt</button>
+      </span>
+      <span class="lbl" style="margin-left:8px">Slogan</span>
+      <span class="seg" id="segTag">
+        <button data-v="on" class="on">Có</button>
+        <button data-v="off">Không</button>
+      </span>
+    </div>
+    <div class="stage light" id="stage"><div id="xem"></div></div>
+    <div id="chi"></div>
+  </div>
+
+  <h2>Kết xuất</h2>
+  <div class="panel">
+    <div class="row" style="margin:0">
+      <button class="btn main" id="btnSvg" disabled>Tải SVG vector</button>
+      <button class="btn main" id="btnPng" disabled>Tải PNG 2048</button>
+    </div>
+    <div class="log" id="log4"></div>
+  </div>
+
+  <h2>Số đo mượn từ ENACTon</h2>
+  <div class="panel">
+    <table>
+      <tr><th>Phần</th><th>Số đo</th><th>Ghi chú</th></tr>
+      <tr><td>Kiểu chữ slogan</td><td>Instrument Serif <b>nghiêng</b></td>
+          <td>trình bày theo slogan DIATALENT</td></tr>
+      <tr><td>Giãn chữ slogan</td><td class="n">0,21 em</td><td>đúng mức của DIATALENT</td></tr>
+      <tr><td>Bề rộng slogan</td><td class="n">83,3%</td><td>theo bề rộng chữ chính</td></tr>
+      <tr><td>Hở từ đường chân chữ tới slogan</td><td class="n">0,2553</td><td></td></tr>
+      <tr><td>Căn slogan</td><td>giữa theo bề rộng chữ</td><td></td></tr>
+      <tr><td>Làm dày nét slogan</td><td>không</td><td>DIATALENT không làm dày</td></tr>
+      <tr><td>Lề bảo vệ</td><td class="n">0,260</td><td>đều bốn phía</td></tr>
+    </table>
+  </div>
+
+  <div class="foot">
+    <span>PROYAKU · Xưởng dựng logo</span>
+    <span>Ngày 1 tháng 8 năm 2026 · <b>Lê Long Sơn</b></span>
+  </div>
+</div>
+
+<script>
+var CAP = 1000, DROP = 0.2553, LE = 0.26, TRK_TAG = 0.21;
+var PHONG = { chinh: null, tag: null };
+var UI = { nen: 'light', tag: 'on' };
+var HIEN = null;
+
+function f(v) { return (Math.round(v * 100) / 100 + '').replace(/\.?0+$/, '') || '0'; }
+function log(id, t, loi) {
+  document.getElementById(id).innerHTML = loi ? '<i>' + t + '</i>' : '<b>' + t + '</b>';
+}
+function xong(id) { document.getElementById(id).classList.add('xong'); }
+function gt(id) { return document.getElementById(id).value.trim(); }
+function gn(id) { return parseFloat(document.getElementById(id).value) || 0; }
+
+document.getElementById('btnChep').addEventListener('click', function () {
+  navigator.clipboard.writeText(document.getElementById('ma').textContent)
+    .then(function () { log('log1', 'Đã chép — Thầy dán vào Console của trang PROYAKU'); xong('b1'); })
+    .catch(function () { log('log1', 'Không chép được, Thầy bôi đen đoạn mã rồi chép tay', true); });
+});
+
+/* ---------- nạp phông ---------- */
+function nhan(buf, ten, la_tag) {
+  try {
+    var ft = opentype.parse(buf);
+    if (la_tag) PHONG.tag = ft; else PHONG.chinh = ft;
+    log(la_tag ? 'log4' : 'log3',
+        'Đã nạp ' + (ten || (ft.names.fullName && ft.names.fullName.en) || 'phông'));
+    if (PHONG.chinh) xong('b3');
+    dung();
+  } catch (e) {
+    log(la_tag ? 'log4' : 'log3', 'Không đọc được file này: ' + e.message, true);
+  }
+}
+function taiGoogle(ten, dam, nghieng, la_tag) {
+  var q = ten.replace(/\s+/g, '+') + ':' + (nghieng ? 'ital,wght@1,' : 'wght@') + dam;
+  return fetch('https://fonts.googleapis.com/css2?family=' + q)
+    .then(function (r) { return r.text(); })
+    .then(function (css) {
+      var m = css.match(/url\((https:[^)]+)\)/);
+      if (!m) throw new Error('không có đường dẫn phông');
+      return fetch(m[1]);
+    })
+    .then(function (r) { return r.arrayBuffer(); })
+    .then(function (b) { nhan(b, ten + ' ' + dam, la_tag); });
+}
+document.getElementById('btnTai').addEventListener('click', function () {
+  log('log3', 'Đang tải…');
+  taiGoogle(gt('i-ff'), gn('i-w'), false, false).catch(function (e) {
+    log('log3', 'Tải tự động không được (' + e.message +
+        '). Thầy thả file phông vào ô trên giúp em.', true);
+  });
+});
+document.getElementById('tha').addEventListener('click', function () {
+  document.getElementById('file').click();
+});
+document.getElementById('file').addEventListener('change', function (e) {
+  var fl = e.target.files[0]; if (!fl) return;
+  fl.arrayBuffer().then(function (b) { nhan(b, fl.name, false); });
+});
+['dragover', 'dragenter'].forEach(function (t) {
+  document.getElementById('tha').addEventListener(t, function (e) {
+    e.preventDefault(); this.classList.add('dang');
+  });
+});
+['dragleave', 'drop'].forEach(function (t) {
+  document.getElementById('tha').addEventListener(t, function (e) {
+    e.preventDefault(); this.classList.remove('dang');
+  });
+});
+document.getElementById('tha').addEventListener('drop', function (e) {
+  var fl = e.dataTransfer.files[0]; if (!fl) return;
+  fl.arrayBuffer().then(function (b) { nhan(b, fl.name, false); });
+});
+
+/* ---------- dựng path ---------- */
+function dichPath(s, dx, dy, k) {
+  return s.replace(/([MLCQZ])([^MLCQZ]*)/g, function (_, ky, so) {
+    if (ky === 'Z') return 'Z';
+    var v = (so.match(/-?\d*\.?\d+(?:e[-+]?\d+)?/g) || []).map(Number);
+    var r = [];
+    for (var i = 0; i < v.length; i += 2) {
+      r.push((v[i] * k + dx).toFixed(2), (v[i + 1] * k + dy).toFixed(2));
+    }
+    return ky + r.join(' ');
+  });
+}
+function capHeight(ft) {
+  try {
+    var g = ft.charToGlyph('H'), bb = g.getBoundingBox();
+    if (bb && bb.y2 > 0) return bb.y2;
+  } catch (e) {}
+  return (ft.tables.os2 && ft.tables.os2.sCapHeight) || ft.unitsPerEm * 0.7;
+}
+function veChuoi(ft, chuoi, k, trk_em) {
+  /* k: hệ số phóng. trk_em: giãn chữ theo em. Trả về {d, advance} */
+  var upem = ft.unitsPerEm, trk = trk_em * upem;
+  var gs = ft.stringToGlyphs(chuoi), d = '', x = 0;
+  gs.forEach(function (g, i) {
+    var p = g.getPath(0, 0, upem);
+    var s = p.toPathData(3);
+    if (s) d += ' ' + dichPath(s, x * k, 0, k);
+    x += g.advanceWidth + (i < gs.length - 1 ? trk : 0);
+  });
+  return { d: d.trim(), adv: x * k };
+}
+function hopBao(d) {
+  var v = (d.match(/-?\d*\.?\d+(?:e[-+]?\d+)?/g) || []).map(Number);
+  var x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9;
+  for (var i = 0; i + 1 < v.length; i += 2) {
+    x0 = Math.min(x0, v[i]); x1 = Math.max(x1, v[i]);
+    y0 = Math.min(y0, v[i + 1]); y1 = Math.max(y1, v[i + 1]);
+  }
+  return [x0, y0, x1, y1];
+}
+
+function dung() {
+  if (!PHONG.chinh) return;
+  var ft = PHONG.chinh;
+  var k = CAP / capHeight(ft);
+  var chu = veChuoi(ft, gt('i-txt'), k, gn('i-ls'));
+  var hb = hopBao(chu.d);
+  var wChu = hb[2] - hb[0];
+  var dChu = dichPath(chu.d, -hb[0], CAP, 1);
+
+  var mau = gt('i-c') || '#16223C';
+  var mauNen = (UI.nen === 'dark') ? '#0F1B2B' : (UI.nen === 'light' ? '#FFFFFF' : null);
+  var mauChu = mau, mauTag = gt('i-ct') || '#FB7185';
+
+  var dTag = null, H = CAP;
+  if (UI.tag === 'on' && PHONG.tag && gt('i-tag')) {
+    var fi = PHONG.tag;
+    var rongMuon = gn('i-fill') / 100 * wChu;
+    var t0 = veChuoi(fi, gt('i-tag'), 1, TRK_TAG);
+    var hb0 = hopBao(t0.d);
+    var ink0 = hb0[2] - hb0[0];
+    var kt = rongMuon / ink0;
+    var t1 = veChuoi(fi, gt('i-tag'), kt, TRK_TAG);
+    var hb1 = hopBao(t1.d);
+    var dx = (wChu - (hb1[2] - hb1[0])) / 2 - hb1[0];
+    var dy = CAP + DROP * CAP - hb1[1];
+    dTag = dichPath(t1.d, dx, dy, 1);
+    H = hopBao(dTag)[3];
+  }
+
+  var pad = LE * CAP;
+  var VW = wChu + pad * 2, VH = H + pad * 2;
+  var s = '<?xml version="1.0" encoding="UTF-8"?>\n'
+    + '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ' + f(VW) + ' ' + f(VH) + '"\n'
+    + '     width="' + Math.round(200 * VW / VH) + '" height="200" role="img"'
+    + ' aria-labelledby="ten mo">\n'
+    + '  <title id="ten">PROYAKU</title>\n'
+    + '  <desc id="mo">Phien dich Viet — Nhat. Chu da vector hoa.</desc>\n'
+    + '  <metadata>\n'
+    + '    PROYAKU · Esuhai Group\n'
+    + '    Phong chu chinh lay dung tu web app. Slogan: Instrument Serif dung.\n'
+    + '    Be rong slogan ' + gn('i-fill') + '% be rong chu, ho doc ' + DROP + '.\n'
+    + '    Sinh ngay ' + new Date().toISOString().slice(0, 10) + '\n'
+    + '  </metadata>\n';
+  if (mauNen) s += '  <rect width="100%" height="100%" fill="' + mauNen + '"/>\n';
+  s += '  <g transform="translate(' + f(pad) + ',' + f(pad) + ')">\n';
+  s += '    <path id="chu" fill="' + mauChu + '" d="' + dChu + '"/>\n';
+  if (dTag) {
+    s += '    <path id="slogan" fill="' + mauTag + '" d="' + dTag + '"/>\n';
+  }
+  s += '  </g>\n</svg>\n';
+  HIEN = { svg: s, W: VW, H: VH };
+
+  document.getElementById('stage').className = 'stage ' + UI.nen;
+  document.getElementById('xem').innerHTML = s.slice(s.indexOf('<svg'));
+  var e = document.querySelector('#xem svg');
+  if (e) { e.removeAttribute('width'); e.removeAttribute('height');
+           e.style.width = '100%'; e.style.maxWidth = '700px'; }
+
+  document.getElementById('chi').innerHTML =
+      '<span class="chip">bề rộng chữ <b>' + f(wChu / CAP) + ' × cao chữ hoa</b></span>'
+    + '<span class="chip">khối logo <b>' + f(VW) + ' × ' + f(VH) + '</b></span>'
+    + (dTag ? '<span class="chip ok">slogan <b>' + gn('i-fill') + '%</b></span>' : '')
+    + '<span class="chip ' + (s.indexOf('<text') < 0 ? 'ok' : 'bad') + '">còn thẻ chữ <b>'
+    + (s.indexOf('<text') < 0 ? 'không' : 'CÓ') + '</b></span>';
+  ['btnSvg', 'btnPng'].forEach(function (id) {
+    document.getElementById(id).disabled = false;
+  });
+  xong('b2');
+}
+
+['i-ff','i-w','i-ls','i-c','i-ct','i-txt','i-tag','i-fill'].forEach(function (id) {
+  document.getElementById(id).addEventListener('input', function () { dung(); });
+});
+function seg(id, khoa) {
+  var e = document.getElementById(id);
+  e.addEventListener('click', function (ev) {
+    var b = ev.target.closest('button'); if (!b) return;
+    e.querySelectorAll('button').forEach(function (x) { x.classList.remove('on'); });
+    b.classList.add('on'); UI[khoa] = b.dataset.v; dung();
+  });
+}
+seg('segNen', 'nen'); seg('segTag', 'tag');
+
+function tai(b, t) {
+  var a = document.createElement('a');
+  a.href = URL.createObjectURL(b); a.download = t;
+  document.body.appendChild(a); a.click();
+  setTimeout(function () { URL.revokeObjectURL(a.href); a.remove(); }, 1500);
+}
+document.getElementById('btnSvg').addEventListener('click', function () {
+  tai(new Blob([HIEN.svg], { type: 'image/svg+xml;charset=utf-8' }),
+      'proyaku-' + UI.nen + '.svg');
+  log('log4', 'Đã tải SVG · chữ là đường bao, không gọi phông');
+});
+document.getElementById('btnPng').addEventListener('click', function () {
+  var w = 2048, h = Math.round(w * HIEN.H / HIEN.W);
+  var img = new Image();
+  img.onload = function () {
+    var cv = document.createElement('canvas'); cv.width = w; cv.height = h;
+    cv.getContext('2d').drawImage(img, 0, 0, w, h);
+    cv.toBlob(function (b) { tai(b, 'proyaku-' + UI.nen + '-2048.png');
+      log('log4', 'Đã tải PNG · ' + w + ' điểm ảnh'); });
+  };
+  img.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(HIEN.svg);
+});
+
+/* nạp sẵn Instrument Serif cho slogan */
+window.addEventListener('load', function () {
+  taiGoogle('Instrument Serif', 400, true, true)
+    .then(function () { log('log4', 'Đã nạp Instrument Serif cho slogan'); })
+    .catch(function () {
+      log('log4', 'Chưa nạp được Instrument Serif cho slogan — thử lại khi có mạng', true);
+    });
+});
+</script>
+</html>
