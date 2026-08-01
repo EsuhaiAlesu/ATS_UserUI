@@ -66,13 +66,29 @@ Màu đang dùng chọn trong **cùng bảng màu mà app dùng**: nền `#1C1D2
 | Phần | Số đo | Nguồn |
 |---|---|---|
 | Tổng bề rộng chữ PROYAKU | 7,625 | đo từ ảnh web app |
-| Giãn chữ | 0,1355 em | tính ngược từ tổng bề rộng |
+| Giãn chữ | 0,1943 em | tính ngược từ tổng bề rộng, đã nới để bù nét |
+| **Làm dày nét chữ** | **1,6 lần** | nét thêm 53,2 đơn vị, bề dày 70,07 trên khung |
 | Bề rộng slogan | 83,3% | mượn từ DIATALENT |
 | Hở tới slogan | 0,2553 | |
 | Giãn chữ slogan | 0,21 em | |
 | Căn slogan | giữa theo bề rộng chữ | |
 | Làm dày nét slogan | **1,4 lần** | riêng của PROYAKU — DIATALENT không làm dày |
 | Lề bảo vệ | 0,260 | đều bốn phía |
+
+---
+
+## Làm dày mà vẫn giữ đúng hai số đo gốc
+
+Nét vẽ lan đều mọi phía nên chữ vừa cao lên vừa rộng ra. Phải bù cả hai:
+
+- Hệ số phóng tính theo **chiều cao chữ hoa cộng bề dày nét** → chữ vẫn cao đúng 1000
+- Giãn chữ tính ngược từ **bề rộng đã gồm nét** → nới từ 0,1355 lên **0,1943**
+
+Đo lại trên file xuất: bề rộng **7,625** đúng như ảnh, chữ P cao **1000,0**. Chữ O cao 1031,6
+vì vượt đường chuẩn 3,2% — trong ảnh Thầy gửi chữ O cũng vượt **3,1%**, nên khớp.
+
+Đã kiểm lỗ chữ: lỗ chữ O thu từ đường kính 596 xuống **483** — hẹp đi 19% nhưng vẫn rộng.
+Khoảng hở nhỏ nhất giữa các chữ gần như không đổi (94,2 → 95,0) vì giãn chữ tự tăng bù lại.
 
 ---
 

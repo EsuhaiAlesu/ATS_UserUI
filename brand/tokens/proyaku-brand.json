@@ -93,7 +93,7 @@
   },
   "hinhHoc": {
     "phongChu": "Outfit Bold — ung vien gan nhat, chua xac nhan",
-    "gianChu": 0.1355,
+    "gianChu": 0.1943,
     "tongBeRongChu": 7.625,
     "phongSlogan": "Instrument Serif nghieng",
     "beRongSlogan": 0.833,
@@ -101,7 +101,9 @@
     "hoToiSlogan": 0.2553,
     "lamDayNetSlogan": 1.4,
     "canSlogan": "giua theo be rong chu",
-    "leBaoVe": 0.26
+    "leBaoVe": 0.26,
+    "lamDayNetChu": 1.6,
+    "ghiChuLamDay": "Net lan deu moi phia nen chu cao len va rong ra. He so phong tinh theo (cap + net) de chieu cao giu nguyen 1000; gian chu tang tu 0,1355 len 0,1943 de tong be rong van dung 7,625."
   },
   "chuaChac": [
     "Ten phong that cua chu PROYAKU — ba ung vien chenh nhau trong sai so cua anh",

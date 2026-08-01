@@ -12,7 +12,9 @@ cùng sổ tay quy chuẩn không thành công khai cho bất kỳ ai có link.
 | Dùng ở đâu | File |
 |---|---|
 | Logo trên head bar + ngăn điều hướng | `public/proyaku/svg/proyaku-chinh-nen-trong.svg` |
-| Favicon (thẻ `<link rel="icon">` trong `index.html`) | `public/proyaku/svg/proyaku-icon-vuong.svg` |
+| Favicon — trình duyệt hiện đại | `public/proyaku/svg/proyaku-icon-vuong.svg` |
+| Favicon — trình duyệt cũ / Windows | `public/proyaku/icon/favicon.ico` |
+| Ghim màn hình chính iPad/iPhone | `public/proyaku/icon/apple-touch-icon.png` |
 
 `proyaku-chinh-nen-trong.svg` = y hệt `brand/svg/proyaku-chinh.svg`, **chỉ bỏ tấm nền
 đặc `#1C1D22`**. Bản gốc có nền đặc, mà head bar của app là `#080c18` (đậm hơn), nên
@@ -29,29 +31,16 @@ còn **tăng** tương phản chứ không giảm. Màu thương hiệu giữ ng
    ```
 3. Xem lại ở 390px và 1280px — head bar là chỗ chật nhất, logo rộng ra là đè chữ.
 
-## ⚠ LỖI TRONG BỘ KIT — cả bộ icon bị lệch khung
+## Lịch sử: lỗi lệch khung icon — ĐÃ XONG
 
-**Cả 3 bản SVG icon (`vuong`, `tron`, `trong`) và TẤT CẢ file PNG/`.ico` trong `brand/icon/`
-đều bị lệch: chữ P bị đẩy gần hết ra ngoài khung, chỉ còn một vệt xanh ở mép trên.**
+Bộ kit lần đầu bị lệch khung: cả 3 bản SVG icon và toàn bộ PNG/`.ico` đều đẩy chữ P gần
+hết ra ngoài, chỉ còn một vệt xanh ở mép trên. Nguyên nhân là `translate` y để `-409.60`
+thay vì `204.80` (`-409,60 = 204,80 − 614,40` — trừ nhầm nguyên chiều cao chữ).
 
-Nguyên nhân, đo bằng `getBBox()` trên trình duyệt chứ không đoán:
+**Bộ kit hiện tại đã được xuất lại đúng** (`translate(274.80, 204.80)`), chữ P cân giữa và
+được vẽ lại bo góc. Đã kiểm bằng mắt cả bản SVG lẫn bản PNG 512. Không còn phải vá gì ở
+phía app, và `index.html` đã khai lại đủ `.ico` + `apple-touch-icon`.
 
-| | Đúng phải là | Kit đang để |
-|---|---|---|
-| Khung chữ P | 463,85 × 614,40 | — |
-| `translate` x | `(1024−463,85)/2 = 280,08` | `280.08` ✅ đúng sẵn |
-| `translate` y | `(1024−614,40)/2 = 204,80` | `-409.60` ❌ |
-
-`-409,60 = 204,80 − 614,40` — người xuất đã **trừ nhầm nguyên chiều cao chữ**.
-
-**Đã xử lý tạm:** `public/proyaku/svg/proyaku-icon-vuong.svg` (bản app dùng) đã sửa thành
-`translate(280.08, 204.80)` và kiểm bằng mắt — chữ P cân giữa. `index.html` **chỉ khai bản SVG
-này**, cố ý KHÔNG khai `.ico` và `apple-touch-icon`, vì hai file đó vẫn hỏng: khai vào thì trình
-duyệt cũ hiện một ô đen với vệt xanh cụt, tệ hơn là không có gì.
-
-**Cần làm cho đúng:** xuất lại cả bộ icon từ nguồn với y = 204,80, rồi:
-1. thay `brand/svg/proyaku-icon-*.svg` + `brand/icon/*`,
-2. chép bản vuông sang `public/proyaku/svg/`,
-3. thêm lại 2 dòng `.ico` + `apple-touch-icon` vào `index.html`.
-
-Kit gốc trong `brand/` Em **giữ nguyên chưa sửa**, để còn đối chiếu khi xuất lại.
+Ghi lại đây để nếu bộ kit được xuất lại lần nữa thì có cái mà đối chiếu: **lắp xong phải mở
+trình duyệt nhìn**, đừng tin file chạy được là file đúng — lần đó `tsc`, `build`, `curl 200`
+đều xanh trong khi icon hỏng hoàn toàn.

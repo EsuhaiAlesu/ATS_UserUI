@@ -6,12 +6,11 @@
          Bản VUÔNG bo tròn được chọn vì nó tự mang nền riêng: thanh tab của trình duyệt có thể sáng
          hoặc tối tuỳ máy và tuỳ chủ đề, nên một biểu tượng nền trong sẽ biến mất ở một trong hai.
 
-         CHỈ khai báo bản SVG, CỐ Ý không khai .ico và apple-touch-icon: bộ icon trong kit bị lệch
-         khung (chữ P bị đẩy gần hết ra ngoài) và các bản .ico/.png đều xuất từ đúng file lỗi đó, nên
-         khai báo chúng làm dự phòng thì trình duyệt cũ sẽ hiện một ô đen với vệt xanh cụt — tệ hơn là
-         không có gì. Bản SVG ở đây đã sửa khung và mọi trình duyệt hiện đại đều đọc được.
-         Khi bộ kit được xuất lại đúng, thêm 2 dòng .ico + apple-touch-icon vào đây. -->
+         SVG cho trình duyệt hiện đại (nét sắc ở mọi cỡ), .ico cho bản cũ và cho Windows,
+         apple-touch-icon cho khi ghim vào màn hình chính iPad/iPhone. -->
     <link rel="icon" type="image/svg+xml" href="/proyaku/svg/proyaku-icon-vuong.svg" />
+    <link rel="icon" sizes="any" href="/proyaku/icon/favicon.ico" />
+    <link rel="apple-touch-icon" href="/proyaku/icon/apple-touch-icon.png" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <!-- Font tự lưu tại máy (an toàn khi mạng hội trường cô lập/không internet — không phụ thuộc Google Fonts). -->
     <link rel="stylesheet" href="/fonts/fonts.css" />

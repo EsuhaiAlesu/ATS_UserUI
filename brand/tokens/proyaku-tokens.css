@@ -19,10 +19,12 @@
 
   /* --- Hình học, tính theo chiều cao chữ hoa --- */
   --proyaku-rong-chu:     7.625;   /* tổng bề rộng mực của chữ PROYAKU */
-  --proyaku-gian-chu:     0.1355;  /* giãn chữ, em */
+  --proyaku-gian-chu:     0.1943;  /* giãn chữ, em — đã nới ra để bù nét làm dày */
+  --proyaku-day-chu:      1.6;     /* nét chữ làm dày 1,6 lần */
   --proyaku-rong-slogan:  0.833;   /* theo bề rộng chữ */
   --proyaku-ho-slogan:    0.2553;
   --proyaku-gian-slogan:  0.21;    /* em */
+  --proyaku-day-slogan:   1.4;     /* nét slogan làm dày 1,4 lần */
   --proyaku-le-bao-ve:    0.26;
 }
 
