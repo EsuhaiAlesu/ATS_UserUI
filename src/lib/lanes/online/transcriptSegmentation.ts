@@ -54,3 +54,37 @@ export function endsWithStrongSentenceBreak(text: string, includePeriods: boolea
   if (!trimmed) return false;
   return findLastStrongSentenceBreak(trimmed, includePeriods) === trimmed.length;
 }
+
+// ---- one character does not carry the same amount of meaning in both languages ----
+//
+// The two segmentation ceilings (SEGMENT_MAX_CHARS 120 / SEGMENT_MIN_CHARS 18) COUNT CHARACTERS, and
+// they were tuned around Japanese. Measured on 63 saved sessions (1,519 lines): the same sentence is
+// 1.85× longer in Vietnamese than in Japanese (p25 1.54 · p75 2.23, over 836 aligned sentence pairs).
+// One fixed pair of numbers therefore produces two opposite behaviours:
+//   • Vietnamese hits the "too long, cut it" ceiling on 12.1% of its lines — Japanese on 0.3%, a 40×
+//     difference;
+//   • Japanese sits under the "too short, wait and glue" floor on 58% of its lines and is glued into
+//     whole thoughts, while Vietnamese sits there on only 19% and almost never gets glued.
+// The operator sees exactly those two symptoms: the Japanese window reads as sentences, the Vietnamese
+// window breaks mid-clause. Scaling the ceiling by the language of the text itself is the fix at the
+// right spot.
+export const SEGMENT_VI_CHAR_FACTOR = 1.85;
+
+const JA_SCRIPT = /[぀-ヿㇰ-ㇿ㐀-䶿一-鿿豈-﫿]/gu;
+// JA_SCRIPT: kana · katakana phonetic extensions · kanji (CJK ext-A, unified, compatibility).
+const LATIN_LETTER = /\p{Script=Latin}/gu;
+/** A Japanese sentence may still carry a proper noun in Latin script; a Vietnamese sentence may quote a
+ *  kanji or two. Weighing by RATIO lands both cases on the right side. */
+const JA_SCRIPT_WEIGHT = 2;
+
+export function isJapaneseHeavy(text: string): boolean {
+  const ja = (text.match(JA_SCRIPT) || []).length;
+  if (ja === 0) return false;
+  const latin = (text.match(LATIN_LETTER) || []).length;
+  return ja * JA_SCRIPT_WEIGHT >= latin;
+}
+
+/** The character ceiling for THIS text. The base number is the one tuned for Japanese. */
+export function segmentCharLimit(base: number, text: string): number {
+  return isJapaneseHeavy(text) ? base : Math.round(base * SEGMENT_VI_CHAR_FACTOR);
+}

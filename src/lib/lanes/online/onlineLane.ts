@@ -12,8 +12,8 @@
 import type { LaneController, LaneEvents, LaneLine, LaneStatus } from '../types';
 import { startPcm16Capture, type CaptureHandle, type CapturePacket, type MicSensitivity } from './pcm16Capture';
 import { resolveLoudThreshold, type LoudGateMode } from './loudGate';
-import { endsWithStrongSentenceBreak, findFirstCommaClauseBreak, findLastStrongSentenceBreak } from './transcriptSegmentation';
-import { ASR_FINAL_MIN_VOICED_MS, ASR_PARTIAL_MIN_VOICED_MS, hasClearSpeechEvidence, isNonSpeechAnnotation } from './asrSpeechEvidence';
+import { endsWithStrongSentenceBreak, findFirstCommaClauseBreak, findLastStrongSentenceBreak, segmentCharLimit } from './transcriptSegmentation';
+import { ASR_FINAL_MIN_VOICED_MS, ASR_PARTIAL_MIN_VOICED_MS, hasClearSpeechEvidence, isInventedNumber, isNonSpeechAnnotation } from './asrSpeechEvidence';
 import { isStableDraftPrefix, joinLiveDraftSource, stripPromotedPrefix } from './liveDraftTranslation';
 import { DRAFT_RATE_WINDOW_MS, decideCaptureFrame, decideDraftAdmission, getContinuationWaitMs } from './livePipelinePolicy';
 import { createSpeechPauseProfile } from './speechPauseProfile';
@@ -28,6 +28,7 @@ import { buildSessionExport, saveSessionExport, type SaveOutcome, type SessionLi
 import { createLatencyTracker, type LatencyReport } from './latencyTracker';
 import { classifyInterimUtterance, createDirectionTracker, decideFinalLanguage, directionOf, type DirectionTracker, type Lang } from './utteranceDirection';
 import { fetchAsrSession, createAsrCodec, type AsrCodec } from './asrTransport';
+import { SPEECH_RHYTHM_DEFAULT, loadSpeechRhythm, rhythmCommitWindows, rhythmPauseSecs, speechRhythmLabel } from './speechRhythm';
 import { refineReasonText } from './refineFailure';
 
 const ONLINE_BASE = '/online-api';
@@ -161,10 +162,6 @@ export interface OnlineLaneConfig {
   // TASK 6.2: one mic, two directions — read ONCE at start() and latched for the whole session.
   getTwoWay?: () => boolean;
   onDirectedLine?: (line: DirectedLaneLine) => void;
-  // TASK 13: the meeting's speech rhythm, as seconds of silence. Read at TICKET time, like every other
-  // handshake parameter — it is baked into the single-use URL, so a change mid-session takes effect from
-  // the next dial. `undefined` means "say nothing" and the server's own default stands.
-  getPauseSecs?: () => number | undefined;
   // TASK 11.13's hall-babble getter used to sit here. Removed: the vendor rejects that filter whenever
   // timestamps are on, and the session then fails to start at all. Do not add it back without checking
   // docs/ONLINE-LANE-UI-API.md → "Removed from the UI: the hall-babble switch".
@@ -232,9 +229,6 @@ export interface OnlineDiagnostics {
   foreignDrops: number; // finals discarded because neither signal called them Vietnamese or Japanese
   languageTurns: number; // buffers closed because the other language started speaking
   vendorTags: number; // finals that arrived carrying the recogniser's own language verdict
-  // TASK 13 — the silence-to-end-of-sentence the current handshake ACTUALLY carries, after the server's
-  // clamp. `null` before the first successful dial. This is the applied value, never the requested one.
-  asrPauseSecs: number | null;
   asrLanguages: string | null; // what the recogniser AGREED to listen for; null = free auto-detect
   // The OTHER half of the same handshake reply: did the recogniser accept language detection? The
   // timestamped final's `language_code` is the evidence the two-way router runs on, and it only exists
@@ -244,10 +238,13 @@ export interface OnlineDiagnostics {
   // `pauseWindowMs` is what the last planned commit waited for (0 before the first one); `pauseSamples`
   // is how many of this speaker's pauses the profile has collected, and stays under 8 — the point where
   // it starts trusting itself — for a speaker who never pauses inside a sentence. `pauseAdaptive` says
-  // which of the two numbers is being used: false = the fixed 600/800ms guess, true = this speaker's own.
+  // where the number came from: true = measured off this speaker, false = a fixed number (the 600/800ms
+  // guess, or the step the operator picked). `pauseRhythm` names that step, so an operator who wonders
+  // why sentences cut where they do can read the answer instead of guessing.
   pauseWindowMs: number;
   pauseSamples: number;
   pauseAdaptive: boolean;
+  pauseRhythm: string;
   // M13 — sentences displayed but NOT spoken, because the text was not in the target language.
   // `lastTtsSkipReason` is the guard's own words for the most recent one.
   ttsLanguageSkips: number;
@@ -362,7 +359,6 @@ export function createOnlineLane(events: LaneEvents, config: OnlineLaneConfig = 
   let foreignDrops = 0;
   let languageTurns = 0;
   let vendorTags = 0;
-  let asrPauseSecs: number | null = null;
   let asrLanguages: string | null = null;
   let asrLanguageDetection: boolean | null = null;
   // M13 — the cut threshold this speaker earns for themselves. The 600/800ms stability windows in
@@ -980,6 +976,37 @@ export function createOnlineLane(events: LaneEvents, config: OnlineLaneConfig = 
     }, nextScribeForceCommitDelay(scribeLastCommitAt, now));
   }
 
+  // TASK 24: which two waits the planner should use for THIS partial, given the step the operator picked
+  // in Cài đặt. Read live (not cached at start) so a technician can move the knob between two speakers
+  // without restarting the session — the same rule the loud-gate knob follows.
+  //
+  // Three different intents, deliberately not collapsed:
+  //   • Bình thường  → exactly what the lane did before this knob existed: the M13 learner, its own
+  //                    1_100ms ceiling, planner constants until it has 8 pauses. Nobody who never opened
+  //                    Cài đặt gets a changed session.
+  //   • Chậm / Nhanh → the operator has stated the answer. Their numbers win outright and the learner is
+  //                    ignored; a machine that quietly overrules an explicit choice is worse than one
+  //                    that never adapts.
+  //   • Tự học       → the learner with a wider ceiling, so a speaker who really does leave 1.6s between
+  //                    clauses keeps 1.6s instead of being flattened to 1.1s. Until it has measured
+  //                    enough, it runs at a middle stand-in (900/1_100ms) rather than at 600ms.
+  function stableCommitWindows(): {
+    windows: { sentenceMs: number; longMs: number } | null;
+    /** true only when the number was MEASURED off this speaker — the diagnostics line says so. */
+    learned: boolean;
+  } {
+    const rhythm = loadSpeechRhythm();
+    if (rhythm === SPEECH_RHYTHM_DEFAULT) {
+      const measured = pauseProfile.windows(pauseKey);
+      return { windows: measured, learned: Boolean(measured) };
+    }
+    const rung = rhythmCommitWindows(rhythm);
+    const fixed = { sentenceMs: rung.sentenceMs, longMs: rung.longMs };
+    if (!rung.adaptive) return { windows: fixed, learned: false };
+    const measured = pauseProfile.windows(pauseKey, rung.maxMs);
+    return measured ? { windows: measured, learned: true } : { windows: fixed, learned: false };
+  }
+
   // Drive the planner from the vendor's live partial. Called on every partial: the planner is cheap and
   // it is the CHANGE timestamp, not the arrival timestamp, that decides — a speaker holding a pause
   // keeps re-sending identical text, and that stillness is the signal.
@@ -991,18 +1018,21 @@ export function createOnlineLane(events: LaneEvents, config: OnlineLaneConfig = 
     }
     clearScribeCommitTimer();
     if (!text || scribeCommitPending) return;
-    // M13: this speaker's own measured windows when the profile has enough pauses to be trusted; null
-    // until then, and the planner falls back to its constants.
+    // M13 + the rhythm knob: this speaker's own measured windows, or the step the operator chose; null
+    // means neither had an answer and the planner falls back to its constants.
+    const chosen = stableCommitWindows();
     const plan = planStableScribeCommit(
       text,
       scribePartialChangedAt,
       scribeLastCommitAt,
       Date.now(),
-      pauseProfile.windows(pauseKey),
+      chosen.windows,
     );
     if (!plan) return; // no punctuation and not long yet — the VAD backstop still owns this turn
     lastStableWindowMs = plan.stableMs;
-    lastStableWindowAdaptive = plan.adaptive;
+    // NOT `plan.adaptive`: the planner only knows it was handed numbers, not whether they were measured
+    // off this speaker or picked by hand in Cài đặt.
+    lastStableWindowAdaptive = chosen.learned;
     scribeCommitTimer = setTimeout(() => {
       scribeCommitTimer = null;
       sendManualCommit(plan.reason);
@@ -1089,6 +1119,16 @@ export function createOnlineLane(events: LaneEvents, config: OnlineLaneConfig = 
       dropGhost('non-speech annotation', transcript);
       return;
     }
+    // TASK 22: the gates above all ask about the AUDIO, and on repeated filler ("anh, anh, anh") the
+    // audio is real speech — the recogniser is what invents the digits. This one reads the words instead,
+    // so "Anh 1000, anh 1000," and a bare "177。" stop reaching the hall. Counted with the other
+    // non-speech drops so the technician can see it happening on the diagnostics line.
+    if (isInventedNumber(transcript)) {
+      nonSpeechDrops += 1;
+      lastNonSpeechReason = 'số ảo';
+      dropGhost('invented number', transcript);
+      return;
+    }
     previousFinalTranscript = transcript;
 
     // M11: what language was this, really? The vendor tags every completed transcript (the session is
@@ -1145,12 +1185,17 @@ export function createOnlineLane(events: LaneEvents, config: OnlineLaneConfig = 
     // treated as half a thought and waits one continuation window — the "≥40 characters ⇒ translate it
     // now" rule that used to sit here is what put half-sentences on the loudspeaker. Two ceilings bound
     // the wait: the buffer is already a full line's worth, or it has been held long enough.
-    const complete = endsWithStrongSentenceBreak(buf, true) && buf.length >= SEGMENT_MIN_CHARS;
+    //
+    // TASK 23: both ceilings COUNT CHARACTERS, and a Vietnamese character carries less meaning than a
+    // Japanese one (measured: 1.85×). With the fixed numbers Vietnamese hit the cut ceiling 40× as often
+    // as Japanese, while Japanese was glued into whole thoughts and Vietnamese almost never was. So the
+    // ruler now follows the language of the text it measures.
+    const complete = endsWithStrongSentenceBreak(buf, true) && buf.length >= segmentCharLimit(SEGMENT_MIN_CHARS, buf);
     if (complete) {
       flushSegment('complete');
       return;
     }
-    if (buf.length >= SEGMENT_MAX_CHARS || Date.now() - segmentFirstFinalAt >= SEGMENT_MAX_HOLD_MS) {
+    if (buf.length >= segmentCharLimit(SEGMENT_MAX_CHARS, buf) || Date.now() - segmentFirstFinalAt >= SEGMENT_MAX_HOLD_MS) {
       flushSegment('ceiling');
       return;
     }
@@ -1171,7 +1216,7 @@ export function createOnlineLane(events: LaneEvents, config: OnlineLaneConfig = 
     }
     let head = text;
     let remainder = '';
-    if (text.length > SEGMENT_MAX_CHARS) {
+    if (text.length > segmentCharLimit(SEGMENT_MAX_CHARS, text)) {
       const cut = findLastStrongSentenceBreak(text, true);
       if (cut > 0 && cut < text.length) {
         head = text.slice(0, cut).trim();
@@ -1496,7 +1541,9 @@ export function createOnlineLane(events: LaneEvents, config: OnlineLaneConfig = 
       session = await fetchAsrSession({
         targetLanguage: opts!.targetLanguage,
         language: twoWay ? 'auto' : opts!.sourceLanguage,
-        pauseSecs: config.getPauseSecs?.(),
+        // TASK 24: re-read at EVERY dial, never latched at create — change the step in Cài đặt, press
+        // Bắt đầu again, and the new backstop is already in the handshake. No page reload.
+        pauseSecs: rhythmPauseSecs(loadSpeechRhythm()),
         corpus: buildAsrCorpus(),
       });
     } catch (err) {
@@ -1517,7 +1564,6 @@ export function createOnlineLane(events: LaneEvents, config: OnlineLaneConfig = 
     // previous_text rides the FIRST chunk on a RECONNECT only (never a fresh session); a partial is never
     // fed back (a mistake fed back propagates).
     codec = session.transport === 'direct' ? createAsrCodec(initial ? undefined : (lastFinalForReconnect || undefined)) : null;
-    asrPauseSecs = typeof session.pauseSecs === 'number' ? session.pauseSecs : null;
     // TASK 12.6: on the proxied (qwen3) path the session terms travel as the FIRST WS message, not in the
     // URL query string (query strings land in access logs and hit proxy length limits). On the direct
     // path terms are keyterms in the vendor's own handshake — not ours to move. `codec === null` ⇒ proxy.
@@ -1804,7 +1850,6 @@ export function createOnlineLane(events: LaneEvents, config: OnlineLaneConfig = 
     foreignDrops = 0;
     languageTurns = 0;
     vendorTags = 0;
-    asrPauseSecs = null;
     asrLanguages = null;
     asrLanguageDetection = null;
     // M13: a new session is a new speaker in a new room — never inherit the previous event's pauses. The
@@ -1926,12 +1971,12 @@ export function createOnlineLane(events: LaneEvents, config: OnlineLaneConfig = 
       foreignDrops,
       languageTurns,
       vendorTags,
-      asrPauseSecs,
       asrLanguages,
       asrLanguageDetection,
       pauseWindowMs: lastStableWindowMs,
       pauseSamples: learned?.samples ?? 0,
       pauseAdaptive: lastStableWindowAdaptive,
+      pauseRhythm: speechRhythmLabel(loadSpeechRhythm()),
       ttsLanguageSkips,
       lastTtsSkipReason,
       continuationMerges,

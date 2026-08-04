@@ -6,7 +6,7 @@ import {
     loadSettings, saveSettings, exportLocalData, clearLocalData,
 } from '../lib/settings';
 import { toast } from '../lib/toast';
-import { OnlineKeysSettings, OnlineMicSettings } from '../lib/lanes/online';
+import { OnlineKeysSettings, OnlineMicSettings, OnlineRhythmSettings } from '../lib/lanes/online';
 
 // Central Settings page (Giai đoạn 1) — consolidates the scattered per-feature config into one
 // professional place: Kết nối · Sự kiện · Hiển thị · Giọng đọc · Tài khoản · Dữ liệu · Giới thiệu.
@@ -126,6 +126,11 @@ const Settings: React.FC = () => {
                     {/* CHẾ ĐỘ ONLINE — ĐỘ NHẠY MICRO (theo máy / theo hội trường) */}
                     <Section id="ms" icon="mic" title="Chế độ ONLINE — Độ nhạy micro" desc="Máy này đang nghe bằng loại micro nào. Đặt một lần theo phòng, không phải đặt lại mỗi buổi.">
                         <OnlineMicSettings />
+                    </Section>
+
+                    {/* CHẾ ĐỘ ONLINE — NHỊP NÓI CỦA BUỔI (theo từng buổi — nút chống vụn câu) */}
+                    <Section id="rh" icon="graphic_eq" title="Chế độ ONLINE — Nhịp nói của buổi" desc="Máy chờ im lặng bao lâu mới chốt một câu. Chờ ngắn thì câu bị cắt vụn, chờ lâu thì phụ đề lên chậm.">
+                        <OnlineRhythmSettings />
                     </Section>
 
                     {/* HIỂN THỊ */}

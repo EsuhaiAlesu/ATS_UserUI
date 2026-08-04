@@ -1,170 +1,164 @@
-import { describe, it, expect, beforeEach, afterAll, vi } from 'vitest'
-import { readFileSync, readdirSync } from 'node:fs'
-import * as rhythm from '../src/lib/lanes/online/speechRhythm'
-// @ts-expect-error — the server is plain .mjs (no types); we only exercise the pure exported helper here.
+import { describe, it, expect } from 'vitest'
+import {
+  SPEECH_RHYTHM_OPTIONS,
+  SPEECH_RHYTHM_DEFAULT,
+  PAUSE_SECS_MIN,
+  PAUSE_SECS_MAX,
+  RHYTHM_ADAPTIVE_MAX_MS,
+  isSpeechRhythm,
+  rhythmPauseSecs,
+  rhythmCommitWindows,
+  clampPauseSecs,
+  speechRhythmLabel,
+  type SpeechRhythm,
+} from '../src/lib/lanes/online/speechRhythm'
+import {
+  createSpeechPauseProfile,
+  recommendStableWindows,
+  STABLE_WINDOW_MAX_MS,
+} from '../src/lib/lanes/online/speechPauseProfile'
+import {
+  SCRIBE_MANUAL_SENTENCE_STABLE_MS,
+  SCRIBE_MANUAL_LONG_STABLE_MS,
+} from '../src/lib/lanes/online/scribeManualCommit'
+// @ts-expect-error — plain .mjs
 const { buildScribeWsParams } = await import('../server/online-api.mjs')
 
-// TASK 13 — "nhịp nói của buổi". How long a silence has to last before the recogniser calls the sentence
-// over was one number for every room and every speaker, and 01/08 showed both failure modes in one
-// rehearsal: cut mid-sentence on a thinking pause, and sentences run together when the MC read straight
-// through. Three named steps, no numbers for the operator, riding the token request that already exists —
-// no new endpoint. The clamp lives on BOTH sides and the server has the last word; the parity block below
-// is what keeps the client's copy from drifting away from it.
-const read = (p: string) => readFileSync(new URL(`../${p}`, import.meta.url), 'utf8')
+// TASK 24 — "nhịp nói của buổi", the full version. PART 2's three-step knob only moved the RECOGNISER's
+// silence backstop (~1.5s). The 03/08 measurements showed the thing that actually cuts a sentence is the
+// CLIENT pair — the 600/800ms stability windows `scribeManualCommit` waits before committing a partial
+// that already reads as finished. The operator's "one breath and it becomes a sentence" is the 600ms.
+// So every step now carries BOTH, a fourth step learns the speaker's own rhythm under a wider ceiling,
+// and the knob lives in Cài đặt. This suite REPLACES §13.7's — three of its cases pinned wiring this
+// part removed (`getPauseSecs`/`asrPauseSecs`) or a count now pinned by tests/sessionBoxes.test.ts.
 
-const RHYTHM = 'src/lib/lanes/online/speechRhythm.ts'
-const TRANSPORT = 'src/lib/lanes/online/asrTransport.ts'
-const LANE = 'src/lib/lanes/online/onlineLane.ts'
-const FACADE = 'src/lib/lanes/online/index.ts'
-const SERVER = 'server/online-api.mjs'
+const base = { token: 't', language: 'auto', keyterms: [] as string[], roomFilter: undefined }
 
-const store = new Map<string, string>()
-const stub = {
-  getItem: (k: string) => store.get(k) ?? null,
-  setItem: (k: string, v: string) => { store.set(k, v) },
-  removeItem: (k: string) => { store.delete(k) },
-  clear: () => { store.clear() },
-  key: (i: number) => [...store.keys()][i] ?? null,
-  get length() { return store.size },
-}
-vi.stubGlobal('localStorage', stub)
-afterAll(() => { vi.unstubAllGlobals() })
-beforeEach(() => { store.clear(); vi.stubGlobal('localStorage', stub) })
-
-const base = { token: 'TK', language: 'auto', keyterms: ['Esuhai'], roomFilter: undefined }
-const build = (vadSilenceSecs?: unknown) => buildScribeWsParams({ ...base, vadSilenceSecs }) as {
-  params: URLSearchParams; filterApplied: boolean; vadApplied: number
-}
-
-/** Every file under a directory, recursively — used to prove one storage key lives in exactly one file. */
-const filesUnder = (dir: string): string[] =>
-  readdirSync(new URL(`../${dir}`, import.meta.url), { recursive: true, withFileTypes: true })
-    .filter((e) => e.isFile())
-    .map((e) => `${e.parentPath ?? e.path}/${e.name}`)
-
-describe('the three steps', () => {
-  it('1 · SPEECH_RHYTHM_OPTIONS có đúng ba mục, theo thứ tự slow · normal · fast', () => {
-    expect(rhythm.SPEECH_RHYTHM_OPTIONS).toHaveLength(3)
-    expect(rhythm.SPEECH_RHYTHM_OPTIONS.map((o) => o.value)).toEqual(['slow', 'normal', 'fast'])
+describe('speechRhythm — the anti-fragment knob', () => {
+  it('1 · đúng bốn nấc, đúng thứ tự, và số giây gửi lên đúng như đã chốt', () => {
+    expect(SPEECH_RHYTHM_OPTIONS.map((o) => o.value)).toEqual(['slow', 'normal', 'fast', 'adaptive'])
+    expect(SPEECH_RHYTHM_OPTIONS.map((o) => o.secs)).toEqual([2.4, undefined, 0.9, 2.4])
   })
 
-  it('2 · bậc giữa KHÔNG gửi gì cả, để cài đặt sẵn của máy chủ tiếp tục cầm trịch', () => {
-    expect(rhythm.rhythmPauseSecs('normal')).toBeUndefined()
+  it('2 · mặc định là "normal" và nấc đó KHÔNG gửi gì lên — không ai bị đổi hành vi', () => {
+    expect(SPEECH_RHYTHM_DEFAULT).toBe('normal')
+    expect(rhythmPauseSecs(SPEECH_RHYTHM_DEFAULT)).toBeUndefined()
   })
 
-  it('3 · hai bậc đầu-cuối nằm trong khoảng an toàn', () => {
-    expect(rhythm.rhythmPauseSecs('slow')).toBe(2.4)
-    expect(rhythm.rhythmPauseSecs('fast')).toBe(0.9)
-    for (const v of [rhythm.rhythmPauseSecs('slow')!, rhythm.rhythmPauseSecs('fast')!]) {
-      expect(v).toBeGreaterThanOrEqual(rhythm.PAUSE_SECS_MIN)
-      expect(v).toBeLessThanOrEqual(rhythm.PAUSE_SECS_MAX)
+  it('3 · nấc nào có gửi giây thì giây đó nằm trong khoảng an toàn', () => {
+    for (const o of SPEECH_RHYTHM_OPTIONS) {
+      if (o.secs === undefined) continue
+      expect(o.secs).toBeGreaterThanOrEqual(PAUSE_SECS_MIN)
+      expect(o.secs).toBeLessThanOrEqual(PAUSE_SECS_MAX)
     }
   })
 
-  it('4 · hai đầu khoảng là 0.6 và 3', () => {
-    expect(rhythm.PAUSE_SECS_MIN).toBe(0.6)
-    expect(rhythm.PAUSE_SECS_MAX).toBe(3)
+  it('4 · rác bị loại, nhãn luôn đọc được', () => {
+    expect(isSpeechRhythm('slow')).toBe(true)
+    expect(isSpeechRhythm('adaptive')).toBe(true)
+    expect(isSpeechRhythm('turbo')).toBe(false)
+    expect(isSpeechRhythm(null)).toBe(false)
+    expect(speechRhythmLabel('fast')).toBe('MC nói liền mạch')
   })
 
-  it('5 · isSpeechRhythm nhận đúng ba bậc và từ chối mọi thứ khác', () => {
-    for (const v of ['slow', 'normal', 'fast']) expect(rhythm.isSpeechRhythm(v)).toBe(true)
-    for (const v of ['auto', '', null, 2.4]) expect(rhythm.isSpeechRhythm(v)).toBe(false)
+  it('5 · mỗi nấc mang theo cặp mốc chờ phía client, tăng dần theo độ chậm', () => {
+    expect(rhythmCommitWindows('fast')).toMatchObject({ sentenceMs: 450, longMs: 650, adaptive: false })
+    expect(rhythmCommitWindows('normal')).toMatchObject({ sentenceMs: 600, longMs: 800, adaptive: false })
+    expect(rhythmCommitWindows('slow')).toMatchObject({ sentenceMs: 1_100, longMs: 1_400, adaptive: false })
+    // "Bình thường" PHẢI bằng đúng hai hằng số gốc, nếu không thì mặc định đã đổi hành vi của người
+    // chưa từng mở Cài đặt.
+    expect(rhythmCommitWindows('normal').sentenceMs).toBe(SCRIBE_MANUAL_SENTENCE_STABLE_MS)
+    expect(rhythmCommitWindows('normal').longMs).toBe(SCRIBE_MANUAL_LONG_STABLE_MS)
+    const asc = (['fast', 'normal', 'slow'] as SpeechRhythm[]).map((v) => rhythmCommitWindows(v).sentenceMs)
+    expect(asc).toEqual([...asc].sort((a, b) => a - b))
   })
 
-  it('6 · lưu rồi đọc lại đi qua ĐÚNG một khoá; rác có sẵn trong bộ nhớ đọc thành mặc định, không ném lỗi', () => {
-    rhythm.saveSpeechRhythm('fast')
-    expect(store.get(rhythm.SPEECH_RHYTHM_KEY)).toBe('fast')
-    expect(store.size).toBe(1)
-    expect(rhythm.loadSpeechRhythm()).toBe('fast')
-
-    store.set(rhythm.SPEECH_RHYTHM_KEY, 'rất chậm')
-    expect(() => rhythm.loadSpeechRhythm()).not.toThrow()
-    expect(rhythm.loadSpeechRhythm()).toBe(rhythm.SPEECH_RHYTHM_DEFAULT)
+  it('6 · chỉ nấc tự học mới cho phép số đo đè lên, và trần của nó rộng hơn', () => {
+    const ad = rhythmCommitWindows('adaptive')
+    expect(ad.adaptive).toBe(true)
+    expect(ad.maxMs).toBe(RHYTHM_ADAPTIVE_MAX_MS)
+    expect(RHYTHM_ADAPTIVE_MAX_MS).toBeGreaterThan(STABLE_WINDOW_MAX_MS)
+    for (const v of ['slow', 'normal', 'fast'] as SpeechRhythm[]) {
+      const w = rhythmCommitWindows(v)
+      expect(w.adaptive).toBe(false)
+      expect(w.maxMs).toBe(w.sentenceMs)
+    }
   })
 
-  it('7 · clampPauseSecs kẹp cả hai đầu và cho giá trị hợp lệ đi thẳng', () => {
-    expect(rhythm.clampPauseSecs(0.1)).toBe(0.6)
-    expect(rhythm.clampPauseSecs(9)).toBe(3)
-    expect(rhythm.clampPauseSecs(1.5)).toBe(1.5)
+  it('7 · trần rộng hơn thật sự cởi trói cho mốc chờ đã học được', () => {
+    const gaps = Array.from({ length: 12 }, () => 1_600)
+    expect(recommendStableWindows(gaps)?.sentenceMs).toBe(STABLE_WINDOW_MAX_MS)          // trần cũ ép xuống 1_100
+    expect(recommendStableWindows(gaps, RHYTHM_ADAPTIVE_MAX_MS)?.sentenceMs).toBe(1_720) // 1_600 + 120 biên
   })
 
-  it('8 · clampPauseSecs trả undefined cho undefined, null, chuỗi rỗng và NaN', () => {
-    expect(rhythm.clampPauseSecs(undefined)).toBeUndefined()
-    expect(rhythm.clampPauseSecs(null)).toBeUndefined()
-    expect(rhythm.clampPauseSecs('')).toBeUndefined()
-    expect(rhythm.clampPauseSecs(NaN)).toBeUndefined()
+  it('8 · nấc lạ rơi về "normal", không rơi về undefined', () => {
+    expect(rhythmCommitWindows('turbo' as never)).toMatchObject({ sentenceMs: 600, longMs: 800 })
+  })
+
+  it('9 · luật chọn của lane, chép lại nguyên văn', () => {
+    // Bản sao của onlineLane.stableCommitWindows() trên một hồ sơ đã đo đủ 12 nhịp 1_600ms.
+    const profile = createSpeechPauseProfile()
+    for (let i = 0; i < 12; i += 1) profile.observe(1_600, 'ja')
+    const pick = (v: SpeechRhythm): number => {
+      if (v === SPEECH_RHYTHM_DEFAULT) return profile.windows('ja')!.sentenceMs
+      const rung = rhythmCommitWindows(v)
+      if (!rung.adaptive) return rung.sentenceMs
+      return profile.windows('ja', rung.maxMs)?.sentenceMs ?? rung.sentenceMs
+    }
+    expect(pick('fast')).toBe(450)                       // người vận hành đã nói — máy không cãi
+    expect(pick('slow')).toBe(1_100)
+    expect(pick('normal')).toBe(STABLE_WINDOW_MAX_MS)    // y như trước khi có nút này
+    expect(pick('adaptive')).toBe(1_720)                 // nhịp thật của người đang nói
+  })
+
+  it('10 · chưa đo đủ thì nấc tự học chạy bằng số tạm, không tụt về 600ms', () => {
+    const profile = createSpeechPauseProfile()
+    profile.observe(1_600, 'ja')
+    const rung = rhythmCommitWindows('adaptive')
+    expect(profile.windows('ja', rung.maxMs)).toBeNull()
+    expect({ sentenceMs: rung.sentenceMs, longMs: rung.longMs }).toEqual({ sentenceMs: 900, longMs: 1_100 })
+    expect(rung.sentenceMs).toBeGreaterThan(SCRIBE_MANUAL_SENTENCE_STABLE_MS)
+  })
+
+  it('11 · clampPauseSecs: rác ra undefined, ngoài khoảng bị kẹp, số hợp lệ đi thẳng', () => {
+    for (const junk of [undefined, null, '', 'xin chào', NaN]) expect(clampPauseSecs(junk)).toBeUndefined()
+    expect(clampPauseSecs(0.1)).toBe(PAUSE_SECS_MIN)
+    expect(clampPauseSecs(99)).toBe(PAUSE_SECS_MAX)
+    expect(clampPauseSecs(1.8)).toBe(1.8)
   })
 })
 
-describe('the server has the last word', () => {
-  it('9 · không gửi gì → giữ mặc định của máy chủ (1.5)', () => {
-    const { params, vadApplied } = build(undefined)
-    expect(vadApplied).toBe(1.5)
+describe('speechRhythm — the server has the last word', () => {
+  it('12 · không gửi gì thì giữ nguyên 1.5s của máy chủ', () => {
+    const { params, vadApplied } = buildScribeWsParams({ ...base })
     expect(params.get('vad_silence_threshold_secs')).toBe('1.5')
+    expect(vadApplied).toBe(1.5)
   })
 
-  it('10 · 2.4 đi thẳng vào handshake', () => {
-    const { params, vadApplied } = build(2.4)
-    expect(vadApplied).toBe(2.4)
-    expect(params.get('vad_silence_threshold_secs')).toBe('2.4')
-  })
-
-  it('11 · quá cao (9) bị kẹp xuống 3', () => {
-    const { params, vadApplied } = build(9)
-    expect(vadApplied).toBe(3)
-    expect(params.get('vad_silence_threshold_secs')).toBe('3')
-  })
-
-  it('12 · quá thấp (0.1) bị kéo lên 0.6', () => {
-    const { params, vadApplied } = build(0.1)
-    expect(vadApplied).toBe(0.6)
-    expect(params.get('vad_silence_threshold_secs')).toBe('0.6')
-  })
-
-  it('13 · rác → mặc định của máy chủ, và không bao giờ có NaN trong chuỗi truy vấn', () => {
-    for (const junk of ['fast', null, NaN]) {
-      const { params, vadApplied } = build(junk)
-      expect(vadApplied).toBe(1.5)
-      expect(params.get('vad_silence_threshold_secs')).toBe('1.5')
-      expect(params.toString()).not.toContain('NaN')
+  it('13 · số giây của một nấc hợp lệ đi qua đúng nguyên', () => {
+    for (const secs of [2.4, 0.9]) {
+      const { params, vadApplied } = buildScribeWsParams({ ...base, vadSilenceSecs: secs })
+      expect(params.get('vad_silence_threshold_secs')).toBe(String(secs))
+      expect(vadApplied).toBe(secs)
     }
   })
 
-  it('14 · máy khách và máy chủ nói cùng một luật, con số nào cũng vậy', () => {
-    for (const x of [0.1, 0.6, 0.9, 1.5, 2.4, 3, 9]) {
-      expect(rhythm.clampPauseSecs(x)).toBe(build(x).vadApplied)
+  it('14 · máy chủ tự kẹp — client sửa tay không đẩy ra ngoài khoảng được', () => {
+    expect(buildScribeWsParams({ ...base, vadSilenceSecs: 0.05 }).vadApplied).toBe(0.6)
+    expect(buildScribeWsParams({ ...base, vadSilenceSecs: 60 }).vadApplied).toBe(3)
+  })
+
+  it('15 · rác không bao giờ làm hỏng lần bắt tay', () => {
+    for (const junk of [null, 'nhanh', NaN, {}]) {
+      expect(buildScribeWsParams({ ...base, vadSilenceSecs: junk }).vadApplied).toBe(1.5)
     }
   })
-})
 
-describe('the wire', () => {
-  it('15 · asrTransport gửi đi và đọc câu trả lời về', () => {
-    const src = read(TRANSPORT)
-    expect(src).toContain('pauseSecs: opts.pauseSecs,')
-    expect(src).toContain('asrVadSilenceSecs?: number')
-    expect(src).toContain('pauseSecs: data.asrVadSilenceSecs')
-  })
-
-  it('16 · lane hỏi lúc lấy vé và giữ lại giá trị ĐÃ ÁP DỤNG', () => {
-    const src = read(LANE)
-    expect(src).toContain('pauseSecs: config.getPauseSecs?.(),')
-    expect(src).toContain("asrPauseSecs = typeof session.pauseSecs === 'number' ? session.pauseSecs : null;")
-    const from = src.indexOf('export interface OnlineDiagnostics {')
-    expect(from).toBeGreaterThan(-1)
-    expect(src.slice(from, src.indexOf('\n}', from))).toContain('asrPauseSecs: number | null;')
-  })
-
-  it('17 · facade nối getter, và khoá lưu trữ chỉ nằm ở đúng một file dưới src/', () => {
-    expect(read(FACADE)).toContain('getPauseSecs: () => rhythmPauseSecs(speechRhythmRef.current),')
-    const owners = filesUnder('src').filter((f) => readFileSync(f, 'utf8').includes('proyaku_online_speech_rhythm'))
-    expect(owners).toHaveLength(1)
-    expect(owners[0].endsWith('speechRhythm.ts')).toBe(true)
-    expect(read(RHYTHM)).toContain("export const SPEECH_RHYTHM_KEY = 'proyaku_online_speech_rhythm';")
-  })
-
-  // PART 3 adds six: GET+PUT for /online-api/glossary, /online-api/session-boxes and /online-api/mishearings.
-  it('18 · số endpoint vẫn được chốt cứng: đúng 16 chỗ khớp pathname', () => {
-    const hits = read(SERVER).match(/pathname === '\/online-api\//g) ?? []
-    expect(hits).toHaveLength(16)
+  it('16 · ba tham số VAD còn lại không xê dịch', () => {
+    const { params } = buildScribeWsParams({ ...base, vadSilenceSecs: 0.9 })
+    expect(params.get('vad_threshold')).toBe('0.4')
+    expect(params.get('min_speech_duration_ms')).toBe('100')
+    expect(params.get('min_silence_duration_ms')).toBe('100')
+    expect(params.get('commit_strategy')).toBe('vad')
   })
 })

@@ -57,19 +57,23 @@ export function pausePercentile(gaps: number[], share: number): number {
  * number would be worse than not adapting at all, because the first pauses of a session are usually the
  * microphone being adjusted rather than the speaker talking.
  */
-export function recommendStableWindows(gaps: number[]): StableWindows | null {
+export function recommendStableWindows(
+  gaps: number[],
+  maxMs: number = STABLE_WINDOW_MAX_MS,
+): StableWindows | null {
   const usable = gaps.filter(pauseGapIsUsable);
   if (usable.length < PAUSE_PROFILE_MIN_SAMPLES) return null;
 
+  // TASK 24: the ceiling is now the CALLER's, not a module constant. A speaker who leaves 1.5–2s
+  // between clauses had every recommendation flattened to 1_100ms — below their real pause — so the
+  // adaptation was invisible for exactly the speakers it exists to serve. The knob's "Tự học" step
+  // hands in a wider ceiling; every other caller keeps the original one.
+  const ceiling = Math.max(STABLE_WINDOW_MIN_MS, Number.isFinite(maxMs) ? maxMs : STABLE_WINDOW_MAX_MS);
   const typical = pausePercentile(usable, PAUSE_PROFILE_PERCENTILE);
-  const sentenceMs = clamp(
-    Math.round(typical + PAUSE_SENTENCE_MARGIN_MS),
-    STABLE_WINDOW_MIN_MS,
-    STABLE_WINDOW_MAX_MS,
-  );
+  const sentenceMs = clamp(Math.round(typical + PAUSE_SENTENCE_MARGIN_MS), STABLE_WINDOW_MIN_MS, ceiling);
   // A partial with no sentence-ending punctuation is weaker evidence, so it waits longer — the same
   // ordering the fixed 600/800 pair had.
-  const longMs = clamp(sentenceMs + PAUSE_LONG_EXTRA_MS, STABLE_WINDOW_MIN_MS, STABLE_WINDOW_MAX_MS);
+  const longMs = clamp(sentenceMs + PAUSE_LONG_EXTRA_MS, STABLE_WINDOW_MIN_MS, ceiling);
   return { sentenceMs, longMs, samples: usable.length };
 }
 
@@ -92,8 +96,8 @@ export function createSpeechPauseProfile() {
       gapsByKey.set(key, gaps);
       return true;
     },
-    windows(key = 'default'): StableWindows | null {
-      return recommendStableWindows(gapsByKey.get(key) ?? []);
+    windows(key = 'default', maxMs: number = STABLE_WINDOW_MAX_MS): StableWindows | null {
+      return recommendStableWindows(gapsByKey.get(key) ?? [], maxMs);
     },
     reset(): void {
       gapsByKey.clear();

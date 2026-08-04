@@ -13,7 +13,7 @@
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { useOnlineLane, fetchOnlineConfigStatus, summarizePrepDocs, ONLINE_SPEED_RANGE, SUBTITLE_FONT, type LaneStatus, type OnlineVoice, type AudienceLine, type WallOutput, type WallDock, MIC_SENSITIVITY_OPTIONS, micSensitivityLabel, LOUD_GATE_OPTIONS, resolveLoudThreshold, type MicSensitivity, type LoudGateMode, splitMishearingLines, previewKeyterms, KEYTERM_MAX, KEYTERM_MAX_LEN, SPEECH_RHYTHM_OPTIONS, type SpeechRhythm, fetchOnlineGlossary, saveOnlineGlossary, parseGlossaryLines, formatGlossaryLines, fetchSessionBoxes, saveSessionBoxes, EMPTY_SESSION_BOXES, fetchMishearings, saveMishearings } from '../index'
+import { useOnlineLane, fetchOnlineConfigStatus, summarizePrepDocs, ONLINE_SPEED_RANGE, SUBTITLE_FONT, type LaneStatus, type OnlineVoice, type AudienceLine, type WallOutput, type WallDock, MIC_SENSITIVITY_OPTIONS, micSensitivityLabel, LOUD_GATE_OPTIONS, resolveLoudThreshold, type MicSensitivity, type LoudGateMode, splitMishearingLines, previewKeyterms, KEYTERM_MAX, KEYTERM_MAX_LEN, fetchOnlineGlossary, saveOnlineGlossary, parseGlossaryLines, formatGlossaryLines, fetchSessionBoxes, saveSessionBoxes, EMPTY_SESSION_BOXES, fetchMishearings, saveMishearings } from '../index'
 import { useConferenceMode } from '../../../ConferenceModeContext'
 import { useActiveEvent } from '../../../ActiveEventContext'
 import { collectPrepPack, collectPrepDocuments, collectPrepHeader, type PrepPack } from '../../../prepData'
@@ -1013,18 +1013,6 @@ const OnlineConsole: React.FC = () => {
                     đứng im, so <em>ngưỡng</em> với <em>VU đỉnh</em> ở khối Chẩn đoán rồi hạ một nấc.
                   </p>
                 </div>
-                <div>
-                  <label htmlFor="online-console-rhythm" className="font-label-caps text-label-caps text-on-surface-variant block mb-1.5">
-                    Nhịp nói của buổi
-                  </label>
-                  <select id="online-console-rhythm" value={lane.speechRhythm} onChange={(e) => lane.setSpeechRhythm(e.target.value as SpeechRhythm)} disabled={lane.running} className={SELECT_CLS}>
-                    {SPEECH_RHYTHM_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
-                  </select>
-                  <p className="text-[11px] leading-relaxed text-on-surface-variant/80 mt-1">
-                    {SPEECH_RHYTHM_OPTIONS.find((o) => o.value === lane.speechRhythm)?.hint}
-                    {diag?.asrPauseSecs != null && <> Máy đang chờ <strong className="tabular-nums">{diag?.asrPauseSecs}s</strong> im lặng rồi mới chốt câu.</>}
-                  </p>
-                </div>
               </section>
 
               <div className="h-px bg-outline-variant"></div>
@@ -1103,11 +1091,13 @@ const OnlineConsole: React.FC = () => {
                         commit is not firing and the long stalls are back; `bỏ lạ` and `đổi tiếng` are
                         the two-way guards, and both being zero in a bilingual session is also a signal. */}
                     <div>cắt {diag.manualCommits} · bỏ tiếng lạ {diag.foreignDrops} · đổi tiếng {diag.languageTurns}</div>
-                    {/* M13 — ngưỡng cắt đang dùng cho người đang nói. "mặc định" là con số cố định
-                        600/800ms; "theo người nói" nghĩa là máy đã đo đủ (từ 8 nhịp ngắt trở lên) và
-                        đang dùng nhịp của chính người đó. Số nhịp đứng yên suốt buổi = người nói
-                        không ngắt giữa câu, và ngưỡng mặc định vẫn đang giữ việc. */}
-                    <div>ngưỡng cắt {diag.pauseWindowMs || '—'}{diag.pauseWindowMs ? 'ms' : ''} · {diag.pauseAdaptive ? 'theo người nói' : 'mặc định'} · {diag.pauseSamples} nhịp</div>
+                    {/* M13 + TASK 24 — the sentence-cut wait in force for the current speaker. "theo
+                        người nói" = the profile has measured enough (8+ pauses) and is using this
+                        speaker's own rhythm; "đặt sẵn" = a fixed number, either the original 600/800ms
+                        pair or the step picked in Cài đặt — whose name is printed right after. A sample
+                        count frozen all session = the speaker never pauses mid-sentence, so there is
+                        nothing to learn from yet. */}
+                    <div>ngưỡng cắt {diag.pauseWindowMs || '—'}{diag.pauseWindowMs ? 'ms' : ''} · {diag.pauseAdaptive ? 'theo người nói' : 'đặt sẵn'} · {diag.pauseSamples} nhịp · {diag.pauseRhythm}</div>
                     {/* M12 — chờ trọn ý. `ghép ý` là số mảnh câu đã được nối lại trước khi dịch (trước
                         đây mỗi mảnh này là một câu dịch nửa vời đọc lên loa); `mảnh` là số câu vẫn phải
                         gửi đi khi chưa có dấu kết — cao bất thường nghĩa là đang chạm trần chờ; `nối tiếp`

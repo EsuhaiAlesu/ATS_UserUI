@@ -21,7 +21,6 @@ import {
   loadWallOutputs, saveWallOutputs, detectWallScreens, scanWallScreens, openWallWindows, getOpenWallIds, closeWallWindows,
   type WallOutput, type ScreenSupport, type WallScreen,
 } from './audienceWindows'
-import { loadSpeechRhythm, rhythmPauseSecs, saveSpeechRhythm, type SpeechRhythm } from './speechRhythm'
 
 export type { LaneLine, LaneStatus } from '../types'
 export type { OnlineDiagnostics, TtsGateMode } from './onlineLane'
@@ -53,11 +52,13 @@ export { applyMishearings, formatMishearingRules, parseMishearingRules, splitMis
 export type { MishearingRule } from './mishearing'
 export type { WallOutput, WallView, WallDock, ScreenSupport, WallScreen } from './audienceWindows'
 export { SUBTITLE_FONT } from '../../audienceSubtitles'
-// TASK 13 — "nhịp nói của buổi". The console picks the step; the lane sends the seconds.
+// TASK 13 + TASK 24 — "nhịp nói của buổi". The Settings page picks the step; the lane reads it live
+// (the client pair that actually cuts) and sends the seconds upstream at each dial (the backstop).
 export type { SpeechRhythm } from './speechRhythm'
 export {
   SPEECH_RHYTHM_KEY, SPEECH_RHYTHM_DEFAULT, SPEECH_RHYTHM_OPTIONS, PAUSE_SECS_MIN, PAUSE_SECS_MAX,
-  isSpeechRhythm, loadSpeechRhythm, saveSpeechRhythm, speechRhythmLabel, rhythmPauseSecs, clampPauseSecs,
+  RHYTHM_ADAPTIVE_MAX_MS, isSpeechRhythm, loadSpeechRhythm, saveSpeechRhythm, speechRhythmLabel,
+  rhythmPauseSecs, rhythmCommitWindows, clampPauseSecs,
 } from './speechRhythm'
 // M14 — the pre-session document summariser. A plain async function, not part of the hook: it belongs to
 // Chuẩn bị, runs at most once per session, and must never be reachable from anything a live session does.
@@ -189,9 +190,6 @@ export interface UseOnlineLane {
   // Bắt đầu, exactly like terms/brief.
   script: ScriptMatcherEntry[]
   setScript: (rows: ScriptMatcherEntry[]) => void
-  // TASK 13 — the meeting's speech rhythm, persisted per machine.
-  speechRhythm: SpeechRhythm
-  setSpeechRhythm: (v: SpeechRhythm) => void
   // TASK 14 — which meeting the saved transcript belongs to. Set by the console from the same resolved
   // pointer the script is loaded from, so the file and the script can never disagree about the meeting.
   eventId: string
@@ -259,7 +257,6 @@ export function useOnlineLane(): UseOnlineLane {
   const [brief, setBrief] = useState('')
   const [listenPaused, setListenPaused] = useState(false)
   const [script, setScript] = useState<ScriptMatcherEntry[]>([])
-  const [speechRhythm, setSpeechRhythmState] = useState<SpeechRhythm>(() => loadSpeechRhythm())
   const [eventId, setEventIdState] = useState('')
 
   // voices + speed (TASK 5) — persisted so the operator's choice survives a reload.
@@ -312,9 +309,6 @@ export function useOnlineLane(): UseOnlineLane {
   gateModeRef.current = gateMode
   const scriptRef = useRef<ScriptMatcherEntry[]>([])
   scriptRef.current = script
-  const speechRhythmRef = useRef<SpeechRhythm>('normal')
-  speechRhythmRef.current = speechRhythm
-  const setSpeechRhythm = useCallback((v: SpeechRhythm) => { setSpeechRhythmState(v); saveSpeechRhythm(v) }, [])
   const eventIdRef = useRef('')
   eventIdRef.current = eventId
   const setEventId = useCallback((v: string) => { setEventIdState(v) }, [])
@@ -490,8 +484,6 @@ export function useOnlineLane(): UseOnlineLane {
         // two-lane treaty (src/lib/lanes/types.ts) and the offline lane has no script. The lane calls
         // this once at Bắt đầu and latches the rows for the whole session.
         getScript: () => scriptRef.current,
-        // TASK 13: read at ticket time, so changing the step applies from the next dial.
-        getPauseSecs: () => rhythmPauseSecs(speechRhythmRef.current),
         getEventId: () => eventIdRef.current,
         onDirectedLine: (line) => {
           dirByLid.current.set(line.lid, line.dir)
@@ -553,7 +545,7 @@ export function useOnlineLane(): UseOnlineLane {
     nearMicGate, setNearMicGate, micSensitivity, setMicSensitivity, loudGate, setLoudGate, speakEnabled, setSpeakEnabled, gateMode, setGateMode,
     listenPaused, setListenPaused,
     direction, setDirection, terms, setTerms, mishearing, setMishearing, brief, setBrief, script, setScript,
-    speechRhythm, setSpeechRhythm, eventId, setEventId,
+    eventId, setEventId,
     voices, voicesStatus, refreshVoices, voiceJa, setVoiceJa, voiceVi, setVoiceVi,
     speedMode, setSpeedMode, manualSpeed, setManualSpeed,
     twoWay, setTwoWay, directedLines, subtitleFont, setSubtitleFont,
@@ -571,3 +563,6 @@ export { default as OnlinePanel } from './components/OnlinePanel'
 export { default as OnlineKeysSettings } from './components/OnlineKeysSettings'
 //   OnlineMicSettings  — the Settings "Độ nhạy micro" section (per machine / per hall)
 export { default as OnlineMicSettings } from './components/OnlineMicSettings'
+//   OnlineRhythmSettings — the Settings "Nhịp nói của buổi" section (per meeting, TASK 24): the
+//   anti-fragment knob — how long a silence must last before a sentence is closed.
+export { default as OnlineRhythmSettings } from './components/OnlineRhythmSettings'

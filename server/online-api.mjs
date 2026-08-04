@@ -107,14 +107,18 @@ const SCRIBE_SEND_LANGUAGE_CODE = env('SCRIBE_SEND_LANGUAGE_CODE', 'false');
 // Narrow auto-detect to the languages this event actually uses. A WHITELIST is not the pin that broke
 // TASK 6: `language_code` names the primary and `secondary_languages` the others the session is allowed
 // to hear, so a two-way microphone stays two-way while Chinese/Thai/Italian stop being possible answers.
-// Comma-separated. Set empty to restore free auto-detect (instant rollback, no code change).
+// Comma-separated, and the ORDER DECIDES: the FIRST code becomes `language_code`, the session's primary.
 //
-// Verified against a live session on 2026-07-30, both directions: the vendor echoes back
-// `language_code: "ja", secondary_languages: ["vi"]` — it ACCEPTS the pair — and Vietnamese speech
-// still returns as Vietnamese with Japanese as the primary, so a two-way microphone stays two-way.
-// Without it the same handshake echoes `language_code: null`, which is how a Vietnamese sentence came
-// back as Chinese and was translated and read to the hall.
-const SCRIBE_LANGUAGE_WHITELIST = env('SCRIBE_LANGUAGE_WHITELIST', 'ja,vi');
+// Default changed 2026-08-03 (owner's call): 'ja,vi' → 'vi,ja'. The old default silently told the
+// recogniser "this stage speaks Japanese first" on a stage that speaks mostly Vietnamese — measured that
+// day, the Japanese lines came back clean while the Vietnamese ones were badly mangled. Same two
+// languages allowed, opposite lead.
+//
+// Do NOT reach for '' (free auto-detect) as the fallback: an unrestricted session has already
+// transcribed Vietnamese speech as Russian once (30/07 log) and as Chinese before that; the whitelist
+// exists to make that impossible. A hand-set env still beats this default, so
+// SCRIBE_LANGUAGE_WHITELIST=ja,vi restores the old lead with no code change.
+const SCRIBE_LANGUAGE_WHITELIST = env('SCRIBE_LANGUAGE_WHITELIST', 'vi,ja');
 const SCRIBE_SECONDARY_LANGUAGE_FORMAT = env('SCRIBE_SECONDARY_LANGUAGE_FORMAT', 'repeat');
 const SCRIBE_TOKEN_TTL_MS = 15 * 60 * 1000;
 const SCRIBE_KEYTERM_MAX_LEN = 20;

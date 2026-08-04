@@ -68,11 +68,14 @@ describe('buildScribeWsParams (TASK 11.1 / 11.13)', () => {
     expect(params.get('audio_format')).toBeNull()
   })
 
-  // PROMPT-10 TASK 1: a two-way session is RESTRICTED to the event's two languages, not pinned to one.
-  it('a two-way session is restricted to exactly Japanese + Vietnamese by default', () => {
+  // Default changed 2026-08-03 (owner's call): still exactly two languages, but VIETNAMESE now leads.
+  // The first code in the list becomes `language_code`, the session's primary, and this stage speaks
+  // mostly Vietnamese — the old 'ja,vi' default was quietly telling the recogniser otherwise.
+  it('a two-way session is restricted to exactly Vietnamese + Japanese, Vietnamese leading', () => {
     const { params } = buildScribeWsParams({ ...base, roomFilter: undefined })
-    expect(params.get('language_code')).toBe('ja') // the whitelist leads
-    expect(params.getAll('secondary_languages')).toEqual(['vi']) // the mic stays two-way
+    expect(params.get('language_code')).toBe('vi')
+    expect(params.getAll('secondary_languages')).toEqual(['ja'])
+    expect(params.get('include_language_detection')).toBe('true') // we still ASK for the verdict
   })
 
   it('roomFilter three states: ON sets the parameter; OFF sets nothing (demo parity); absent inherits the off-by-default env', () => {

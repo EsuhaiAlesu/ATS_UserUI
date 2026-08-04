@@ -145,3 +145,28 @@ still implements the three-state rule (`true` → set it; `false` → send nothi
 `SCRIBE_FILTER_BACKGROUND`) and the token endpoint still accepts a boolean `roomFilter` in the request
 body. The client simply always takes the "absent" branch now, so switching it back on is one environment
 variable — no code change, no client redeploy.
+
+## Speech rhythm — "Nhịp nói của buổi" (four steps, lives in Settings)
+
+The per-meeting rhythm knob is **Settings → "Chế độ ONLINE — Nhịp nói của buổi"** (`Section id="rh"`,
+component `OnlineRhythmSettings`, exported from the facade root). It is NOT in the console drawer and it
+is NOT hook state — the Settings page and the lane both go through `speechRhythm.ts` and one localStorage
+key, so they can never disagree.
+
+Each of the four steps carries THREE numbers, split across the two halves of the pipeline:
+
+- the client pair `sentenceMs`/`longMs` (via `rhythmCommitWindows`) — the stability waits that actually
+  cut sentences. The lane re-reads the step on every partial, so a change applies IMMEDIATELY,
+  mid-session.
+- the upstream `secs` (via `rhythmPauseSecs`) — the recogniser's silence backstop, ridden on the token
+  request as `pauseSecs`. It is baked into the handshake, so it applies from the next Bắt đầu. `normal`
+  sends nothing and leaves the server default standing.
+
+The fourth step, `adaptive` ("Tự học theo người đang nói"), lets the M13 pause profile override the
+client pair with the speaker's own measured rhythm under a wider ceiling (`RHYTHM_ADAPTIVE_MAX_MS`,
+2,000ms — the profile's own ceiling stays 1,100ms for every other caller). Until the profile has its 8
+pauses the step runs at a fixed 900/1,100ms stand-in. An explicit `slow`/`fast` pick always beats the
+learner; `normal` behaves exactly as the lane did before the knob existed.
+
+The diagnostics line `ngưỡng cắt … · <tên nấc>` names the step in force (`diag.pauseRhythm`), and its
+"đặt sẵn"/"theo người nói" flag says whether the wait in use was hand-picked or measured.
