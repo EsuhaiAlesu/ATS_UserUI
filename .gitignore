@@ -26,3 +26,7 @@ dist-ssr
 # ONLINE lane saved transcripts (server writes here)
 translated_history/
 online-keys.json
+# ONLINE lane store, when DATA_DIR is not set (dev clone). Holds the operator's own glossary and the
+# per-meeting boxes — a `git add -A` on a machine that ran the server without a disk attached would
+# otherwise put that in the history.
+online-data/

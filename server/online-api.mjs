@@ -18,7 +18,7 @@ import path from 'node:path';
 import { getOnlineConfig, getConfigStatus, setOnlineConfig, ONLINE_KEY_SLUGS } from './online-config.mjs';
 // TASK 18 — the lane's own small persistent store (DATA_DIR, atomic JSON). Used by the online glossary
 // (TASK 19) and the per-meeting boxes (TASK 20).
-import { readStore, writeStore, storeDir } from './onlineStore.mjs';
+import { readStore, writeStore } from './onlineStore.mjs';
 import { createHash } from 'node:crypto';
 
 const env = (name, fallback = '') => (process.env[name] ?? fallback).trim();
