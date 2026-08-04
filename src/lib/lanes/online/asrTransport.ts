@@ -286,11 +286,21 @@ export function createAsrCodec(previousText?: string): AsrCodec {
           const finalKey = normaliseFinal(transcript);
           // Swallow the twin — and only the twin. Three conditions, each earning its place:
           //   * same WORDS, not the same string: the two passes disagree about punctuation and width;
-          //   * the OTHER kind of final from the one just emitted: a genuine repeat ("Vâng." twice) opens
-          //     its own plain-then-timestamped pair, and its first half is the same kind as the one
-          //     already emitted, so it is let through;
+          //   * the OTHER kind of final from the one just emitted — and the memory below must be updated
+          //     INSIDE this branch too, because the kind that matters next is the one just swallowed,
+          //     not the one last emitted;
           //   * inside the window, so a sentence legitimately repeated a minute later is never lost.
+          //
+          // 04/08/2026 — measured, not reasoned. The third bullet's original wording claimed a genuine
+          // repeat "is let through". Driving the codec with plain·tagged·plain·tagged of the same short
+          // sentence returned ONE event, not two: the second "Vâng." produced no subtitle, no
+          // translation, no voice and no line in the saved transcript, in silence. The plain half of the
+          // second pair never reaches this test at all — the twin-wait above holds it — so its tagged
+          // half was the only survivor, and it was compared against a flag still stuck on the FIRST
+          // pair's plain half. In a ceremony "Vâng." "Vâng." and "はい。" "はい。" recur dozens of times
+          // an hour, which is how often a whole sentence was disappearing.
           if (lastFinalKey !== null && finalKey === lastFinalKey && timestamped !== lastFinalTimestamped && now - lastFinalAt < FINAL_DEDUP_MS) {
+            lastFinalTimestamped = timestamped;
             return null;
           }
           lastFinalKey = finalKey;

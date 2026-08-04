@@ -87,27 +87,31 @@ describe('the twin is swallowed', () => {
 describe('a genuine repeat still gets through', () => {
   afterEach(() => vi.useRealTimers())
 
-  // SPEC-vs-REALITY (§8.2 case 7). The prompt asks: "Two full pairs of `Vâng.` back to back → **two**
-  // events." The codec as written emits ONE, and the code is right — the test is what moved.
-  //
-  // Why: the twin test alone would indeed let the repeat's plain half through (its `timestamped` matches
-  // the kind already emitted). But TASK 9's hold path is armed the moment the session delivers its first
-  // timestamped final with words in it (`sawTimestampedFinal = true`), so the repeat's plain half never
-  // reaches the twin test at all — it is HELD for its own tagged twin. When that twin arrives it clears
-  // the hold and then meets the dedup memory, which still reads `Vâng.` / plain / inside the window, so it
-  // is swallowed as a twin. Net: one event.
-  //
-  // Per the standing rule the source keeps the behaviour the prompt asked for and this case asserts what
-  // actually happens. The claim the prompt was really making — that the TWIN TEST does not eat a genuine
-  // repeat — is pinned intact by case 10 below, where the hold path is never armed.
-  it('7 · hai cặp "Vâng." liền nhau: đường GIỮ của TASK 9 làm cặp thứ hai chỉ còn một sự kiện', () => {
+  // Hành vi mà ca này từng ghi lại (hai cặp → một sự kiện) là LỖI THẬT, đã vá ngày 04/08/2026 bằng
+  // TASK 8B: nhánh nuốt bản sao nay cập nhật `lastFinalTimestamped` trước khi `return null`. Mong đợi
+  // ban đầu của prompt là đúng.
+  it('7 · hai cặp "Vâng." liền nhau → hai sự kiện; ba cặp → ba; và はい。 cũng vậy', () => {
     vi.useFakeTimers(); vi.setSystemTime(0)
-    const d = driver()
-    d.plain('Vâng.')
-    d.tagged('Vâng.')
-    d.plain('Vâng.')
-    d.tagged('Vâng.')
-    expect(d.emitted).toEqual(['Vâng.'])
+    const two = driver()
+    two.plain('Vâng.')
+    two.tagged('Vâng.')
+    two.plain('Vâng.')
+    two.tagged('Vâng.')
+    expect(two.emitted).toEqual(['Vâng.', 'Vâng.'])
+
+    // Ba cặp liền nhau → BA sự kiện. Đây là chỗ chốt quyết định KHÔNG làm mới `lastFinalAt` trong nhánh
+    // nuốt: làm mới nó thì cặp thứ ba đo cửa sổ từ một bản sao chứ không từ một câu thật.
+    const three = driver()
+    for (let i = 0; i < 3; i += 1) { three.plain('Vâng.'); three.tagged('Vâng.') }
+    expect(three.emitted).toEqual(['Vâng.', 'Vâng.', 'Vâng.'])
+
+    // Cùng một lỗi, tiếng Nhật — dạng mà lễ Esuhai sinh ra nhiều nhất.
+    const ja = driver()
+    ja.plain('はい。')
+    ja.tagged('はい。')
+    ja.plain('はい。')
+    ja.tagged('はい。')
+    expect(ja.emitted).toEqual(['はい。', 'はい。'])
   })
 
   it('8 · hai câu KHÁC nhau trong cùng cửa sổ → hai sự kiện', () => {
