@@ -125,6 +125,22 @@ export async function collectPrepPack(conf: Conference | undefined, dir: PrepDir
     glossaryReachable = false
   }
 
+  // ── TASK 19: the ONLINE glossary — the one that works on the deployed build ──
+  // Appended, not substituted. When both are reachable the office glossary is the curated one and wins a
+  // tie, because the de-duplication below keeps the FIRST entry at a given rank. When `/api` is absent —
+  // which is the normal state of the deployed build — this is the only glossary there is, and without it
+  // the Thuật ngữ box has to be retyped by hand before every session.
+  //
+  // A plain fetch, deliberately: this file is a neutral bridge and may not import the online lane. It
+  // must never throw, so an unreachable store contributes nothing and is not an error.
+  try {
+    const res = await fetch('/online-api/glossary', { headers: { Accept: 'application/json' } })
+    if (res.ok) {
+      const data = (await res.json()) as { entries?: unknown }
+      if (Array.isArray(data.entries)) glossary = [...glossary, ...(data.entries as GlossaryEntry[])]
+    }
+  } catch { /* no online store on this deploy — not an error */ }
+
   // ── roster + approved-script count (localStorage-backed, always reachable) ──
   let speakers: ReturnType<typeof getSpeakers> = []
   try { speakers = getSpeakers() } catch { speakers = [] }

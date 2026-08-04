@@ -13,7 +13,7 @@
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { useOnlineLane, fetchOnlineConfigStatus, summarizePrepDocs, ONLINE_SPEED_RANGE, SUBTITLE_FONT, type LaneStatus, type OnlineVoice, type AudienceLine, type WallOutput, type WallDock, MIC_SENSITIVITY_OPTIONS, micSensitivityLabel, LOUD_GATE_OPTIONS, resolveLoudThreshold, type MicSensitivity, type LoudGateMode, splitMishearingLines, previewKeyterms, KEYTERM_MAX, KEYTERM_MAX_LEN, SPEECH_RHYTHM_OPTIONS, type SpeechRhythm } from '../index'
+import { useOnlineLane, fetchOnlineConfigStatus, summarizePrepDocs, ONLINE_SPEED_RANGE, SUBTITLE_FONT, type LaneStatus, type OnlineVoice, type AudienceLine, type WallOutput, type WallDock, MIC_SENSITIVITY_OPTIONS, micSensitivityLabel, LOUD_GATE_OPTIONS, resolveLoudThreshold, type MicSensitivity, type LoudGateMode, splitMishearingLines, previewKeyterms, KEYTERM_MAX, KEYTERM_MAX_LEN, SPEECH_RHYTHM_OPTIONS, type SpeechRhythm, fetchOnlineGlossary, saveOnlineGlossary, parseGlossaryLines, formatGlossaryLines, fetchSessionBoxes, saveSessionBoxes, EMPTY_SESSION_BOXES, fetchMishearings, saveMishearings } from '../index'
 import { useConferenceMode } from '../../../ConferenceModeContext'
 import { useActiveEvent } from '../../../ActiveEventContext'
 import { collectPrepPack, collectPrepDocuments, collectPrepHeader, type PrepPack } from '../../../prepData'
@@ -91,7 +91,7 @@ const MissingKeysModal: React.FC<{ onClose: () => void; onGoSettings: () => void
   </div>
 )
 
-type Panel = 'gate' | 'voice' | 'terms' | 'brief' | 'wall' | null
+type Panel = 'gate' | 'voice' | 'terms' | 'brief' | 'glossary' | 'wall' | null
 
 function wallSupportLine(support: string, count: number): string {
   if (support === 'multi') return `Thấy ${count} màn hình — chọn màn cho từng cửa sổ rồi bấm Xuất.`
@@ -260,14 +260,82 @@ const OnlineConsole: React.FC = () => {
     // window latched an empty matcher for the entire session. Reading the script is a localStorage read.
     applyScript()
     let cancelled = false
-    void collectPrepPack(event, lane.direction).then((pack) => {
+    // TASK 20: what was SAVED for this meeting outranks the mechanical auto-fill, always. The saved text
+    // includes the operator's hand corrections from the rehearsal; the auto-fill is a first draft
+    // assembled from stores. Filling an already-answered box with a first draft is how a rehearsal's work
+    // gets thrown away in silence.
+    void (async () => {
+      const saved = event ? await fetchSessionBoxes(kbScopeId(event), lane.direction) : EMPTY_SESSION_BOXES
+      if (cancelled) return
+      if (saved.terms) lane.setTerms(saved.terms)
+      if (saved.brief) lane.setBrief(saved.brief)
+      setBoxesSaved(saved.savedAt > 0)
+      const pack = await collectPrepPack(event, lane.direction)
       if (cancelled) return
       setPrep(pack)
-      if (!lane.terms.trim()) lane.setTerms(pack.terms)
-      if (!lane.brief.trim()) lane.setBrief(pack.brief)
-    })
+      if (!saved.terms && !lane.terms.trim()) lane.setTerms(pack.terms)
+      if (!saved.brief && !lane.brief.trim()) lane.setBrief(pack.brief)
+    })()
     return () => { cancelled = true }
   }, [eventId, event, lane.direction, lane, applyScript])
+
+  // TASK 20: write the two boxes back a moment after typing stops. Debounced, never on the live path's
+  // critical section, and silent on failure — a red line under the box because the network blinked would
+  // be noise in the middle of a ceremony. The ref makes an unchanged pair cost nothing.
+  const [boxesSaved, setBoxesSaved] = useState(false)
+  const boxesWrittenRef = useRef('')
+  useEffect(() => {
+    if (!event) return
+    if (prepLoadedRef.current !== `${eventId}|${lane.direction}`) return
+    const payload = JSON.stringify([lane.terms, lane.brief])
+    if (boxesWrittenRef.current === payload) return
+    const timer = setTimeout(() => {
+      boxesWrittenRef.current = payload
+      void saveSessionBoxes(kbScopeId(event), lane.direction, lane.terms, lane.brief).then((ok) => {
+        if (ok) setBoxesSaved(true)
+      })
+    }, 1_500)
+    return () => clearTimeout(timer)
+  }, [event, eventId, lane.direction, lane.terms, lane.brief])
+
+  // TASK 20: the mishearing box is GLOBAL — one list for every meeting, not keyed on anything — so it
+  // loads once per mount rather than per meeting. What the recogniser mangles is a property of the words:
+  // the company name it gets wrong at the anniversary is the same name it gets wrong next month. When the
+  // store holds something it WINS over the localStorage copy, and that is what makes a correction learned
+  // on the rehearsal machine already be there on the hall machine.
+  const [mishearingSaved, setMishearingSaved] = useState(false)
+  // `null` until the store has answered. Nothing is ever written back before that, so an empty box on a
+  // fresh machine cannot overwrite a list somebody spent a rehearsal building.
+  const mishearingWrittenRef = useRef<string | null>(null)
+  const setMishearingRef = useRef(lane.setMishearing)
+  setMishearingRef.current = lane.setMishearing
+  const mishearingAtMountRef = useRef(lane.mishearing)
+  useEffect(() => {
+    let cancelled = false
+    void fetchMishearings().then((stored) => {
+      if (cancelled) return
+      if (stored.savedAt > 0) {
+        mishearingWrittenRef.current = stored.text
+        setMishearingRef.current(stored.text)
+        setMishearingSaved(true)
+      } else {
+        // Nothing stored yet: adopt whatever this machine already had, so the first save is an upload of
+        // the local list rather than an erasure of it.
+        mishearingWrittenRef.current = mishearingAtMountRef.current
+      }
+    })
+    return () => { cancelled = true }
+  }, [])
+
+  useEffect(() => {
+    if (mishearingWrittenRef.current === null) return
+    if (mishearingWrittenRef.current === lane.mishearing) return
+    const timer = setTimeout(() => {
+      mishearingWrittenRef.current = lane.mishearing
+      void saveMishearings(lane.mishearing).then((ok) => { if (ok) setMishearingSaved(true) })
+    }, 1_500)
+    return () => clearTimeout(timer)
+  }, [lane.mishearing])
 
   const voiceOptions = (list: OnlineVoice[]) => {
     const personal = list.filter((v) => v.category === 'personal')
@@ -283,6 +351,35 @@ const OnlineConsole: React.FC = () => {
   // TASK 5: parsed once per keystroke, so the box can name the lines that are not usable yet instead of
   // dropping them in silence — silence is exactly how the 01/08 rehearsal lost its script.
   const mishearingInfo = useMemo(() => splitMishearingLines(lane.mishearing), [lane.mishearing])
+
+  // ── TASK 19: the ONLINE glossary panel ──
+  // Loaded when the panel is first opened, not on mount: this component re-renders on every subtitle
+  // line, and a glossary the operator may never open should not cost a request at the start of a
+  // ceremony. `glossaryLoaded` is the latch; the text is the operator's until they press Lưu.
+  const [glossaryText, setGlossaryText] = useState('')
+  const [glossaryState, setGlossaryState] = useState<{ busy: boolean; note: string; error: string }>({ busy: false, note: '', error: '' })
+  const glossaryLoadedRef = useRef(false)
+  const loadGlossary = useCallback(async () => {
+    setGlossaryState({ busy: true, note: '', error: '' })
+    const entries = await fetchOnlineGlossary()
+    glossaryLoadedRef.current = true
+    setGlossaryText(formatGlossaryLines(entries))
+    setGlossaryState({ busy: false, note: `${entries.length} mục`, error: '' })
+  }, [])
+  useEffect(() => {
+    if (panel !== 'glossary' || glossaryLoadedRef.current) return
+    void loadGlossary()
+  }, [panel, loadGlossary])
+  const glossaryParse = useMemo(() => parseGlossaryLines(glossaryText), [glossaryText])
+  const saveGlossary = async () => {
+    setGlossaryState({ busy: true, note: '', error: '' })
+    try {
+      const count = await saveOnlineGlossary(glossaryParse.entries)
+      setGlossaryState({ busy: false, note: `Đã lưu ${count} mục`, error: '' })
+    } catch (error) {
+      setGlossaryState({ busy: false, note: '', error: error instanceof Error ? error.message : 'Lưu từ điển thất bại.' })
+    }
+  }
 
   // TASK 7: exactly what the recogniser will be primed with, computed from the two boxes that feed it.
   // Names lifted from the approved script are appended after these on the server side and take whatever
@@ -306,6 +403,12 @@ const OnlineConsole: React.FC = () => {
       {/* M9 — an empty or unapproved script behaves exactly like a script that never matches, so it must
           be said out loud here; nothing else on this screen would tell the operator before going live. */}
       <div>{scriptLoadMessage(scriptLoad)}</div>
+      {/* TASK 20 — the operator has to be able to tell "this will be here tomorrow" from "this is in this
+          tab only". One short line; it appears under both boxes because both are saved together. */}
+      <div>{boxesSaved ? 'Đã nhớ Thuật ngữ và Bối cảnh cho buổi này' : 'Chưa lưu — gõ xong vài giây là tự nhớ cho buổi này'}</div>
+      {/* TASK 20 — and one more for the mishearing box, which is deliberately NOT per meeting. Saying so
+          out loud is the point: the operator should expect to type each correction exactly once, ever. */}
+      <div>{mishearingSaved ? 'Đã nhớ phần sửa nghe nhầm — dùng chung cho mọi buổi, mọi máy' : 'Phần sửa nghe nhầm: gõ xong vài giây là tự nhớ, dùng chung cho mọi buổi'}</div>
     </div>
   )
 
@@ -443,6 +546,7 @@ const OnlineConsole: React.FC = () => {
             <div className="px-2 pb-1 font-label-caps text-[10px] text-on-surface-variant/55 tracking-[0.16em]">NỘI DUNG</div>
             <RailBtn icon="menu_book" label="Thuật ngữ" title="Thuật ngữ / corpus cho nhận dạng" tone={panel === 'terms' ? 'active' : 'default'} onClick={() => setPanel((p) => (p === 'terms' ? null : 'terms'))} />
             <RailBtn icon="article" label="Bối cảnh" title="Bối cảnh (brief) cho bản dịch" tone={panel === 'brief' ? 'active' : 'default'} onClick={() => setPanel((p) => (p === 'brief' ? null : 'brief'))} />
+            <RailBtn icon="translate" label="Từ điển" title="Từ điển riêng của bản trực tuyến — dùng được không cần máy chủ nội bộ" tone={panel === 'glossary' ? 'active' : 'default'} onClick={() => setPanel((p) => (p === 'glossary' ? null : 'glossary'))} />
             <RailBtn icon="save" label="Lưu transcript" title="Lưu bản ghi phiên dịch" onClick={() => { void lane.saveSession() }} />
             {lane.saveStatus && <div className="px-3 pt-0.5 text-[11px] text-on-surface-variant">{lane.saveStatus}</div>}
             {/* TASK 12.3 — a failing auto-save is silent (no download storm) but must not be invisible. */}
@@ -676,6 +780,39 @@ const OnlineConsole: React.FC = () => {
                     </p>
                   )}
                 </div>
+              </div>
+            )}
+            {panel === 'glossary' && (
+              <div className="space-y-2">
+                <div className="flex items-center justify-between gap-2">
+                  <h3 className="font-label-caps text-label-caps text-on-surface">Từ điển trực tuyến</h3>
+                  <button onClick={() => { void loadGlossary() }} disabled={glossaryState.busy} title="Tải lại từ kho lưu"
+                    className="inline-flex items-center gap-1 rounded-lg border border-outline-variant text-on-surface-variant px-2.5 py-1 text-xs hover:text-primary hover:border-primary transition-colors disabled:opacity-50">
+                    <span className={`material-symbols-outlined text-[15px] ${glossaryState.busy ? 'animate-spin' : ''}`} aria-hidden="true">{glossaryState.busy ? 'progress_activity' : 'refresh'}</span>Tải lại
+                  </button>
+                </div>
+                <p className="text-[11px] text-on-surface-variant leading-relaxed">
+                  Mỗi dòng một mục: <span className="font-mono">tiếng Việt = tiếng Nhật</span>. Thêm dấu{' '}
+                  <span className="font-mono">*</span> ở cuối dòng để mồi cho máy nghe. Từ điển này nằm trên
+                  kho của bản trực tuyến — <strong>không cần máy chủ nội bộ</strong>, và nút “Nạp từ Chuẩn bị”
+                  ở ô Thuật ngữ sẽ gộp nó vào.
+                </p>
+                <textarea value={glossaryText} onChange={(e) => setGlossaryText(e.target.value)} rows={12}
+                  className={TEXTAREA_CLS} placeholder={'Esuhai = エスハイ *\nGEM Center *\nkỹ sư = エンジニア'} />
+                <div className="flex items-center justify-between gap-2 text-[11px] text-on-surface-variant">
+                  <span className="tabular-nums">{glossaryParse.entries.length} mục</span>
+                  <button onClick={() => { void saveGlossary() }} disabled={glossaryState.busy}
+                    className="inline-flex items-center gap-1 rounded-lg border border-primary/60 text-primary px-2.5 py-1 text-xs hover:bg-primary/10 transition-colors disabled:opacity-50">
+                    <span className="material-symbols-outlined text-[15px]" aria-hidden="true">save</span>Lưu từ điển
+                  </button>
+                </div>
+                {glossaryParse.invalid.length > 0 && (
+                  <p className="text-[11px] text-error leading-relaxed">
+                    {glossaryParse.invalid.length} dòng chưa dùng được: {glossaryParse.invalid.slice(0, 3).join(' · ')}
+                  </p>
+                )}
+                {glossaryState.error && <p className="text-[11px] text-error leading-relaxed">{glossaryState.error}</p>}
+                {glossaryState.note && !glossaryState.error && <p className="text-[11px] text-secondary leading-relaxed">{glossaryState.note}</p>}
               </div>
             )}
             {panel === 'brief' && (

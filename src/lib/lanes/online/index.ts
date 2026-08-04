@@ -63,6 +63,14 @@ export {
 // Chuẩn bị, runs at most once per session, and must never be reachable from anything a live session does.
 export { summarizePrepDocs, PREP_DOCS_MAX, PREP_DOC_MAX_CHARS } from './prepBrief'
 export type { PrepBriefInput, PrepBriefResult, PrepBriefDoc } from './prepBrief'
+// TASK 19 — the ONLINE lane's own glossary (its own store; the offline /glossary page is untouched).
+// Plain async functions like the summariser above: pre-session work, never reachable from a live session.
+export { fetchOnlineGlossary, saveOnlineGlossary, parseGlossaryLines, formatGlossaryLines, ONLINE_GLOSSARY_MAX } from './onlineGlossary'
+export type { OnlineGlossaryEntry, GlossaryLineParse } from './onlineGlossary'
+// TASK 20 — the two console boxes, remembered per meeting × direction, and the mishearing box, global.
+export { fetchSessionBoxes, saveSessionBoxes, EMPTY_SESSION_BOXES } from './sessionBoxes'
+export { fetchMishearings, saveMishearings, EMPTY_MISHEARINGS } from './sessionBoxes'
+export type { SessionBoxes, StoredMishearings } from './sessionBoxes'
 export type OnlineDirection = 'vi2ja' | 'ja2vi'
 export type SpeedMode = 'auto' | 'manual'
 export interface OnlineVoice { slug: string; name: string; language: string; category: string; labels: Record<string, string> }

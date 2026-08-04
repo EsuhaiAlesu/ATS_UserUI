@@ -162,8 +162,9 @@ describe('the wire', () => {
     expect(read(RHYTHM)).toContain("export const SPEECH_RHYTHM_KEY = 'proyaku_online_speech_rhythm';")
   })
 
-  it('18 · không có endpoint mới nào được thêm vào: vẫn đúng 10 chỗ khớp pathname', () => {
+  // PART 3 adds six: GET+PUT for /online-api/glossary, /online-api/session-boxes and /online-api/mishearings.
+  it('18 · số endpoint vẫn được chốt cứng: đúng 16 chỗ khớp pathname', () => {
     const hits = read(SERVER).match(/pathname === '\/online-api\//g) ?? []
-    expect(hits).toHaveLength(10)
+    expect(hits).toHaveLength(16)
   })
 })

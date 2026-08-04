@@ -16,6 +16,9 @@ import { WebSocketServer, WebSocket } from 'ws';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { getOnlineConfig, getConfigStatus, setOnlineConfig, ONLINE_KEY_SLUGS } from './online-config.mjs';
+// TASK 18 — the lane's own small persistent store (DATA_DIR, atomic JSON). Used by the online glossary
+// (TASK 19) and the per-meeting boxes (TASK 20).
+import { readStore, writeStore, storeDir } from './onlineStore.mjs';
 import { createHash } from 'node:crypto';
 
 const env = (name, fallback = '') => (process.env[name] ?? fallback).trim();
@@ -124,6 +127,14 @@ const ONLINE_REQUIRED_SLUGS = ONLINE_ASR_PROVIDER === 'qwen3'
   : ONLINE_KEY_SLUGS.filter((s) => s !== 'asr_endpoint' && s !== 'asr_key');
 
 const HISTORY_DIR = env('ONLINE_HISTORY_DIR', './translated_history');
+// TASK 19/20 — ceilings for the stored collections. They are generous by an order of magnitude against
+// real use (a gala glossary is ~200 entries) and exist so a runaway client cannot fill the disk.
+const ONLINE_GLOSSARY_MAX = 2_000;
+const ONLINE_GLOSSARY_FIELD_CHARS = 200;
+const SESSION_BOXES_MAX_SCOPES = 500;
+// The mishearing box is one plain string. 2 000 is the same ceiling the client already applies to it, so
+// a client at its limit is never silently truncated by the server.
+const SESSION_MISHEARINGS_MAX_CHARS = 2_000;
 const MAX_TEXT_CHARS = 12_000;
 const TTS_MAX_TEXT_CHARS = 1_000;
 const MAX_RECENT_CONTEXT_ITEMS = 3;
@@ -828,6 +839,37 @@ export function buildScribeWsParams({ token, language, keyterms, roomFilter, vad
   return { params: p, filterApplied, vadApplied };
 }
 
+// ---------- TASK 19: the online glossary, normalised on the way in ----------
+// A stored glossary is read by the live path, so what lands on disk has to be boring: known fields only,
+// strings clipped, every entry carrying at least one usable side. An entry with neither `vi` nor `ja` is
+// not a term, it is a blank row somebody left behind, and it would spend a keyterm slot on nothing.
+export function normalizeGlossaryEntries(input) {
+  if (!Array.isArray(input)) return [];
+  const out = [];
+  for (const raw of input) {
+    if (!raw || typeof raw !== 'object') continue;
+    const s = (v) => (typeof v === 'string' ? v.trim().slice(0, ONLINE_GLOSSARY_FIELD_CHARS) : '');
+    const vi = s(raw.vi);
+    const ja = s(raw.ja);
+    if (!vi && !ja) continue;
+    const entry = { vi, ja };
+    const reading = s(raw.reading);
+    if (reading) entry.reading = reading;
+    const type = s(raw.type);
+    if (type) entry.type = type;
+    if (raw.asr_hotword === true) entry.asr_hotword = true;
+    const note = s(raw.note);
+    if (note) entry.note = note;
+    if (Array.isArray(raw.misheard)) {
+      const misheard = raw.misheard.map(s).filter(Boolean).slice(0, 12);
+      if (misheard.length) entry.misheard = misheard;
+    }
+    out.push(entry);
+    if (out.length >= ONLINE_GLOSSARY_MAX) break;
+  }
+  return out;
+}
+
 // ---------- raw-http request/response helpers ----------
 function sendJson(res, status, obj) {
   const body = JSON.stringify(obj);
@@ -1279,6 +1321,106 @@ export function installOnlineApi(server, { requireAuth } = {}) {
           logLine('usage.report', { reportChars: JSON.stringify(body ?? {}).length });
         }
         sendJson(res, 200, { ok: true });
+        return true;
+      }
+
+      // ---- TASK 20: the console's two boxes, remembered per meeting × direction ----
+      // Keyed on `<kbScopeId>|<dir>`; the value is what the operator last had on screen. The whole map is
+      // read and written as one small object — hundreds of meetings of two text boxes is still kilobytes,
+      // and one file means one atomic write instead of a directory of names to sanitise.
+      if (pathname === '/online-api/session-boxes' && req.method === 'GET') {
+        const scope = normalizeText(url.searchParams.get('scope')).slice(0, 200);
+        const dir = url.searchParams.get('dir') === 'ja2vi' ? 'ja2vi' : 'vi2ja';
+        if (!scope) {
+          sendJson(res, 400, { error: 'Missing scope.' });
+          return true;
+        }
+        const all = await readStore('boxes', {});
+        const hit = (all && typeof all === 'object' ? all[`${scope}|${dir}`] : null) || null;
+        sendJson(res, 200, {
+          terms: typeof hit?.terms === 'string' ? hit.terms : '',
+          brief: typeof hit?.brief === 'string' ? hit.brief : '',
+          savedAt: typeof hit?.savedAt === 'number' ? hit.savedAt : 0,
+        });
+        return true;
+      }
+      if (pathname === '/online-api/session-boxes' && req.method === 'PUT') {
+        const body = await readJsonBody(req, 256 * 1024);
+        const scope = normalizeText(body?.scope).slice(0, 200);
+        const dir = body?.dir === 'ja2vi' ? 'ja2vi' : 'vi2ja';
+        if (!scope) {
+          sendJson(res, 400, { error: 'Missing scope.' });
+          return true;
+        }
+        const terms = limitText(body?.terms, 2_000);
+        const brief = limitText(body?.brief, SESSION_BRIEF_MAX_CHARS);
+        try {
+          const all = await readStore('boxes', {});
+          const map = all && typeof all === 'object' && !Array.isArray(all) ? { ...all } : {};
+          map[`${scope}|${dir}`] = { terms, brief, savedAt: Date.now() };
+          // Oldest-first eviction, so a year of meetings cannot grow the file without a ceiling. The
+          // entries carry their own timestamp, which is the only ordering that survives a restart.
+          const keys = Object.keys(map);
+          if (keys.length > SESSION_BOXES_MAX_SCOPES) {
+            keys
+              .sort((a, b) => (map[a]?.savedAt ?? 0) - (map[b]?.savedAt ?? 0))
+              .slice(0, keys.length - SESSION_BOXES_MAX_SCOPES)
+              .forEach((k) => { delete map[k]; });
+          }
+          await writeStore('boxes', map);
+          sendJson(res, 200, { saved: true });
+        } catch (error) {
+          logLine('boxes.save_fail', { message: String(error?.message ?? error).slice(0, 300) });
+          sendJson(res, 500, { error: 'Failed to save the session boxes.' });
+        }
+        return true;
+      }
+
+      // ---- TASK 20: the mishearing corrections, kept GLOBALLY ----
+      // Not keyed on anything. What the recogniser mangles is a property of the words: the company name
+      // it gets wrong at the anniversary is the same name it gets wrong at next month's briefing. One
+      // list, learned once, is right for every meeting — and it is the one thing an operator most hates
+      // retyping, because each line was earned by hearing the machine fail.
+      if (pathname === '/online-api/mishearings' && req.method === 'GET') {
+        const stored = await readStore('mishearings', {});
+        sendJson(res, 200, {
+          text: typeof stored?.text === 'string' ? stored.text : '',
+          savedAt: typeof stored?.savedAt === 'number' ? stored.savedAt : 0,
+        });
+        return true;
+      }
+      if (pathname === '/online-api/mishearings' && req.method === 'PUT') {
+        const body = await readJsonBody(req, 64 * 1024);
+        const text = limitText(body?.text, SESSION_MISHEARINGS_MAX_CHARS);
+        try {
+          await writeStore('mishearings', { text, savedAt: Date.now() });
+          sendJson(res, 200, { saved: true });
+        } catch (error) {
+          logLine('mishearings.save_fail', { message: String(error?.message ?? error).slice(0, 300) });
+          sendJson(res, 500, { error: 'Failed to save the mishearing list.' });
+        }
+        return true;
+      }
+
+      // ---- TASK 19: the ONLINE glossary, on the TASK 18 store ----
+      // Behind the same gate as everything else under /online-api/* — the handler answered 401 above
+      // before any route matched, so there is no auth code here and there must never be any.
+      if (pathname === '/online-api/glossary' && req.method === 'GET') {
+        const entries = await readStore('glossary', []);
+        sendJson(res, 200, { entries: Array.isArray(entries) ? entries : [] });
+        return true;
+      }
+      if (pathname === '/online-api/glossary' && req.method === 'PUT') {
+        const body = await readJsonBody(req, 4 * 1024 * 1024);
+        const entries = normalizeGlossaryEntries(body?.entries);
+        try {
+          const bytes = await writeStore('glossary', entries);
+          logLine('glossary.saved', { count: entries.length, bytes });
+          sendJson(res, 200, { saved: true, count: entries.length });
+        } catch (error) {
+          logLine('glossary.save_fail', { message: String(error?.message ?? error).slice(0, 300) });
+          sendJson(res, 500, { error: 'Failed to save the glossary.' });
+        }
         return true;
       }
 
