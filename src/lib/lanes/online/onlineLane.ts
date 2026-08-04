@@ -10,7 +10,8 @@
 //   Phase 2 — M5 fast DRAFT tier (while speaking) · M6 accurate REFINE tier + session context
 
 import type { LaneController, LaneEvents, LaneLine, LaneStatus } from '../types';
-import { startPcm16Capture, type CaptureHandle, type CapturePacket } from './pcm16Capture';
+import { startPcm16Capture, type CaptureHandle, type CapturePacket, type MicSensitivity } from './pcm16Capture';
+import { resolveLoudThreshold, type LoudGateMode } from './loudGate';
 import { endsWithStrongSentenceBreak, findFirstCommaClauseBreak, findLastStrongSentenceBreak } from './transcriptSegmentation';
 import { ASR_FINAL_MIN_VOICED_MS, ASR_PARTIAL_MIN_VOICED_MS, hasClearSpeechEvidence, isNonSpeechAnnotation } from './asrSpeechEvidence';
 import { isStableDraftPrefix, joinLiveDraftSource, stripPromotedPrefix } from './liveDraftTranslation';
@@ -19,6 +20,7 @@ import { createSpeechPauseProfile } from './speechPauseProfile';
 import { createSpeechShapeMonitor } from './speechShape';
 import { checkTtsLanguage } from './ttsLanguageGuard';
 import { createScriptMatcher, type ScriptMatch, type ScriptMatcher, type ScriptMatcherEntry } from './scriptMatcher';
+import { applyMishearings, formatMishearingRules, splitMishearingLines, MISHEARING_MAX_CHARS, type MishearingRule } from './mishearing';
 import { nextScribeForceCommitDelay, planStableScribeCommit, type ScribeManualCommitReason } from './scribeManualCommit';
 import { estimateSourceSpeechPace } from './sourceSpeechPace';
 import { enqueueTtsSentence, getTtsQueueLength, resetTtsPlayback, setTtsPlaybackStartHandler, stopTtsPlayback, subscribeTtsSpeaking } from './ttsPlayback';
@@ -37,7 +39,14 @@ const RECONNECT_BASE_DELAY_MS = 600; // exponential: 600, 1200, 2400, 4800, 5000
 const RECONNECT_MAX_DELAY_MS = 5_000;
 const STALL_RECONNECT_MS = 45_000; // 45s with zero events -> upstream wedged -> reconnect
 const STALL_LOUD_RECONNECT_MS = 35_000; // sound present but 35s with zero events -> reconnect earlier
-const AUDIO_LOUD_LEVEL_THRESHOLD = 0.09; // onLevel >= this counts as "sound present" (≈ peak 12/127)
+// "Đủ to" — the level a VU frame must reach before it counts as "sound present". It used to be the hard
+// 0.09 that lived on this line; the number itself has not moved (`LOUD_BASE_THRESHOLD` in `loudGate.ts`
+// is still 0.09 and the close-mic step still resolves to exactly that), but it is now a knob rather than
+// a constant: it follows "Độ nhạy micro" and the operator can override it live from the console. Why:
+// the capture worklet's "there is a voice here" floor already followed the sensitivity while this one did
+// not, so with a far microphone the same speech was voice AND silence at once, and every final was thrown
+// away as `long-silence`.
+const RECENT_LEVEL_PEAK_WINDOW_MS = 3_000; // how far back the diagnostics VU peak looks
 const WATCHDOG_INTERVAL_MS = 5_000;
 
 // M3 — sentence segmentation
@@ -132,6 +141,13 @@ export interface OnlineLaneConfig {
   // so the host page supplies them here; all are read live at the relevant moment.
   getDeviceId?: () => string | undefined;
   getNearMicGate?: () => boolean;
+  // "Độ nhạy micro" — which voice floor the capture worklet treats as speech. Read ONCE at Bắt đầu
+  // (it is baked into the worklet's configure message), so the console disables it while running.
+  getMicSensitivity?: () => MicSensitivity;
+  // "Ngưỡng đủ to" — read LIVE on every VU frame, unlike the sensitivity above. It is a knob the operator
+  // turns WHILE listening ("phụ đề đứng im dù có người đang nói → hạ một nấc"), so making them stop and
+  // restart the session to try the next step would defeat the point. Nothing is baked into the worklet.
+  getLoudGate?: () => LoudGateMode;
   getSpeakEnabled?: () => boolean; // Phase 3: speak refined translations via TTS
   // M13 "Ngưng nghe" — read LIVE on every captured frame, because its whole purpose is to be flipped
   // mid-ceremony: the technician holds it down for a performance, a video or a musical number, and the
@@ -140,8 +156,9 @@ export interface OnlineLaneConfig {
   // TASK 6.2: one mic, two directions — read ONCE at start() and latched for the whole session.
   getTwoWay?: () => boolean;
   onDirectedLine?: (line: DirectedLaneLine) => void;
-  // TASK 11.13: hall-babble rejection — read at TICKET time (baked into the single-use asrWsUrl).
-  getRoomFilter?: () => boolean;
+  // TASK 11.13's hall-babble getter used to sit here. Removed: the vendor rejects that filter whenever
+  // timestamps are on, and the session then fails to start at all. Do not add it back without checking
+  // docs/ONLINE-LANE-UI-API.md → "Removed from the UI: the hall-babble switch".
   // M9: the approved event script (Chuẩn bị → Kịch bản). It rides here, NOT in start(): the treaty in
   // src/lib/lanes/types.ts is shared with the offline lane and only changes by explicit decision, while
   // this config object is the sanctioned home for lane-private options (same as the device/gate getters
@@ -149,6 +166,11 @@ export interface OnlineLaneConfig {
   // running ceremony would move the cursor mid-sentence. Rows in either direction are fine: the matcher
   // only considers rows whose source language is the one actually being spoken.
   getScript?: () => readonly ScriptMatcherEntry[] | undefined;
+  // TASK 5: the misheard-substitution layer, read LIVE on every event — deliberately NOT latched at
+  // start() the way the script above is. This is the one thing the operator has to be able to fix while
+  // the ceremony is running: hearing the machine say the company's name wrong and having to stop the
+  // session to correct it is not an option on the day.
+  getMishearing?: () => string;
 }
 
 export interface OnlineDiagnostics {
@@ -180,6 +202,12 @@ export interface OnlineDiagnostics {
   lastSaveDownloaded: boolean;
   lastSaveOk: boolean; // TASK 12.3 — false when the last save failed (even if nothing downloaded)
   sendBacklogBytes: number; // TASK 12.5 — the WS send buffer at the last audio frame
+  // "Đủ to". These two are a PAIR and only mean anything together: `loudThreshold` is the level a VU
+  // frame must reach to count as sound, `recentLevelPeak` is the loudest frame of the last 3 seconds.
+  // Peak below threshold while somebody is speaking = every final of this stretch will be thrown away as
+  // `long-silence`, and lowering the knob one step is the fix. Neither number is actionable alone.
+  loudThreshold: number;
+  recentLevelPeak: number;
   // M9 — script matching. `scriptLines` is 0 when no script was loaded, which is the one state the
   // operator must be able to see before going live: everything else looks identical to a script that
   // simply never matches.
@@ -256,6 +284,13 @@ export function createOnlineLane(events: LaneEvents, config: OnlineLaneConfig = 
   let watchdogTimer: ReturnType<typeof setInterval> | null = null;
   let lastEventAt = 0; // any JSON event from the WS (or a fresh (re)connect)
   let lastLoudAt = 0; // onLevel exceeded the loud threshold
+  // The threshold ACTUALLY in force at the last VU frame, and the loudest VU frame of the last few
+  // seconds. Both exist to be READ OUT in the console: without them, "lower it until it hears" is
+  // guesswork in the dark — the operator has to be able to see that their voice peaks at, say, 0.03 while
+  // the gate sits at 0.09. `loudThreshold` starts at the close-mic base so the value shown before the
+  // first frame is the honest one.
+  let loudThreshold = resolveLoudThreshold('auto', 'close');
+  let recentLevels: { at: number; v: number }[] = [];
 
   // M3 segmentation state
   let segmentBuffer = ''; // finalized fragments awaiting flush
@@ -355,6 +390,33 @@ export function createOnlineLane(events: LaneEvents, config: OnlineLaneConfig = 
   // `flushSeq` + `outstandingRefine` exist only to keep the loudspeaker in speaking order (see
   // SNAP_TTS_ORDER_WAIT_MS): a line goes into the map when it is sent to refine and comes out when
   // refine settles, so a snap can tell whether anything said EARLIER is still unspoken.
+  // TASK 5 — the misheard-substitution layer. Two sources feed it: the "Sửa nghe nhầm" box, read live
+  // through the getter, and any `~` line the operator typed into Thuật ngữ out of habit. Re-parsed only
+  // when the text actually changed, because this is called on every partial.
+  let mishearingSeen: string | null = null; // null, never a string — so the first call always parses
+  let mishearingRules: MishearingRule[] = [];
+  function activeMishearings(): MishearingRule[] {
+    const raw = `${config.getMishearing?.() ?? ''}\n${opts?.terms ?? ''}`.slice(0, MISHEARING_MAX_CHARS * 2);
+    if (raw !== mishearingSeen) {
+      mishearingSeen = raw;
+      mishearingRules = splitMishearingLines(raw).rules;
+    }
+    return mishearingRules;
+  }
+
+  // TASK 5 + TASK 6 — the single answer to "what is the recogniser primed with", rebuilt at every dial so
+  // a rule added mid-session reaches it at the next reconnect. Three sources, in this order:
+  //   1. Thuật ngữ with every `~` line removed;
+  //   2. the CORRECT side of every mishearing rule, and never the misheard side — priming the recogniser
+  //      with "suhai" would train it toward the exact surface we are trying to get rid of;
+  //   3. proper nouns lifted from the approved script (TASK 6 fills this; empty until then).
+  let scriptKeytermCorpus = '';
+  function buildAsrCorpus(): string {
+    const plain = splitMishearingLines(opts?.terms ?? '').terms;
+    const corrected = activeMishearings().map((rule) => rule.correct).join('\n');
+    return [plain, corrected, scriptKeytermCorpus].filter(Boolean).join('\n').slice(0, CORPUS_MAX_CHARS);
+  }
+
   let scriptMatcher: ScriptMatcher | null = null;
   let scriptRows = 0; // approved rows this session; the matcher's own `size` counts candidates, not lines
   let scriptSnaps = 0;
@@ -426,6 +488,17 @@ export function createOnlineLane(events: LaneEvents, config: OnlineLaneConfig = 
     let sum = 0;
     for (const e of voicedWindow) sum += e.voicedMs;
     return sum;
+  }
+
+  // The loudest VU frame of the last few seconds — the number the operator compares against the threshold
+  // when deciding whether to lower the knob. Pruned on read (same shape as pruneVoiced), so a session
+  // sitting idle in the diagnostics panel decays to 0 instead of showing a peak from ten minutes ago.
+  function pruneRecentLevels(): number {
+    const cutoff = Date.now() - RECENT_LEVEL_PEAK_WINDOW_MS;
+    while (recentLevels.length && recentLevels[0].at < cutoff) recentLevels.shift();
+    let peak = 0;
+    for (const e of recentLevels) if (e.v > peak) peak = e.v;
+    return peak;
   }
 
   function pruneDraftWindow(): number {
@@ -629,9 +702,17 @@ export function createOnlineLane(events: LaneEvents, config: OnlineLaneConfig = 
         },
         (v: number) => {
           events.onLevel(v);
-          if (v >= AUDIO_LOUD_LEVEL_THRESHOLD) lastLoudAt = Date.now();
+          const now = Date.now();
+          // Read the knob on EVERY frame: the operator turns it mid-session while watching the two
+          // numbers this same callback feeds into the diagnostics (threshold in force vs VU peak).
+          loudThreshold = resolveLoudThreshold(
+            config.getLoudGate?.() ?? 'auto',
+            config.getMicSensitivity?.() ?? 'auto',
+          );
+          recentLevels.push({ at: now, v });
+          if (v >= loudThreshold) lastLoudAt = now;
         },
-        { nearMicGate: config.getNearMicGate?.() ?? true },
+        { nearMicGate: config.getNearMicGate?.() ?? true, micSensitivity: config.getMicSensitivity?.() ?? 'auto' },
       );
       // stop()/restart may have fired, or a duplicate capture may have won, while the mic-permission
       // prompt was open — never leave a hot mic, a stale-session mic, or a second mic.
@@ -916,8 +997,11 @@ export function createOnlineLane(events: LaneEvents, config: OnlineLaneConfig = 
   // ---- events ----
 
   function handlePartial(msg: Record<string, unknown>): void {
-    const text = typeof msg.text === 'string' ? msg.text : '';
-    const stash = typeof msg.stash === 'string' ? msg.stash : '';
+    // TASK 5: correct on arrival. The operator's Nguồn column, the draft translation and the audience
+    // wall all read from here, so the fix has to land before any of them sees the words.
+    const rules = activeMishearings();
+    const text = applyMishearings(typeof msg.text === 'string' ? msg.text : '', rules).text;
+    const stash = applyMishearings(typeof msg.stash === 'string' ? msg.stash : '', rules).text;
     // M4: only display partials backed by clear speech evidence / recent sound.
     if (!hasClearSpeechEvidence(pruneVoiced(), ASR_PARTIAL_MIN_VOICED_MS)) return;
     if (Date.now() - lastLoudAt >= LONG_SILENCE_MS) return;
@@ -938,7 +1022,10 @@ export function createOnlineLane(events: LaneEvents, config: OnlineLaneConfig = 
   function handleFinal(msg: Record<string, unknown>): void {
     // M11: the turn upstream was holding is closed, whatever closed it — clock a fresh window.
     resetScribeCommitState(true);
-    const transcript = (typeof msg.transcript === 'string' ? msg.transcript : '').trim();
+    // TASK 5: correct BEFORE every guard below. The repeat guard, the script matcher, the refine call,
+    // the audience wall and the saved transcript must all see the same corrected string — otherwise the
+    // name is fixed on screen and still wrong in the recording.
+    const transcript = applyMishearings((typeof msg.transcript === 'string' ? msg.transcript : '').trim(), activeMishearings()).text;
     if (!transcript) return;
     // M4 ghost guards (drop finals, count them).
     if (!hasClearSpeechEvidence(pruneVoiced(), ASR_FINAL_MIN_VOICED_MS)) {
@@ -1241,7 +1328,13 @@ export function createOnlineLane(events: LaneEvents, config: OnlineLaneConfig = 
       refineStage: 'refine',
       recentFinals: priorFinals,
       sessionBrief: o.brief,
-      sessionTerms: o.terms,
+      // TASK 5: `~` lines never travel as terms — a misheard surface sitting in the term list reads to
+      // the model as vocabulary the speaker is expected to use, which is the opposite of what it is. They
+      // travel as their own field, where they become a correction instruction. `head` has already been
+      // corrected by the plain replace above; this is the model's backstop for the inflected or partial
+      // surfaces a string replace cannot catch.
+      sessionTerms: splitMishearingLines(o.terms ?? '').terms,
+      sessionMishearings: formatMishearingRules(activeMishearings()),
       sourcePace,
       sourceEmotion: latestEmotion,
       sourceIsFragment: cont.fragment,
@@ -1360,8 +1453,7 @@ export function createOnlineLane(events: LaneEvents, config: OnlineLaneConfig = 
       session = await fetchAsrSession({
         targetLanguage: opts!.targetLanguage,
         language: twoWay ? 'auto' : opts!.sourceLanguage,
-        corpus: (opts!.terms ?? '').slice(0, CORPUS_MAX_CHARS),
-        roomFilter: config.getRoomFilter?.(),
+        corpus: buildAsrCorpus(),
       });
     } catch (err) {
       // A token that arrives after Dừng or a restart is dropped, not surfaced.
@@ -1384,7 +1476,7 @@ export function createOnlineLane(events: LaneEvents, config: OnlineLaneConfig = 
     // TASK 12.6: on the proxied (qwen3) path the session terms travel as the FIRST WS message, not in the
     // URL query string (query strings land in access logs and hit proxy length limits). On the direct
     // path terms are keyterms in the vendor's own handshake — not ours to move. `codec === null` ⇒ proxy.
-    const proxyTerms = codec ? null : (opts?.terms ?? '').slice(0, CORPUS_MAX_CHARS);
+    const proxyTerms = codec ? null : buildAsrCorpus();
 
     const socket = new WebSocket(session.url);
     socket.binaryType = 'arraybuffer';
@@ -1583,6 +1675,7 @@ export function createOnlineLane(events: LaneEvents, config: OnlineLaneConfig = 
     segmentBuffer = '';
     segmentLid = null;
     voicedWindow.length = 0;
+    recentLevels = []; // a new session never shows the previous room's VU peak
     previousFinalTranscript = '';
     droppedGhosts = 0;
     recentFinals.length = 0;
@@ -1764,6 +1857,8 @@ export function createOnlineLane(events: LaneEvents, config: OnlineLaneConfig = 
       lastSaveDownloaded,
       lastSaveOk,
       sendBacklogBytes,
+      loudThreshold,
+      recentLevelPeak: pruneRecentLevels(),
       scriptLines: scriptRows,
       scriptSnaps,
       scriptSuggests,

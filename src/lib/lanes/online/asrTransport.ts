@@ -58,18 +58,18 @@ export async function fetchAsrSession(opts: {
   targetLanguage: 'vi' | 'ja';
   language: string;
   corpus: string;
-  roomFilter?: boolean;
 }): Promise<AsrSession> {
   const res = await fetch(`${ONLINE_BASE}/realtime-preview-token`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    // `roomFilter: undefined` drops out of JSON.stringify by itself — that is the "absent"
-    // case the server falls back to its env for.
+    // The hall-babble filter used to ride here as `roomFilter`. It is gone from the client: the vendor
+    // refuses that filter whenever timestamps are on, and the timestamped final is what carries the
+    // language label. Sending NOTHING is the safe default — the server reads an absent field as "fall
+    // back to the env", and that env is off unless somebody deliberately turns it on.
     body: JSON.stringify({
       targetLanguage: opts.targetLanguage,
       language: opts.language,
       corpus: opts.corpus,
-      roomFilter: opts.roomFilter,
     }),
   });
   if (!res.ok) throw new Error(`token request failed (HTTP ${res.status})`);

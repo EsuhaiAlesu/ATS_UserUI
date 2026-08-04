@@ -11,15 +11,15 @@
 // the voice catalog (TASK 5), "Nạp từ Chuẩn bị" (TASK 4), the subtitle mechanism (TASK 8), two-way
 // (TASK 6) and the hall-babble switch (TASK 11.13) arrive in later phases — room is left for them.
 
-import React, { useCallback, useEffect, useRef, useState } from 'react'
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { useOnlineLane, fetchOnlineConfigStatus, summarizePrepDocs, ONLINE_SPEED_RANGE, SUBTITLE_FONT, type LaneStatus, type OnlineVoice, type AudienceLine, type WallOutput, type WallDock, type ScriptMatcherEntry } from '../index'
+import { useOnlineLane, fetchOnlineConfigStatus, summarizePrepDocs, ONLINE_SPEED_RANGE, SUBTITLE_FONT, type LaneStatus, type OnlineVoice, type AudienceLine, type WallOutput, type WallDock, MIC_SENSITIVITY_OPTIONS, micSensitivityLabel, LOUD_GATE_OPTIONS, resolveLoudThreshold, type MicSensitivity, type LoudGateMode, splitMishearingLines } from '../index'
 import { useConferenceMode } from '../../../ConferenceModeContext'
 import { useActiveEvent } from '../../../ActiveEventContext'
 import { collectPrepPack, collectPrepDocuments, collectPrepHeader, type PrepPack } from '../../../prepData'
 import { savePrepSummary, clearPrepSummary, getPrepSummary, type PrepSummary } from '../../../prepSummary'
 import { kbScopeId } from '../../../kbscope'
-import { getScriptLocal } from '../../../script'
+import { loadScriptForSession, approveTranslatedRows, scriptLoadMessage, type ScriptLoad } from '../../../scriptLoad'
 import SubtitleParagraphs from '../../../../components/SubtitleParagraphs'
 
 type CfgStatus = Awaited<ReturnType<typeof fetchOnlineConfigStatus>>
@@ -33,22 +33,12 @@ const TEXTAREA_CLS =
 
 // M9 — the approved script the live matcher is allowed to speak from. Only rows a human APPROVED and
 // that carry BOTH sides qualify: a draft row is somebody's unchecked guess, and a row with an empty
-// translation would put a blank line on the audience wall. Read-only use of the Chuẩn bị store, the
-// same arrangement as collectPrepPack above.
-function scriptCountLine(c: { approved: number; total: number }): string {
-  if (c.approved > 0) return `Kịch bản: ${c.approved}/${c.total} dòng đã duyệt — câu nào trùng kịch bản sẽ đọc đúng câu đã duyệt.`
-  if (c.total > 0) return `Kịch bản: có ${c.total} dòng nhưng chưa dòng nào được duyệt — máy vẫn tự dịch toàn bộ.`
-  return 'Kịch bản: chưa có dòng nào — máy tự dịch toàn bộ.'
-}
-
-function loadScriptForLane(eventId: string): { rows: ScriptMatcherEntry[]; total: number } {
-  try {
-    const all = getScriptLocal(eventId)
-    return { rows: all.filter((r) => r.status === 'approved' && r.src.trim() !== '' && r.dst.trim() !== ''), total: all.length }
-  } catch {
-    return { rows: [], total: 0 } // corrupt/absent local script → translate everything, never crash the console
-  }
-}
+// translation would put a blank line on the audience wall.
+//
+// Both the key derivation and the row filter now live in `src/lib/scriptLoad.ts`, shared with the Kịch
+// bản page. The version that used to sit here derived the key from `event?.id ?? ''` — the pointer AFTER
+// resolution against the schedule — so a pointer that no longer resolves made the console read the
+// `_default` store and find 0 rows while Chuẩn bị still showed 40 approved ones, without a word on screen.
 
 // Map LaneStatus onto the OFFLINE console's annunciator vocabulary + dot colours/animations (§1.1).
 const ANN: Record<LaneStatus, { label: string; text: string; dot: string; anim: string }> = {
@@ -121,7 +111,9 @@ const OnlineConsole: React.FC = () => {
   const nav = useNavigate()
   const lane = useOnlineLane()
   const { setBusy, registerStop } = useConferenceMode()
-  const { event } = useActiveEvent()
+  // `eventId` = the RAW pointer, the key the Kịch bản page writes under; `event` = the resolved meeting,
+  // used ONLY to show its title and to detect a dangling pointer. Never derive the script key from `event`.
+  const { eventId, event } = useActiveEvent()
 
   const [panel, setPanel] = useState<Panel>(null)
   const [settingsOpen, setSettingsOpen] = useState(false)
@@ -130,7 +122,9 @@ const OnlineConsole: React.FC = () => {
   const [isFs, setIsFs] = useState(false)
   const [elapsed, setElapsed] = useState(0)
   const [prep, setPrep] = useState<PrepPack | null>(null)
-  const [scriptCount, setScriptCount] = useState({ approved: 0, total: 0 })
+  // Read on the FIRST render, not in an effect: the technician can press Bắt đầu in the first second, and
+  // the script status has to be true from that second rather than after some promise settles.
+  const [scriptLoad, setScriptLoad] = useState<ScriptLoad>(() => loadScriptForSession(eventId))
   const prepLoadedRef = useRef('')
 
   // Report running state + register the stop function to the neutral context, so the head-bar DỪNG can
@@ -182,10 +176,20 @@ const OnlineConsole: React.FC = () => {
   // hiding it from the dependency array — the effect's own `prepLoadedRef` guard is what keeps it to one
   // run per (event × direction), not a short dependency list.
   const applyScript = useCallback(() => {
-    const { rows, total } = loadScriptForLane(event?.id ?? '')
-    lane.setScript(rows)
-    setScriptCount({ approved: rows.length, total })
-  }, [event, lane])
+    const load = loadScriptForSession(eventId)
+    lane.setScript(load.rows)
+    setScriptLoad(load)
+  }, [eventId, lane])
+
+  // The draft trap: 40 rows imported from a file all arrive as draft (`scriptImport.ts` never sets
+  // `status`), and a ceremony running on free translation for want of one button press is too expensive.
+  // This does exactly what the Kịch bản page's "Duyệt hết đã dịch" does, in place, so nobody has to leave
+  // the running screen minutes before the doors open.
+  const approveAllDrafts = useCallback(() => {
+    if (!window.confirm(`Duyệt ${scriptLoad.draft} dòng kịch bản đã có bản dịch? Sau khi duyệt, câu nào trùng kịch bản sẽ được đọc đúng câu đã duyệt.`)) return
+    approveTranslatedRows(eventId)
+    applyScript()
+  }, [scriptLoad.draft, eventId, applyScript])
 
   // ── TASK 4: fill the Thuật ngữ / Bối cảnh boxes from the Chuẩn bị stores ──
   const loadPrep = async (overwrite: boolean) => {
@@ -247,19 +251,23 @@ const OnlineConsole: React.FC = () => {
   // Auto-load once per (event × direction), and only into boxes that are still empty — auto-fill must
   // never overwrite something the technician typed.
   useEffect(() => {
-    const key = `${event?.id ?? ''}|${lane.direction}`
+    const key = `${eventId}|${lane.direction}`
     if (prepLoadedRef.current === key) return
     prepLoadedRef.current = key
+    // The script loads FIRST and synchronously. It used to sit inside the `.then()` of collectPrepPack,
+    // which awaits the internal glossary over the network — unreachable on the deployed build — so for
+    // that whole timeout the console believed the meeting had no script, and pressing Bắt đầu inside that
+    // window latched an empty matcher for the entire session. Reading the script is a localStorage read.
+    applyScript()
     let cancelled = false
     void collectPrepPack(event, lane.direction).then((pack) => {
       if (cancelled) return
       setPrep(pack)
       if (!lane.terms.trim()) lane.setTerms(pack.terms)
       if (!lane.brief.trim()) lane.setBrief(pack.brief)
-      applyScript()
     })
     return () => { cancelled = true }
-  }, [event, lane.direction, lane, applyScript])
+  }, [eventId, event, lane.direction, lane, applyScript])
 
   const voiceOptions = (list: OnlineVoice[]) => {
     const personal = list.filter((v) => v.category === 'personal')
@@ -271,6 +279,10 @@ const OnlineConsole: React.FC = () => {
       </>
     )
   }
+
+  // TASK 5: parsed once per keystroke, so the box can name the lines that are not usable yet instead of
+  // dropping them in silence — silence is exactly how the 01/08 rehearsal lost its script.
+  const mishearingInfo = useMemo(() => splitMishearingLines(lane.mishearing), [lane.mishearing])
 
   const prepCounts = (
     <div className="text-[11px] text-on-surface-variant leading-relaxed">
@@ -288,7 +300,7 @@ const OnlineConsole: React.FC = () => {
       )}
       {/* M9 — an empty or unapproved script behaves exactly like a script that never matches, so it must
           be said out loud here; nothing else on this screen would tell the operator before going live. */}
-      <div>{scriptCountLine(scriptCount)}</div>
+      <div>{scriptLoadMessage(scriptLoad)}</div>
     </div>
   )
 
@@ -339,6 +351,12 @@ const OnlineConsole: React.FC = () => {
   const viColLines: AudienceLine[] = lane.directedLines.map((l) => ({ ...l, targetText: l.dir === 'vi2ja' ? l.sourceText : l.targetText, dir: 'ja2vi' }))
   const jaColLines: AudienceLine[] = lane.directedLines.map((l) => ({ ...l, targetText: l.dir === 'vi2ja' ? l.targetText : l.sourceText, dir: 'vi2ja' }))
 
+  // Script: green only when the matcher actually has rows to speak; red for all three ways of having 0.
+  // `danglingEvent` = a pointer that survives while its meeting has vanished from the schedule — the exact
+  // signature of the 2026-08-01 failure.
+  const scriptReady = scriptLoad.reason === 'ok'
+  const danglingEvent = eventId !== '' && !event
+
   const diag = lane.diagnostics
   const lat = diag?.latency
 
@@ -355,6 +373,27 @@ const OnlineConsole: React.FC = () => {
               title={keysReady ? 'Bắt đầu phiên dịch' : 'Chưa nhập khoá dịch vụ (API Key) — mở Cài đặt'}
               onClick={() => { void handleStart() }} />
           )}
+          {/* SCRIPT STATUS — right next to Bắt đầu, before it is pressed. On 2026-08-01 the ceremony ran
+              on free translation while every prep screen said "kịch bản đã có": the running screen never
+              said how many rows it had loaded, or for which meeting. This says both, and when the answer
+              is zero it says WHY instead of staying silent. */}
+          <div className={`rounded-xl border px-3 py-2.5 space-y-1.5 ${scriptReady ? 'border-outline-variant bg-surface-container' : 'border-error/60 bg-error/[0.08]'}`}>
+            <div className="flex items-center gap-1.5">
+              <span className={`material-symbols-outlined text-[16px] shrink-0 ${scriptReady ? 'text-secondary' : 'text-error'}`} aria-hidden="true">{scriptReady ? 'subtitles' : 'warning'}</span>
+              <span className="text-[12px] font-medium text-on-surface truncate" title={event?.title?.trim() || undefined}>{event?.title?.trim() || 'Chưa chọn buổi nào'}</span>
+            </div>
+            <div className={`text-[11px] leading-snug ${scriptReady ? 'text-on-surface-variant' : 'text-error'}`}>{scriptLoadMessage(scriptLoad)}</div>
+            {danglingEvent && (
+              <div className="text-[11px] leading-snug text-error">Buổi đang chọn không còn trong Đặt lịch — mở Chuẩn bị chọn lại buổi rồi quay lại đây.</div>
+            )}
+            {scriptLoad.draft > 0 && (
+              <button type="button" onClick={approveAllDrafts} disabled={lane.running}
+                className="w-full flex items-center justify-center gap-1.5 px-2.5 py-1.5 rounded-full font-label-caps text-label-caps border border-secondary/50 text-secondary hover:bg-secondary/10 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                title={lane.running ? 'Đang chạy — dừng phiên trước khi duyệt kịch bản' : 'Duyệt mọi dòng đã có bản dịch'}>
+                <span className="material-symbols-outlined text-[16px]" aria-hidden="true">done_all</span>Duyệt {scriptLoad.draft} dòng
+              </button>
+            )}
+          </div>
           {/* M13 · NGƯNG NGHE — for the parts of a gala nobody is speaking at: a performance, a musical
               number, a video. The microphone keeps its socket but puts silence on the wire, so the
               recogniser cannot invent lyrics out of the music. Only while running, right under Dừng, so
@@ -587,6 +626,27 @@ const OnlineConsole: React.FC = () => {
                   className={TEXTAREA_CLS} placeholder="Tên riêng, thuật ngữ — mỗi mục một dòng…" />
                 <div className="text-right text-[11px] text-on-surface-variant tabular-nums">{lane.terms.length}/2000</div>
                 {prepCounts}
+                {/* TASK 5. This textarea has NO `disabled={lane.running}`, and that is the whole point of
+                    it: every other box on this drawer is locked once the ceremony starts, but a name
+                    coming out wrong has to be fixable without stopping. */}
+                <div className="rounded-xl border border-outline-variant p-2.5 space-y-1.5">
+                  <div className="flex items-center justify-between gap-2">
+                    <h4 className="font-label-caps text-label-caps text-on-surface">Sửa nghe nhầm</h4>
+                    <span className="text-[11px] text-on-surface-variant tabular-nums">{mishearingInfo.rules.length} luật</span>
+                  </div>
+                  <p className="text-[11px] text-on-surface-variant leading-relaxed">
+                    Mỗi dòng một luật: <span className="font-mono">nghe nhầm 1, nghe nhầm 2 ~ dạng đúng</span>. Máy thay
+                    ngay khi vừa nghe được, <strong>trước khi dịch</strong>. Ô này sửa được cả lúc đang chạy — câu tiếp
+                    theo đã đúng.
+                  </p>
+                  <textarea value={lane.mishearing} onChange={(e) => lane.setMishearing(e.target.value)} rows={4} maxLength={2000}
+                    className={TEXTAREA_CLS} placeholder="suhai, S-Hi Group, SI ~ Esuhai" />
+                  {mishearingInfo.invalid.length > 0 && (
+                    <p className="text-[11px] text-error leading-relaxed">
+                      {mishearingInfo.invalid.length} dòng chưa dùng được — thiếu một bên của dấu ~: {mishearingInfo.invalid.slice(0, 3).join(' · ')}
+                    </p>
+                  )}
+                </div>
               </div>
             )}
             {panel === 'brief' && (
@@ -755,17 +815,38 @@ const OnlineConsole: React.FC = () => {
                   <input type="checkbox" checked={lane.nearMicGate} onChange={(e) => lane.setNearMicGate(e.target.checked)} disabled={lane.running} className="accent-secondary" />
                   Noise gate (near-mic)
                 </label>
-                <label className="flex items-start gap-2 font-label-caps text-label-caps text-on-surface-variant cursor-pointer">
-                  <input type="checkbox" checked={lane.roomFilter} onChange={(e) => lane.setRoomFilter(e.target.checked)} disabled={lane.running} className="accent-secondary mt-0.5" />
-                  <span>Bỏ qua tiếng xì xào hội trường<br />
-                    <span className="font-normal normal-case text-[11px] leading-relaxed">
-                      {lane.roomFilter
-                        ? 'Máy nghe sẽ bỏ qua tiếng trò chuyện và tiếng ồn xung quanh, chỉ bám giọng chính. Bật khi trên màn hiện ra câu mà không ai phát biểu. Đây KHÔNG phải bộ lọc tiếng ồn: nó không tẩy nhạc ra khỏi giọng nói, chỉ bớt việc máy tưởng nhầm tiếng ồn là lời nói. '
-                        : 'Máy nghe bắt mọi thứ lọt vào micro. Mic đi qua bàn trộn thì thu cả phòng — nếu thấy phụ đề hiện câu chẳng ai nói, bật ô này rồi thử lại. '}
-                      Chốt khi Bắt đầu — đổi lúc đang chạy thì áp dụng từ lần bắt đầu sau.
-                    </span>
-                  </span>
-                </label>
+                <div>
+                  <label htmlFor="online-console-micsense" className="flex items-center gap-2 font-label-caps text-label-caps text-on-surface-variant"
+                    title="Ngưỡng để máy coi là 'có tiếng nói'. Mic để xa (Jabra, speakerphone) → Tự động hoặc Mic xa. Chốt khi Bắt đầu — đổi lúc đang chạy thì áp dụng từ lần bắt đầu sau.">
+                    Độ nhạy micro
+                    <select id="online-console-micsense" value={lane.micSensitivity} onChange={(e) => lane.setMicSensitivity(e.target.value as MicSensitivity)} disabled={lane.running} className={SELECT_CLS}>
+                      {MIC_SENSITIVITY_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+                    </select>
+                  </label>
+                  {/* Same key as the Settings page: here it is a quick change for this meeting, there it is
+                      the machine's default. */}
+                  <p className="text-[11px] leading-relaxed text-on-surface-variant/80 mt-1">
+                    Đang dùng: <strong>{micSensitivityLabel(lane.micSensitivity)}</strong> · mặc định của máy này đặt ở{' '}
+                    <button type="button" onClick={() => nav('/settings#ms')} className="underline hover:text-primary">Cài đặt → Độ nhạy micro</button>.
+                  </p>
+                </div>
+                {/* "Ngưỡng đủ to". NOT disabled while running, on purpose: this is the knob you turn WHILE
+                    listening — lower it one step and read the two numbers in Chẩn đoán immediately.
+                    Forcing a Dừng/Bắt đầu to try the next step would destroy the point of having it. */}
+                <div>
+                  <label htmlFor="online-console-loudgate" className="flex items-center gap-2 font-label-caps text-label-caps text-on-surface-variant"
+                    title="Âm lượng tối thiểu để máy tin là 'vừa có tiếng'. Quá 4 giây không lần nào chạm ngưỡng thì mọi câu nghe được đều bị vứt. Mic để xa thì hạ xuống. Đổi được ngay giữa buổi.">
+                    Ngưỡng đủ to
+                    <select id="online-console-loudgate" value={lane.loudGate} onChange={(e) => lane.setLoudGate(e.target.value as LoudGateMode)} className={SELECT_CLS}>
+                      {LOUD_GATE_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+                    </select>
+                  </label>
+                  <p className="text-[11px] leading-relaxed text-on-surface-variant/80 mt-1">
+                    Đang áp: <strong>{resolveLoudThreshold(lane.loudGate, lane.micSensitivity).toFixed(4)}</strong>
+                    {' '}· đổi được ngay giữa buổi, không cần Bắt đầu lại. Nếu có người đang nói mà phụ đề
+                    đứng im, so <em>ngưỡng</em> với <em>VU đỉnh</em> ở khối Chẩn đoán rồi hạ một nấc.
+                  </p>
+                </div>
               </section>
 
               <div className="h-px bg-outline-variant"></div>
@@ -823,6 +904,15 @@ const OnlineConsole: React.FC = () => {
                   <div className="font-label-caps text-label-caps text-on-surface-variant space-y-1" style={{ fontFamily: 'ui-monospace, monospace' }}>
                     <div>reconnects {diag.reconnectAttempts} · silent {diag.silentReconnects} · sinceEvent {diag.secondsSinceLastEvent.toFixed(1)}s</div>
                     <div>voiced {diag.voicedMsRecent}ms · ghosts {diag.droppedGhosts}</div>
+                    {/* These two MUST be read together. `ngưỡng đủ to` is the level a frame has to reach
+                        before the machine believes sound just happened; `VU đỉnh 3s` is the loudest frame
+                        of the last three seconds. Peak BELOW threshold while somebody is speaking = this
+                        whole stretch will be discarded as long-silence → lower "Ngưỡng đủ to" one step.
+                        The line turns red at exactly that moment, so nobody has to compare by eye. */}
+                    <div className={diag.recentLevelPeak > 0 && diag.recentLevelPeak < diag.loudThreshold ? 'text-error' : undefined}>
+                      ngưỡng đủ to {diag.loudThreshold.toFixed(4)} · VU đỉnh 3s {diag.recentLevelPeak.toFixed(4)}
+                      {diag.recentLevelPeak > 0 && diag.recentLevelPeak < diag.loudThreshold ? ' · ĐỈNH DƯỚI NGƯỠNG — hạ một nấc' : ''}
+                    </div>
                     {/* M13 — hai chốt chống "có tiếng to nhưng không phải giọng người". `ngưng nghe` là
                         do kỹ thuật viên tự bấm (tổng thời gian đã ngưng trong buổi); `bỏ tiếng không
                         phải giọng` là máy tự bỏ, kèm lý do của chính nó. Cả hai bằng 0 suốt buổi nghĩa

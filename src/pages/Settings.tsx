@@ -6,7 +6,7 @@ import {
     loadSettings, saveSettings, exportLocalData, clearLocalData,
 } from '../lib/settings';
 import { toast } from '../lib/toast';
-import { OnlineKeysSettings } from '../lib/lanes/online';
+import { OnlineKeysSettings, OnlineMicSettings } from '../lib/lanes/online';
 
 // Central Settings page (Giai đoạn 1) — consolidates the scattered per-feature config into one
 // professional place: Kết nối · Sự kiện · Hiển thị · Giọng đọc · Tài khoản · Dữ liệu · Giới thiệu.
@@ -121,6 +121,11 @@ const Settings: React.FC = () => {
                     {/* CHẾ ĐỘ ONLINE — KHOÁ DỊCH VỤ (API Key) (FIX-07 / PROMPT-09 9.1) */}
                     <Section id="ok" icon="vpn_key" title="Chế độ ONLINE — Khoá dịch vụ (API Key)" desc="Khoá dịch vụ (API Key) cho luồng ONLINE (nhận dạng giọng · dịch · đọc giọng). Lưu trên máy chủ, chỉ ghi.">
                         <OnlineKeysSettings />
+                    </Section>
+
+                    {/* CHẾ ĐỘ ONLINE — ĐỘ NHẠY MICRO (theo máy / theo hội trường) */}
+                    <Section id="ms" icon="mic" title="Chế độ ONLINE — Độ nhạy micro" desc="Máy này đang nghe bằng loại micro nào. Đặt một lần theo phòng, không phải đặt lại mỗi buổi.">
+                        <OnlineMicSettings />
                     </Section>
 
                     {/* HIỂN THỊ */}

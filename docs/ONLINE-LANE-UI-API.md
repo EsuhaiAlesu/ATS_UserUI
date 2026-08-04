@@ -95,3 +95,40 @@ BEFORE the offline lane can claim it (and vice-versa). Default mode is OFFLINE (
 `config-status`) and posts only the filled fields to `config-keys`. The client uses opaque **slugs**
 (`asr_endpoint`, `asr_key`, `refine_key`, `tts_key`, `tts_voice_ja`, `tts_voice_vi`); the server maps
 each slug to its env var. No vendor env name, model id, host, or value ever reaches the client.
+
+`OnlineMicSettings` renders the **Độ nhạy micro** section (four steps: auto / close / medium / far),
+persisted per machine under one key through `micSensitivity.ts`. That module is the ONLY reader and
+writer of the key, so the Settings page and the console hook cannot drift apart, and the Settings page
+never has to call `useOnlineLane` (which would start diagnostics timers, the audience publisher and a
+voice-catalog fetch on a page that only edits config).
+
+## Removed from the UI: the hall-babble switch (`roomFilter`)
+
+The console checkbox "hall babble" and its facade state (`roomFilter` / `setRoomFilter`, the localStorage
+key `proyaku_online_room_filter`, the lane's `getRoomFilter`, and the field in the token request body)
+were removed on 02/08/2026. **Do not add them back on the strength of the feature existing** — it does
+exist; what does not exist is using it together with timestamps.
+
+Measured against the live vendor that day, three handshakes, no audio sent, parameters built by
+`buildScribeWsParams` itself:
+
+- `filter_background_audio=true` **+** `include_timestamps=true` (exactly what the app sent with the box
+  ticked) → `{"message_type":"invalid_request","error":"filter_background_audio cannot be combined with
+  include_timestamps. This will be supported in a future update."}`, then close code **1008**, before any
+  `session_started`. The session never begins; not one utterance is transcribed.
+- `filter_background_audio=true` alone → `session_started` normally, config echo
+  `"filter_background_audio":true,"include_timestamps":false`.
+- `include_timestamps=true` alone (the box unticked) → `session_started` normally.
+
+Timestamps are not negotiable: the SECOND, timestamped final is the message that carries `language_code`,
+and the whole one-mic-two-directions mechanism stands on it.
+
+It also failed **invisibly**: `invalid_request` is not in `asrTransport.ts`'s `FATAL_TOKENS`, so the lane
+did not tear down — it burnt all five `RECONNECT_MAX_ATTEMPTS`, minting a fresh token each round, and only
+then reported a generic "connection lost".
+
+**The way back in, when the vendor lifts the restriction:** the server is untouched. `buildScribeWsParams`
+still implements the three-state rule (`true` → set it; `false` → send nothing and beat the env; absent →
+`SCRIBE_FILTER_BACKGROUND`) and the token endpoint still accepts a boolean `roomFilter` in the request
+body. The client simply always takes the "absent" branch now, so switching it back on is one environment
+variable — no code change, no client redeploy.

@@ -10,6 +10,27 @@
 // The resampler KEEPS STATE across render quanta (`lastSample`, `resampleAccumulator` are
 // processor fields, never locals in process()) — otherwise 44.1kHz devices click each quantum.
 
+export type MicSensitivity = 'auto' | 'close' | 'medium' | 'far';
+
+// Voice-floor resolver shared by the worklet AND the unit tests. Self-contained ON PURPOSE — its
+// compiled source is injected into the AudioWorklet via toString(), where module scope does not exist,
+// so it must capture nothing (every constant lives inside the function body).
+export function resolveVoiceFloor(sensitivity: string, noiseRms: number): { rms: number; peak: number } {
+  const CLOSE_RMS = 0.012;          // the original hard-coded tuning — a mic right at the mouth
+  const PEAK_RATIO = 0.035 / 0.012; // keep that tuning's peak/rms proportion at every sensitivity
+  let rms: number;
+  if (sensitivity === 'far') rms = CLOSE_RMS * 0.25;
+  else if (sensitivity === 'medium') rms = CLOSE_RMS * 0.5;
+  else if (sensitivity === 'auto') {
+    // Adapt to THIS mic: sit a fixed ratio above the learned noise floor — never above the close-mic
+    // tuning (a hot mic keeps today's behaviour), never down into digital silence (a suppressed floor
+    // of ~0 must not make breath count as speech).
+    const noise = Number.isFinite(noiseRms) && noiseRms > 0 ? noiseRms : 0.002;
+    rms = Math.min(CLOSE_RMS, Math.max(0.003, noise * 3.5));
+  } else rms = CLOSE_RMS; // unknown value → the conservative original
+  return { rms, peak: rms * PEAK_RATIO };
+}
+
 const WORKLET_SRC = `
 class Pcm16Tap extends AudioWorkletProcessor {
   constructor() {
@@ -18,6 +39,8 @@ class Pcm16Tap extends AudioWorkletProcessor {
     this.outputSampleRate = 16000;
     this.ratioInc = this.outputSampleRate / this.inputSampleRate; // output samples per input sample
     this.nearMicGateEnabled = true;
+    this.micSensitivity = 'auto';
+    this.resolveVoiceFloor = (${resolveVoiceFloor.toString()});
 
     // --- resampler state (kept ACROSS render quanta) ---
     this.lastSample = 0;
@@ -44,6 +67,7 @@ class Pcm16Tap extends AudioWorkletProcessor {
         if (typeof d.inputSampleRate === 'number' && d.inputSampleRate > 0) this.inputSampleRate = d.inputSampleRate;
         if (typeof d.outputSampleRate === 'number' && d.outputSampleRate > 0) this.outputSampleRate = d.outputSampleRate;
         if (typeof d.nearMicGateEnabled === 'boolean') this.nearMicGateEnabled = d.nearMicGateEnabled;
+        if (typeof d.micSensitivity === 'string') this.micSensitivity = d.micSensitivity;
         this.ratioInc = this.outputSampleRate / this.inputSampleRate;
         this.hangoverSamplesMax = Math.round(0.360 * this.inputSampleRate);
         this.levelWindowMax = Math.round(this.inputSampleRate / 10);
@@ -90,7 +114,8 @@ class Pcm16Tap extends AudioWorkletProcessor {
     // Splitting measuring from gating: turning the near-mic gate off must NOT silently disable the M4
     // hallucination guard, which counts voiced ms (11.3). The recogniser runs its own VAD — our gate must
     // not fight it, so cutting is opt-in and measuring is unconditional.
-    const isSilent = rms < 0.012 && peak < 0.035 && rms < this.noiseRms * 3.2;
+    const floor = this.resolveVoiceFloor(this.micSensitivity, this.noiseRms);
+    const isSilent = rms < floor.rms && peak < floor.peak && rms < this.noiseRms * 3.2;
     if (isSilent) {
       this.noiseRms = this.noiseRms * 0.95 + rms * 0.05;
       this.hangoverSamples -= n;
@@ -138,7 +163,7 @@ export async function startPcm16Capture(
   deviceId: string | undefined,
   onPacket: (packet: CapturePacket) => void,
   onLevel: (v: number) => void,
-  options?: { nearMicGate?: boolean },
+  options?: { nearMicGate?: boolean; micSensitivity?: MicSensitivity },
 ): Promise<CaptureHandle> {
   // The operator's chosen microphone, never the browser default (`exact` — with `ideal`, Windows
   // switching its default device mid-event silently switches the mic under us). Mono; keep browser DSP.
@@ -182,6 +207,7 @@ export async function startPcm16Capture(
       inputSampleRate: ctx.sampleRate,
       outputSampleRate: 16000,
       nearMicGateEnabled: options?.nearMicGate ?? true,
+      micSensitivity: options?.micSensitivity ?? 'auto',
     });
     src.connect(node);
     node.connect(ctx.destination); // worklet writes no output → silence; keeps the graph pulling.

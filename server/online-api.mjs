@@ -164,6 +164,38 @@ function parseSessionTerms(raw) {
   return terms;
 }
 
+// TASK 5 — the misheard-substitution layer, server side. The client has already replaced these surfaces
+// in the transcript before sending it; this list is the model's backstop for the inflected or partial
+// forms a plain string replace cannot catch. Same grammar as the client's `mishearing.ts`, one rule per
+// line, split at the FIRST mark, three marks accepted (`~` U+007E, `〜` U+301C, `～` U+FF5E).
+const MISHEARING_MAX_RULES = 40;
+const MISHEARING_MAX_HEARD_PER_RULE = 8;
+export function parseMishearingRules(raw) {
+  const rules = [];
+  for (const line of String(raw ?? '').split(/\r?\n/)) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith('#')) continue;
+    let cut = -1;
+    for (const mark of ['~', '〜', '～']) {
+      const at = trimmed.indexOf(mark);
+      if (at >= 0 && (cut < 0 || at < cut)) cut = at;
+    }
+    if (cut < 0) continue;
+    const correct = limitText(trimmed.slice(cut + 1), 160);
+    if (!correct) continue;
+    const heard = trimmed.slice(0, cut)
+      .split(/[,、/|]/)
+      .map((part) => limitText(part, 120))
+      .filter(Boolean)
+      .filter((part) => part.toLowerCase() !== correct.toLowerCase())
+      .slice(0, MISHEARING_MAX_HEARD_PER_RULE);
+    if (!heard.length) continue;
+    rules.push({ heard, correct });
+    if (rules.length >= MISHEARING_MAX_RULES) break;
+  }
+  return rules;
+}
+
 // ---------- tts speed guard (mirror of the core's ttsDelivery module) ----------
 const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
 const finiteNumber = (value) => {
@@ -320,7 +352,9 @@ function continuationPolicy(previousFragment) {
   ].join('\n');
 }
 
-export function buildRefinePrompt({ sourceText, previewText, sourceLanguage, targetLanguage, sourceEmotion, sourcePace, recentFinals, sessionBrief, sessionTerms, sourceIsFragment, previousFragment }) {
+// `sessionMishearings` is defaulted on purpose: an older client that never sends the field, and the
+// existing tests that call this function without it, must keep working unchanged.
+export function buildRefinePrompt({ sourceText, previewText, sourceLanguage, targetLanguage, sourceEmotion, sourcePace, recentFinals, sessionBrief, sessionTerms, sourceIsFragment, previousFragment, sessionMishearings = [] }) {
   return [
     'Refine a realtime translated subtitle for a live company event. Use the source transcript, preview translation, recent context, and provided terms to produce one accurate final subtitle in the target language. Preserve names, numbers, times, acronyms, tone, and meaning. Return only valid JSON.',
     [
@@ -338,6 +372,7 @@ export function buildRefinePrompt({ sourceText, previewText, sourceLanguage, tar
       '- The source transcript below is READ-ONLY evidence: never rewrite it, clean it up, or return it. Do not output the transcript or any corrected version of it — only the target_final translation. The recogniser already knows the event names.',
       '- When a session context or session terms block is provided below, it describes THIS specific meeting: use it to resolve ambiguous names, agenda items, and topic references, and let session terms override any conflicting generic terms. A session term with no target means: keep that name/acronym exact and correct ASR mishearings toward it.',
       '- A person listed in session terms is allowed vocabulary, NOT proof that the speaker said that name. Never insert or replace a person name unless the CURRENT source transcript contains a plausible matching name surface. Recent subtitles and session context alone are never evidence for a person name.',
+      '- When a known-mishearing block is provided below, it lists surfaces the recogniser is known to produce for a name it gets wrong, together with the one correct form. If any of those surfaces, or a clearly inflected variant of one, appears in the source transcript, treat it as the correct form and translate accordingly — this is a correction, not a suggestion. It applies ONLY to the listed surfaces, and it never licenses inserting a name the transcript does not contain in some recognisable form.',
       '- Also return emotion: exactly one of neutral, excited, serious, somber. When a detected-from-audio value is provided below, map it to the closest of those four. Otherwise infer it conservatively from the wording alone (exclamations, celebration, applause calls, condolences); default to neutral whenever unsure.',
       '- Also return tts_speed: a number from 0.85 to 1.20 for the TTS engine. Primarily follow the measured source speaking pace. Use 1.00 when pace confidence is low; slow speech is normally 0.88-0.95, normal 0.96-1.04, fast 1.05-1.15, and very fast at most 1.20. Emotion may adjust this only slightly and must never override clearly measured pace.',
       '- Also return tts_text: only when that emotion is clearly non-neutral, return target_final with SPARSE audio tags added (e.g. [excited], [serious], [somber]) at natural positions; otherwise return tts_text as "" (empty string). Never copy an untagged target_final into tts_text. Audio tags never go into target_final.',
@@ -349,6 +384,9 @@ export function buildRefinePrompt({ sourceText, previewText, sourceLanguage, tar
     sessionBrief ? `Session context for this meeting (operator-provided):\n${sessionBrief}` : '',
     sessionTerms.length > 0
       ? `Session terms for this meeting (highest priority):\n${sessionTerms.map((term) => term.target ? `- ${term.source} → ${term.target}` : `- ${term.source} (keep exact)`).join('\n')}`
+      : '',
+    sessionMishearings.length > 0
+      ? `Known mishearings for this meeting (the recogniser produces the forms on the left; the form on the right is correct):\n${sessionMishearings.map((rule) => `- ${rule.heard.join(' / ')} → ${rule.correct}`).join('\n')}`
       : '',
     recentFinals.length > 0 ? `Recent final subtitles:\n${recentFinals.join('\n')}` : '',
     previousFragment ? continuationPolicy(previousFragment) : '',
@@ -672,7 +710,16 @@ async function mintScribeToken() {
 // language. Interleaved per line (source, target, source, target…), NOT all-sources-then-all-targets:
 // the operator ranks the glossary, so the top lines must keep both forms before the 30-term cap bites.
 export function pickScribeKeyterms(corpus) {
-  const lines = String(corpus || '').split(/[,\n;·]/).map((t) => t.trim()).filter(Boolean);
+  // TASK 5: a `nghe nhầm ~ dạng đúng` line must never become a keyterm. Priming the recogniser with the
+  // misheard surface teaches it to produce exactly the surface we are trying to get rid of. The whole
+  // left side of such a line is dropped — line by line, BEFORE the comma split, because the misheard
+  // surfaces on the left are themselves comma-separated and would otherwise survive as keyterms of their
+  // own. The client already strips them; this is the server's own guard for anything else that posts.
+  const cleaned = String(corpus || '')
+    .split(/\r?\n/)
+    .map((line) => { const m = line.match(/^[^~〜～]*[~〜～](.*)$/); return m ? m[1] : line; })
+    .join('\n');
+  const lines = cleaned.split(/[,\n;·]/).map((t) => t.trim()).filter(Boolean);
   const all = [];
   for (const line of lines) {
     const eq = line.indexOf('=');
@@ -1058,6 +1105,7 @@ export function installOnlineApi(server, { requireAuth } = {}) {
               : [],
             sessionBrief: limitText(body?.sessionBrief, SESSION_BRIEF_MAX_CHARS),
             sessionTerms: parseSessionTerms(typeof body?.sessionTerms === 'string' ? body.sessionTerms : ''),
+            sessionMishearings: parseMishearingRules(typeof body?.sessionMishearings === 'string' ? body.sessionMishearings : ''),
             sourceIsFragment,
             previousFragment,
           });
