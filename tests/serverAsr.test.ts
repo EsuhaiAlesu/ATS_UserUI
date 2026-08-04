@@ -224,11 +224,13 @@ describe('buildRefinePrompt — mảnh câu & phần nối (PROMPT-10 TASK 6)', 
     expect(build({ sourceIsFragment: true })).not.toContain('CONTINUATION')
   })
 
-  it('nửa đầu được trích NGUYÊN VĂN và mô hình được dặn đừng lặp lại', () => {
+  it('nửa đầu được trích NGUYÊN VĂN, nói rõ đó là TIẾNG NGUỒN, và mô hình được dặn đừng lặp lại', () => {
     const p = build({ previousFragment: 'Chúng tôi rất vinh dự được đón tiếp' })
     expect(p).toContain('CONTINUATION')
-    expect(p).toContain('First half, already translated and shown to the audience:\nChúng tôi rất vinh dự được đón tiếp')
+    expect(p).toContain('First half, exactly as the recogniser heard it — SOURCE language, NOT a translation:\nChúng tôi rất vinh dự được đón tiếp')
     expect(p).toContain('Do NOT repeat, re-translate, or summarise the first half')
+    // Cái nhãn cũ ("already translated") nói sai sự thật: chuỗi này là transcript tiếng nguồn.
+    expect(p).not.toContain('First half, already translated')
   })
 
   it('hai cách vá có thể áp dụng cùng lúc, đúng thứ tự', () => {

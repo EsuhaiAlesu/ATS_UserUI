@@ -10,8 +10,14 @@ export interface SessionLine {
   at: number; // finalize time (ms epoch)
   sourceText: string;
   targetText: string;
+  // TASK 14: PER UTTERANCE, not per session. In two-way mode half the sentences travel the other way, and
+  // the header's single pair described none of them correctly.
   sourceLanguage: 'vi' | 'ja';
   targetLanguage: 'vi' | 'ja';
+  dir: 'vi2ja' | 'ja2vi';
+  // TASK 14: true when the approved script answered this sentence word for word, so a reader can tell the
+  // human wording from the machine's. Absent means the normal path.
+  fromScript?: boolean;
 }
 
 export interface SessionMeta {
@@ -19,6 +25,9 @@ export interface SessionMeta {
   endedAt: number; // ms epoch
   sourceLanguage: 'vi' | 'ja';
   targetLanguage: 'vi' | 'ja';
+  // TASK 14: which meeting this transcript belongs to. Empty when no meeting was selected — a folder of
+  // files named only by timestamp cannot be sorted out a week later.
+  eventId?: string;
 }
 
 export interface SessionExport {
@@ -58,13 +67,16 @@ export function buildSessionExport(lines: SessionLine[], meta: SessionMeta): Ses
       endedAt: new Date(meta.endedAt).toISOString(),
       sourceLanguage: meta.sourceLanguage,
       targetLanguage: meta.targetLanguage,
+      // Omitted entirely when there is no meeting, rather than written as an empty string that later reads
+      // like a meeting whose id happens to be blank.
+      ...(meta.eventId ? { eventId: meta.eventId } : {}),
       lines,
     },
     null,
     2,
   );
-  const header = '| Time | Source | Translation |\n| --- | --- | --- |';
-  const rows = lines.map((l) => `| ${hhmmss(l.at)} | ${mdCell(l.sourceText)} | ${mdCell(l.targetText)} |`);
+  const header = '| Time | Dir | Source | Translation | Script |\n| --- | --- | --- | --- | --- |';
+  const rows = lines.map((l) => `| ${hhmmss(l.at)} | ${l.dir} | ${mdCell(l.sourceText)} | ${mdCell(l.targetText)} | ${l.fromScript ? 'kịch bản' : ''} |`);
   const md = `${[header, ...rows].join('\n')}\n`;
   const filename = `online_${fileStamp(meta.startedAt)}`;
   return { json, md, filename };

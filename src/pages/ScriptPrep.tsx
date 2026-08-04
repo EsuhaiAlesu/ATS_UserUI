@@ -10,6 +10,7 @@ import {
     getScriptLocal, writeScriptLocal, markPulledLocal, newScriptEntry, readiness, getSyncState, pushToBackend, pullFromBackend,
 } from '../lib/script';
 import { readImportFile, parseText } from '../lib/scriptImport';
+import { buildScriptExport, parseScriptImport } from '../lib/scriptTransfer';
 import type { Delim } from '../lib/scriptImport';
 import { upsertDoc, newSourceDoc } from '../lib/docs';
 
@@ -155,6 +156,15 @@ const ImportDrawer: React.FC<{
         if (!file) return;
         setErr(null); setBusy(true); setFileName(file.name);
         try {
+            // TASK 15: a .json export is not text for the delimiter detector — it is already rows, with
+            // their approvals. Committed straight away; an empty or unreadable one is REFUSED here rather
+            // than travelling on as an empty success.
+            if (/\.json$/i.test(file.name)) {
+                const res = parseScriptImport(await file.text(), `json${Date.now()}`);
+                if (res.error) { setErr(res.error); setText(''); return; }
+                onCommit(res.rows);
+                return;
+            }
             const r = await readImportFile(file);
             let text = r.text;
             if (r.kind === 'pdf') {
@@ -177,7 +187,7 @@ const ImportDrawer: React.FC<{
     // the one the delimiter detector reads best. It was missing only from this picker: readImportFile
     // already handles it as plain text, and a dropped .tsv always worked. Adding it here means the
     // operator can pick the same file with the button instead of discovering drag-and-drop.
-    const accept = `.md,.markdown,.txt,.tsv,.csv,.srt,.docx,.docm,.dotx,.dotm${backendOnline ? ',.pdf' : ''}`;
+    const accept = `.json,.md,.markdown,.txt,.tsv,.csv,.srt,.docx,.docm,.dotx,.dotm${backendOnline ? ',.pdf' : ''}`;
     const delimLabel = parsed ? (parsed.delim === 'none' ? 'chỉ câu nguồn' : parsed.delim === 'tab' ? 'Tab' : parsed.delim === 'pipe' ? '|' : '=> / -> / ::') : '';
 
     return (
@@ -321,9 +331,29 @@ const ScriptEditor: React.FC<{ eventId: string; onActivated: () => void }> = ({ 
         toast.success(`Đã duyệt ${n} dòng`);
     };
     const commitImport = (entries: ScriptEntry[]) => {
+        // TASK 15: an import that produced nothing must never be reported as a success. "Đã thêm 0 dòng"
+        // in green is how somebody concludes on the morning of an event that the script is loaded.
+        if (!entries.length) {
+            toast.error('Tệp không có dòng kịch bản nào — kịch bản hiện tại giữ nguyên');
+            return;
+        }
         mutate((prev) => [...prev, ...entries]);
         toast.success(`Đã thêm ${entries.length} dòng`);
         closeImport();
+    };
+
+    const exportScriptJson = () => {
+        const { filename, json } = buildScriptExport(eventId, dir, rows, new Date().toISOString());
+        try {
+            const url = URL.createObjectURL(new Blob([json], { type: 'application/json' }));
+            const a = document.createElement('a');
+            a.href = url; a.download = filename;
+            document.body.appendChild(a); a.click(); a.remove();
+            URL.revokeObjectURL(url);
+            toast.success(`Đã xuất ${rows.length} dòng`);
+        } catch {
+            toast.error('Không tải được tệp về máy');
+        }
     };
 
     const openImport = () => {
@@ -407,6 +437,14 @@ const ScriptEditor: React.FC<{ eventId: string; onActivated: () => void }> = ({ 
                     title={session.backendOnline ? 'Đẩy kịch bản lên backend cho matcher (data/script.json)' : 'Cần backend để đồng bộ'}
                     className="flex items-center gap-1.5 border border-outline-variant text-on-surface-variant px-3 py-2 rounded-full font-label-caps text-label-caps hover:border-secondary hover:text-secondary transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:border-outline-variant disabled:hover:text-on-surface-variant">
                     <span className="material-symbols-outlined text-[18px]" aria-hidden="true">{syncing ? 'progress_activity' : 'sync'}</span>Đồng bộ BE
+                </button>
+                {/* TASK 15: carry the whole script — approvals, languages, order — to another machine.
+                    Disabled with nothing to export, so the button can never produce an empty file that
+                    later reads as "the script was empty". */}
+                <button onClick={exportScriptJson} disabled={rows.length === 0}
+                    title="Tải kịch bản (kèm trạng thái duyệt) về máy, để mở trên máy khác"
+                    className="flex items-center gap-1.5 border border-outline-variant text-on-surface-variant px-3 py-2 rounded-full font-label-caps text-label-caps hover:border-secondary hover:text-secondary transition-colors disabled:opacity-40 disabled:cursor-not-allowed">
+                    <span className="material-symbols-outlined text-[18px]" aria-hidden="true">download</span>Xuất .json
                 </button>
                 <button onClick={openImport} className="btn-lux flex items-center gap-1.5 bg-secondary text-on-secondary px-4 py-2 rounded-full font-label-caps text-label-caps hover:opacity-80"><span className="material-symbols-outlined text-[18px]" aria-hidden="true">upload_file</span>Nhập tệp</button>
             </PageHeader>

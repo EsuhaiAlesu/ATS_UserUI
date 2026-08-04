@@ -330,7 +330,7 @@ function fragmentPolicy(targetLanguage) {
     '- Translate ONLY the words that are actually present. Never complete, round off, or guess the ending.',
     '- Keep target_final grammatically open, exactly as open as the source is: a clause stays a clause.',
     targetLanguage.startsWith('ja')
-      ? '- In Japanese: do NOT close the fragment with です/ます/だ or a sentence-final particle, and do not add 。 at the end. Use the continuing form (て/で, が, ので, 連用形) that a speaker would use mid-sentence.'
+      ? '- In Japanese: do NOT close the fragment with です/ます/だ or a sentence-final particle, and do not add 。 at the end. Use the continuing form (て/で, が, ので, 連用形) that a speaker would use mid-sentence.\n- A cut fragment is exactly where a compound word gets sliced in half, and half a compound written in kanji becomes a different word: 創立二十周年記念 heard only part-way through must never come back as 東立二十少年記念. Wherever the fragment stops mid-word, or wherever you cannot be certain which characters the speaker meant, write that part in kana.'
       : '- In Vietnamese: do not add a closing particle or a full stop, and do not add a subject, verb, or object that the fragment does not contain.',
     '- Use the recent subtitles above only to keep terminology and register consistent — never to fill in the missing half.',
   ].join('\n');
@@ -344,11 +344,12 @@ function fragmentPolicy(targetLanguage) {
 function continuationPolicy(previousFragment) {
   return [
     'IMPORTANT — the subtitle immediately before this one was cut off mid-thought, and the transcript below is its CONTINUATION (the speaker paused, then carried on).',
-    `First half, already translated and shown to the audience:\n${previousFragment}`,
+    `First half, exactly as the recogniser heard it — SOURCE language, NOT a translation:\n${previousFragment}`,
+    '- That half has already been translated and shown to the audience, but you are NOT being shown the translation. You are shown the source words, and only so that you can see where the sentence stopped.',
     '- Translate the transcript below as the continuation of that half: read one after the other, the two subtitles must form one natural sentence.',
-    '- Do NOT repeat, re-translate, or summarise the first half — it is already on screen and has already been spoken aloud.',
+    '- Do NOT repeat, re-translate, or summarise the first half — it is already on screen and has already been spoken aloud. Never copy any of its words, in any language, into target_final.',
     '- Do not restart the sentence: begin exactly where the first half stopped, and keep its grammatical thread (subject, tense, register).',
-    '- Use the first half only to continue it correctly. It is not evidence for any content that is missing from the transcript below.',
+    '- The first half is in the SOURCE language. It is never an example of what the target language should look like, and it is never evidence for content that is missing from the transcript below.',
   ].join('\n');
 }
 
@@ -369,6 +370,7 @@ export function buildRefinePrompt({ sourceText, previewText, sourceLanguage, tar
       '- If the source transcript is missing or empty, keep the preview wording and apply only edits 1-3.',
       '- If the preview translation is missing or empty, translate the source transcript directly and faithfully, applying edits 1-3.',
       '- If uncertain about a name, keep the lower-risk surface form instead of inventing one.',
+      '- NEVER guess kanji. When the target language is Japanese and you are not certain of the written form of a word — a partially heard compound, a place or company name, anything at the edge of a cut fragment — write it in kana (hiragana for a native word, katakana for a foreign one) instead of choosing plausible-looking characters. Wrong kanji fails twice over: on screen it is a DIFFERENT word rather than a misspelling, and the voice reads it aloud with the wrong pronunciation. Kana is always read correctly. Use kanji only for wording you are confident of, or that appears in the session terms, the known-mishearing list, or the recent subtitles above.',
       '- The source transcript below is READ-ONLY evidence: never rewrite it, clean it up, or return it. Do not output the transcript or any corrected version of it — only the target_final translation. The recogniser already knows the event names.',
       '- When a session context or session terms block is provided below, it describes THIS specific meeting: use it to resolve ambiguous names, agenda items, and topic references, and let session terms override any conflicting generic terms. A session term with no target means: keep that name/acronym exact and correct ASR mishearings toward it.',
       '- A person listed in session terms is allowed vocabulary, NOT proof that the speaker said that name. Never insert or replace a person name unless the CURRENT source transcript contains a plausible matching name surface. Recent subtitles and session context alone are never evidence for a person name.',
@@ -399,6 +401,23 @@ export function buildRefinePrompt({ sourceText, previewText, sourceLanguage, tar
       : 'Measured source speaking pace: unavailable; use tts_speed 1.00.',
     'Return JSON only with keys: target_final, tts_text, emotion, tts_speed. tts_text must be "" in the untagged case described above.',
   ].filter(Boolean).join('\n\n');
+}
+
+// TASK 16 — turn an upstream failure into a reason code the screen can name. Deliberately coarse and
+// deliberately opaque: it says what KIND of failure it was and never which provider, which model, which
+// host, or which environment variable. Four codes, four different actions:
+//   no-key            → somebody has to set the key; that is the owner's job, not the technician's
+//   timeout           → the provider is slow right now, and the draft translation is still on screen
+//   upstream-http-NNN → the provider refused; the number is the only detail worth showing
+//   bad-json          → the provider answered with something unusable
+export function classifyRefineFailure(error) {
+  const message = String(error?.message ?? error ?? '');
+  if (/not configured|missing key|no api key/i.test(message)) return 'no-key';
+  if (/abort|timeout|timed out|ETIMEDOUT|ESOCKETTIMEDOUT/i.test(message)) return 'timeout';
+  const http = message.match(/\bHTTP (\d{3})\b/) || message.match(/\bstatus (\d{3})\b/i);
+  if (http) return `upstream-http-${http[1]}`;
+  if (/JSON|Unexpected token|unparsable/i.test(message)) return 'bad-json';
+  return 'unknown';
 }
 
 function extractResponseText(data) {
@@ -771,16 +790,27 @@ function applyLanguageRestriction(p, language) {
   if (SCRIBE_SEND_LANGUAGE_CODE === 'true' && sessionLang) p.set('language_code', sessionLang);
 }
 
+// Below 0.6 s the recogniser cuts inside ordinary speech; above 3.0 s the audience watches a blank wall
+// while somebody is talking. A client may ask for anything; this is what it can actually get.
+const PAUSE_SECS_MIN = 0.6;
+const PAUSE_SECS_MAX = 3;
+
 // Build the handshake query. `roomFilter` is THREE-STATE (TASK 11.13): true → set the parameter; false →
 // set nothing (vendor default is off; keeps demo byte-parity AND beats a server env that says on);
 // undefined → fall back to SCRIBE_FILTER_BACKGROUND. Returns the params + the value that ACTUALLY ended
 // up in the handshake, so the token response can report the applied value (never the requested one).
-export function buildScribeWsParams({ token, language, keyterms, roomFilter }) {
+//
+// `vadSilenceSecs` is the same shape (TASK 13): a finite number is clamped and used; anything else falls
+// back to SCRIBE_VAD_SILENCE_SECS, so a client that never sends the field behaves exactly as before.
+export function buildScribeWsParams({ token, language, keyterms, roomFilter, vadSilenceSecs }) {
   const p = new URLSearchParams();
   p.set('model_id', SCRIBE_MODEL_ID);
   p.set('token', token);
   p.set('commit_strategy', 'vad');
-  p.set('vad_silence_threshold_secs', String(SCRIBE_VAD_SILENCE_SECS));
+  const vadApplied = Number.isFinite(Number(vadSilenceSecs)) && vadSilenceSecs !== null && vadSilenceSecs !== ''
+    ? Math.min(PAUSE_SECS_MAX, Math.max(PAUSE_SECS_MIN, Number(vadSilenceSecs)))
+    : SCRIBE_VAD_SILENCE_SECS;
+  p.set('vad_silence_threshold_secs', String(vadApplied));
   p.set('vad_threshold', String(SCRIBE_VAD_THRESHOLD));
   p.set('min_speech_duration_ms', String(SCRIBE_MIN_SPEECH_MS));
   p.set('min_silence_duration_ms', String(SCRIBE_MIN_SILENCE_MS));
@@ -795,7 +825,7 @@ export function buildScribeWsParams({ token, language, keyterms, roomFilter }) {
   if (filterApplied) p.set('filter_background_audio', 'true');
   applyLanguageRestriction(p, language);
   // Do NOT send audio_format (pcm_16000 is the default — fewer params, closer to the demo).
-  return { params: p, filterApplied };
+  return { params: p, filterApplied, vadApplied };
 }
 
 // ---------- raw-http request/response helpers ----------
@@ -1034,6 +1064,10 @@ export function installOnlineApi(server, { requireAuth } = {}) {
         // Accept roomFilter ONLY if it is a real boolean (11.13); anything else stays undefined so the
         // fallback path runs.
         const roomFilter = typeof body?.roomFilter === 'boolean' ? body.roomFilter : undefined;
+        // TASK 13: the meeting's speech rhythm. Rides this body rather than a new endpoint — the token
+        // request is already the one per-session call, and this is a per-session setting. Anything that
+        // is not a finite number is left undefined so the server's own default stands.
+        const pauseSecs = typeof body?.pauseSecs === 'number' && Number.isFinite(body.pauseSecs) ? body.pauseSecs : undefined;
 
         if (ONLINE_ASR_PROVIDER === 'qwen3') {
           // Rollback path (11.6): the old proxied response + asrTransport:'proxy' so the client chooses
@@ -1053,9 +1087,9 @@ export function installOnlineApi(server, { requireAuth } = {}) {
         try {
           const token = await mintScribeToken();
           const { kept, dropped } = pickScribeKeyterms(corpus);
-          const { params, filterApplied } = buildScribeWsParams({ token, language, keyterms: kept, roomFilter });
+          const { params, filterApplied, vadApplied } = buildScribeWsParams({ token, language, keyterms: kept, roomFilter, vadSilenceSecs: pauseSecs });
           const asrWsUrl = `${SCRIBE_WS_BASE}${SCRIBE_WS_PATH}?${params.toString()}`;
-          logLine('asr.session', { asrKeytermCount: kept.length, asrKeytermsDropped: dropped, asrRoomFilter: filterApplied }); // counts only — no term text, no URL, no token
+          logLine('asr.session', { asrKeytermCount: kept.length, asrKeytermsDropped: dropped, asrRoomFilter: filterApplied, asrVadSilenceSecs: vadApplied }); // counts only — no term text, no URL, no token
           sendJson(res, 200, {
             mode: 'transcribe',
             asrProvider: 'scribe',
@@ -1068,6 +1102,9 @@ export function installOnlineApi(server, { requireAuth } = {}) {
             asrSourceCorrectionEnabled: false, // 11.12 — the model no longer rewrites the source transcript
             asrCorrectionTermCount: 0,
             asrRoomFilter: filterApplied,
+            // The APPLIED pause, never the requested one — an operator who asks for something out of
+            // range must be able to see what they actually got.
+            asrVadSilenceSecs: vadApplied,
             asrWsUrl,
           });
         } catch (error) {
@@ -1113,8 +1150,9 @@ export function installOnlineApi(server, { requireAuth } = {}) {
           logLine('refine.ok', { outputFormat, sourceLength: payload.sourceText.length, translatedLength: payload.translatedText.length, ttsSpeed: payload.ttsSpeed, fragment: sourceIsFragment, continues: Boolean(previousFragment), traceId: traceId || null });
           sendJson(res, 200, { ...payload, traceId: traceId || undefined });
         } catch (error) {
-          logLine('refine.fail', { message: String(error?.message ?? error).slice(0, 300) });
-          sendJson(res, 502, { error: 'Preview refine failed.' });
+          const reason = classifyRefineFailure(error);
+          logLine('refine.fail', { reason, message: String(error?.message ?? error).slice(0, 300) });
+          sendJson(res, 502, { error: 'Preview refine failed.', reason });
         }
         return true;
       }

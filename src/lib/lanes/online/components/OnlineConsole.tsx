@@ -13,7 +13,7 @@
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { useOnlineLane, fetchOnlineConfigStatus, summarizePrepDocs, ONLINE_SPEED_RANGE, SUBTITLE_FONT, type LaneStatus, type OnlineVoice, type AudienceLine, type WallOutput, type WallDock, MIC_SENSITIVITY_OPTIONS, micSensitivityLabel, LOUD_GATE_OPTIONS, resolveLoudThreshold, type MicSensitivity, type LoudGateMode, splitMishearingLines } from '../index'
+import { useOnlineLane, fetchOnlineConfigStatus, summarizePrepDocs, ONLINE_SPEED_RANGE, SUBTITLE_FONT, type LaneStatus, type OnlineVoice, type AudienceLine, type WallOutput, type WallDock, MIC_SENSITIVITY_OPTIONS, micSensitivityLabel, LOUD_GATE_OPTIONS, resolveLoudThreshold, type MicSensitivity, type LoudGateMode, splitMishearingLines, previewKeyterms, KEYTERM_MAX, KEYTERM_MAX_LEN, SPEECH_RHYTHM_OPTIONS, type SpeechRhythm } from '../index'
 import { useConferenceMode } from '../../../ConferenceModeContext'
 import { useActiveEvent } from '../../../ActiveEventContext'
 import { collectPrepPack, collectPrepDocuments, collectPrepHeader, type PrepPack } from '../../../prepData'
@@ -284,6 +284,11 @@ const OnlineConsole: React.FC = () => {
   // dropping them in silence — silence is exactly how the 01/08 rehearsal lost its script.
   const mishearingInfo = useMemo(() => splitMishearingLines(lane.mishearing), [lane.mishearing])
 
+  // TASK 7: exactly what the recogniser will be primed with, computed from the two boxes that feed it.
+  // Names lifted from the approved script are appended after these on the server side and take whatever
+  // slots are left, which is why the line below says "chưa kể".
+  const keyterms = useMemo(() => previewKeyterms(`${lane.terms}\n${lane.mishearing}`), [lane.terms, lane.mishearing])
+
   const prepCounts = (
     <div className="text-[11px] text-on-surface-variant leading-relaxed">
       {prep && (
@@ -356,6 +361,12 @@ const OnlineConsole: React.FC = () => {
   // signature of the 2026-08-01 failure.
   const scriptReady = scriptLoad.reason === 'ok'
   const danglingEvent = eventId !== '' && !event
+
+  // TASK 14: the transcript records which meeting it belongs to, taken from the SAME resolved pointer the
+  // script is loaded from — so a saved file and the script it was read against can never name two
+  // different meetings.
+  const setLaneEventId = lane.setEventId
+  useEffect(() => { setLaneEventId(eventId) }, [eventId, setLaneEventId])
 
   const diag = lane.diagnostics
   const lat = diag?.latency
@@ -624,7 +635,25 @@ const OnlineConsole: React.FC = () => {
                 </div>
                 <textarea value={lane.terms} onChange={(e) => lane.setTerms(e.target.value)} rows={6} maxLength={2000} disabled={lane.running}
                   className={TEXTAREA_CLS} placeholder="Tên riêng, thuật ngữ — mỗi mục một dòng…" />
-                <div className="text-right text-[11px] text-on-surface-variant tabular-nums">{lane.terms.length}/2000</div>
+                <div className="flex items-start justify-between gap-2 text-[11px] text-on-surface-variant">
+                  <span className="leading-relaxed">
+                    Máy nghe được mồi <strong className="tabular-nums">{keyterms.kept.length}/{KEYTERM_MAX}</strong> từ khoá
+                    <span className="opacity-70"> (chưa kể tên lấy từ kịch bản)</span>
+                  </span>
+                  <span className="tabular-nums shrink-0">{lane.terms.length}/2000</span>
+                </div>
+                {keyterms.tooLong.length > 0 && (
+                  <p className="text-[11px] text-error leading-relaxed">
+                    {keyterms.tooLong.length} mục dài quá {KEYTERM_MAX_LEN} ký tự nên máy nghe bỏ qua — tách ngắn lại thì
+                    dùng được: {keyterms.tooLong.slice(0, 3).join(' · ')}
+                  </p>
+                )}
+                {keyterms.overflow.length > 0 && (
+                  <p className="text-[11px] text-secondary leading-relaxed">
+                    Đã đủ {KEYTERM_MAX} từ khoá — {keyterms.overflow.length} mục cuối không được mồi (vẫn dùng lúc dịch):{' '}
+                    {keyterms.overflow.slice(0, 3).join(' · ')}
+                  </p>
+                )}
                 {prepCounts}
                 {/* TASK 5. This textarea has NO `disabled={lane.running}`, and that is the whole point of
                     it: every other box on this drawer is locked once the ceremony starts, but a name
@@ -847,6 +876,18 @@ const OnlineConsole: React.FC = () => {
                     đứng im, so <em>ngưỡng</em> với <em>VU đỉnh</em> ở khối Chẩn đoán rồi hạ một nấc.
                   </p>
                 </div>
+                <div>
+                  <label htmlFor="online-console-rhythm" className="font-label-caps text-label-caps text-on-surface-variant block mb-1.5">
+                    Nhịp nói của buổi
+                  </label>
+                  <select id="online-console-rhythm" value={lane.speechRhythm} onChange={(e) => lane.setSpeechRhythm(e.target.value as SpeechRhythm)} disabled={lane.running} className={SELECT_CLS}>
+                    {SPEECH_RHYTHM_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+                  </select>
+                  <p className="text-[11px] leading-relaxed text-on-surface-variant/80 mt-1">
+                    {SPEECH_RHYTHM_OPTIONS.find((o) => o.value === lane.speechRhythm)?.hint}
+                    {diag?.asrPauseSecs != null && <> Máy đang chờ <strong className="tabular-nums">{diag?.asrPauseSecs}s</strong> im lặng rồi mới chốt câu.</>}
+                  </p>
+                </div>
               </section>
 
               <div className="h-px bg-outline-variant"></div>
@@ -937,7 +978,16 @@ const OnlineConsole: React.FC = () => {
                     <div>ghép ý {diag.continuationMerges} · mảnh {diag.fragmentRefines} · nối tiếp {diag.fragmentLinks}</div>
                     {/* What the recogniser AGREED to listen for, in its own handshake reply. "tự do" means
                         it accepted no restriction and any language on earth can still come back. */}
-                    <div>máy nghe: {diag.asrLanguages ?? 'tự do (mọi thứ tiếng)'} · nhãn {diag.vendorTags}</div>
+                    {/* TASK 12: `nhận diện tiếng` is the second half of the same handshake reply. It is the
+                        one that decides whether two-way works at all: without it no final carries a
+                        language tag, and the direction of every sentence is a guess. Red when the vendor
+                        said no while two-way is switched on — that combination cannot work. */}
+                    <div>
+                      máy nghe: {diag.asrLanguages ?? 'tự do (mọi thứ tiếng)'} · nhãn {diag.vendorTags} · nhận diện tiếng:{' '}
+                      <span className={diag.asrLanguageDetection === false && lane.twoWay ? 'text-error font-semibold' : ''}>
+                        {diag.asrLanguageDetection === null ? 'chưa rõ' : diag.asrLanguageDetection ? 'có' : 'KHÔNG'}
+                      </span>
+                    </div>
                     <div>draft {diag.draftCalls} (dup {diag.draftSkipped.duplicate}·rate {diag.draftSkipped['rate-limit']}·infl {diag.draftSkipped['in-flight']})</div>
                     <div>refine {diag.refineCalls} · retries {diag.refineRetries}</div>
                     {/* M9 — snaps vs gần-khớp, and where the script thinks it is. `lastScriptReason` is the

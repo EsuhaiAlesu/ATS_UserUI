@@ -46,11 +46,18 @@ describe('client — no trace of the hall-babble switch left', () => {
     expect(src).not.toContain('roomFilter: config.getRoomFilter')
   })
 
-  it('thân yêu cầu token chỉ còn ĐÚNG ba trường', () => {
+  // PROMPT-11 PHẦN 2 / TASK 13 nới ca này. Bản gốc (PHẦN 1) ghim thân yêu cầu ĐÚNG BA trường; TASK 13
+  // cố ý thêm trường thứ tư `pauseSecs` (nhịp nói của buổi, đi nhờ chính request này thay vì mở endpoint
+  // mới). Đếm số trường chưa bao giờ là điều ca này muốn bảo vệ — điều nó bảo vệ là `roomFilter` KHÔNG
+  // được quay lại, vì nhà cung cấp từ chối handshake khi lọc-nền đi cùng timestamps. Nên phần đếm được
+  // thay bằng: ba trường gốc vẫn còn, và trong thân yêu cầu tuyệt đối không có chữ roomFilter nào.
+  it('thân yêu cầu token: ba trường gốc còn nguyên và KHÔNG có roomFilter', () => {
     const src = read('src/lib/lanes/online/asrTransport.ts')
-    expect(src).toMatch(
-      /body: JSON\.stringify\(\{\s*targetLanguage: opts\.targetLanguage,\s*language: opts\.language,\s*corpus: opts\.corpus,\s*\}\)/,
-    )
+    const body = src.match(/body: JSON\.stringify\(\{[\s\S]*?\}\),/)?.[0] ?? ''
+    expect(body).toContain('targetLanguage: opts.targetLanguage,')
+    expect(body).toContain('language: opts.language,')
+    expect(body).toContain('corpus: opts.corpus,')
+    expect(body).not.toMatch(/roomFilter/)
     expect(src).not.toContain('roomFilter?: boolean')
     expect(src).not.toContain('roomFilter: opts.roomFilter')
   })

@@ -13,6 +13,7 @@ import {
   OnlineKeysSettings,     // the Settings key section
   fetchOnlineConfigStatus, saveOnlineConfigKeys, ONLINE_KEY_FIELDS,
   ONLINE_ACTIVE_STATUSES, ONLINE_STATUS_COLOR,
+  summarizePrepDocs, PREP_DOCS_MAX, PREP_DOC_MAX_CHARS,   // documented below; was missing from this list
   type OnlineConfigStatus, type OnlineDirection,
   type LaneLine, type LaneStatus, type OnlineDiagnostics, type TtsGateMode, type SaveOutcome,
 } from '../lib/lanes/online'
@@ -27,6 +28,18 @@ posts the event's imported documents to `POST /online-api/summarize-prep-docs` a
 operator reads and edits in the box before pressing Bắt đầu. Never call it while a session runs. It
 rejects with an operator-facing Vietnamese message; the console shows it verbatim. Also exported:
 `PREP_DOCS_MAX`, `PREP_DOC_MAX_CHARS`, and the `PrepBriefInput` / `PrepBriefResult` / `PrepBriefDoc` types.
+
+### The `máy nghe:` line in Chẩn đoán is an ECHO, not a setting
+
+`diag.asrLanguages` and `diag.asrLanguageDetection` are the recogniser's **own reply to the handshake** —
+what it agreed to listen for, and whether it agreed to tag each sentence with the language it heard. They
+are not a read-back of anything the operator chose. Asking and agreeing are different events, and the gap
+between them is exactly how Vietnamese speech came back as Chinese and Italian at a ceremony while the
+console showed a healthy session.
+
+Do not "simplify" this line into a display of the console's own settings, and do not remove it because it
+looks redundant. When `nhận diện tiếng` reads `KHÔNG` while two-way is on, that combination cannot work,
+and this line is the only place it is visible.
 
 ### `useOnlineLane(): UseOnlineLane`
 

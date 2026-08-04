@@ -170,14 +170,22 @@ describe('createAsrCodec — giữ bản twin mang nhãn', () => {
     expect((r!.event as { detectedLanguage?: string }).detectedLanguage).toBe('zh')
   })
 
-  it('lời hứa bị bội chỉ mất MỘT câu, không mất cả phiên', () => {
+  it('lời hứa bị bội: câu đang giữ được CỨU qua drain, không mất câu nào', () => {
     vi.useFakeTimers(); vi.setSystemTime(0)
     const codec = createAsrCodec()
     codec.decode(started(true))
     expect(codec.decode(plain('Câu bị mất.'))).toBeNull()
     vi.setSystemTime(5_000)
-    const r = codec.decode(plain('Câu sau vẫn qua.')) // bản trơn thứ hai gỡ bỏ việc chờ
+    // Bản trơn thứ hai là một lời hứa bị bội (lần 1 trong 3): đến lượt NÓ bị giữ để chờ nhãn...
+    expect(codec.decode(plain('Câu sau vẫn qua.'))).toBeNull()
+    // ...còn câu thứ nhất được cứu ra, đúng thứ tự đã nói, không còn biến mất như trước.
+    const rescued = codec.drain?.() ?? []
+    expect(rescued.map((e) => (e as { transcript: string }).transcript)).toEqual(['Câu bị mất.'])
+    expect(codec.drain?.() ?? []).toEqual([]) // hàng đợi đã rỗng
+    // Câu thứ hai vẫn ra, và ra KÈM nhãn, khi bản mang nhãn của nó tới.
+    const r = codec.decode(tagged('Câu sau vẫn qua.', 'vi'))
     expect((r!.event as { transcript: string }).transcript).toBe('Câu sau vẫn qua.')
+    expect((r!.event as { detectedLanguage?: string }).detectedLanguage).toBe('vi')
   })
 
   it('handshake KHÔNG hứa gì → bản trơn dùng y như trước', () => {

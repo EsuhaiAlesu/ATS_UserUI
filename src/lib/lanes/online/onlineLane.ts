@@ -19,7 +19,7 @@ import { DRAFT_RATE_WINDOW_MS, decideCaptureFrame, decideDraftAdmission, getCont
 import { createSpeechPauseProfile } from './speechPauseProfile';
 import { createSpeechShapeMonitor } from './speechShape';
 import { checkTtsLanguage } from './ttsLanguageGuard';
-import { createScriptMatcher, type ScriptMatch, type ScriptMatcher, type ScriptMatcherEntry } from './scriptMatcher';
+import { createScriptMatcher, scriptKeyterms, type ScriptMatch, type ScriptMatcher, type ScriptMatcherEntry } from './scriptMatcher';
 import { applyMishearings, formatMishearingRules, splitMishearingLines, MISHEARING_MAX_CHARS, type MishearingRule } from './mishearing';
 import { nextScribeForceCommitDelay, planStableScribeCommit, type ScribeManualCommitReason } from './scribeManualCommit';
 import { estimateSourceSpeechPace } from './sourceSpeechPace';
@@ -28,10 +28,15 @@ import { buildSessionExport, saveSessionExport, type SaveOutcome, type SessionLi
 import { createLatencyTracker, type LatencyReport } from './latencyTracker';
 import { classifyInterimUtterance, createDirectionTracker, decideFinalLanguage, directionOf, type DirectionTracker, type Lang } from './utteranceDirection';
 import { fetchAsrSession, createAsrCodec, type AsrCodec } from './asrTransport';
+import { refineReasonText } from './refineFailure';
 
 const ONLINE_BASE = '/online-api';
 const RECENT_FINALS_MAX = 6;
 const CORPUS_MAX_CHARS = 2000; // contract: corpus ≤ 2000 chars
+// The server keeps at most 30 keyterms (`pickScribeKeyterms`), so lifting more than 30 names out of the
+// script can never reach the handshake. They are appended AFTER the operator's own glossary, so the
+// glossary always wins the budget and the script fills what is left.
+const SCRIPT_KEYTERM_LIMIT = 30;
 
 // M2 — self-healing WS client (field-measured constants; do NOT tune)
 const RECONNECT_MAX_ATTEMPTS = 5;
@@ -156,6 +161,10 @@ export interface OnlineLaneConfig {
   // TASK 6.2: one mic, two directions — read ONCE at start() and latched for the whole session.
   getTwoWay?: () => boolean;
   onDirectedLine?: (line: DirectedLaneLine) => void;
+  // TASK 13: the meeting's speech rhythm, as seconds of silence. Read at TICKET time, like every other
+  // handshake parameter — it is baked into the single-use URL, so a change mid-session takes effect from
+  // the next dial. `undefined` means "say nothing" and the server's own default stands.
+  getPauseSecs?: () => number | undefined;
   // TASK 11.13's hall-babble getter used to sit here. Removed: the vendor rejects that filter whenever
   // timestamps are on, and the session then fails to start at all. Do not add it back without checking
   // docs/ONLINE-LANE-UI-API.md → "Removed from the UI: the hall-babble switch".
@@ -166,6 +175,8 @@ export interface OnlineLaneConfig {
   // running ceremony would move the cursor mid-sentence. Rows in either direction are fine: the matcher
   // only considers rows whose source language is the one actually being spoken.
   getScript?: () => readonly ScriptMatcherEntry[] | undefined;
+  // TASK 14: which meeting the saved transcript belongs to. Read ONCE at start(), like the script.
+  getEventId?: () => string | undefined;
   // TASK 5: the misheard-substitution layer, read LIVE on every event — deliberately NOT latched at
   // start() the way the script above is. This is the one thing the operator has to be able to fix while
   // the ceremony is running: hearing the machine say the company's name wrong and having to stop the
@@ -221,7 +232,14 @@ export interface OnlineDiagnostics {
   foreignDrops: number; // finals discarded because neither signal called them Vietnamese or Japanese
   languageTurns: number; // buffers closed because the other language started speaking
   vendorTags: number; // finals that arrived carrying the recogniser's own language verdict
+  // TASK 13 — the silence-to-end-of-sentence the current handshake ACTUALLY carries, after the server's
+  // clamp. `null` before the first successful dial. This is the applied value, never the requested one.
+  asrPauseSecs: number | null;
   asrLanguages: string | null; // what the recogniser AGREED to listen for; null = free auto-detect
+  // The OTHER half of the same handshake reply: did the recogniser accept language detection? The
+  // timestamped final's `language_code` is the evidence the two-way router runs on, and it only exists
+  // when this is true. `null` = the vendor said nothing either way.
+  asrLanguageDetection: boolean | null;
   // M13 — the sentence-cut threshold in force for the speaker at the microphone right now.
   // `pauseWindowMs` is what the last planned commit waited for (0 before the first one); `pauseSamples`
   // is how many of this speaker's pauses the profile has collected, and stays under 8 — the point where
@@ -344,7 +362,9 @@ export function createOnlineLane(events: LaneEvents, config: OnlineLaneConfig = 
   let foreignDrops = 0;
   let languageTurns = 0;
   let vendorTags = 0;
+  let asrPauseSecs: number | null = null;
   let asrLanguages: string | null = null;
+  let asrLanguageDetection: boolean | null = null;
   // M13 — the cut threshold this speaker earns for themselves. The 600/800ms stability windows in
   // scribeManualCommit.ts are one guess for everybody; this measures the pauses the person at the
   // microphone is actually taking and hands the planner their own numbers. `lastVoicedAt` is the last
@@ -441,6 +461,7 @@ export function createOnlineLane(events: LaneEvents, config: OnlineLaneConfig = 
   const sessionLines = new Map<string, SessionLine>();
   let sessionStartedAt = 0;
   let sessionStartedISO = '';
+  let sessionEventId = ''; // TASK 14 — latched at start(), written into every save of this session
   let sessionLinesVersion = 0;
   let lastSavedVersion = -1;
   let autoSaveTimer: ReturnType<typeof setInterval> | null = null;
@@ -541,10 +562,21 @@ export function createOnlineLane(events: LaneEvents, config: OnlineLaneConfig = 
 
   // ---- M8: session operations (transcript save + usage report) ----
 
-  function recordSessionLine(lid: string, at: number, sourceText: string, targetText: string): void {
+  // TASK 14: the direction is read from `dirLangs`, which SETTLED it at finalisation and keyed it on this
+  // lid — not from `opts`, whose single pair described only the direction the operator started in. Nothing
+  // at the call sites has to change: the same lid gives the same answer however often it is asked, which
+  // is exactly what the refine path already relies on.
+  function recordSessionLine(lid: string, at: number, sourceText: string, targetText: string, fromScript = false): void {
     const o = opts;
     if (!o) return;
-    sessionLines.set(lid, { lid, at, sourceText, targetText, sourceLanguage: o.sourceLanguage, targetLanguage: o.targetLanguage });
+    const dl = dirLangs(lid, sourceText, false);
+    sessionLines.set(lid, {
+      lid, at, sourceText, targetText,
+      sourceLanguage: dl.source,
+      targetLanguage: dl.target,
+      dir: dl.dir,
+      ...(fromScript ? { fromScript: true } : {}),
+    });
     sessionLinesVersion += 1;
   }
 
@@ -560,6 +592,7 @@ export function createOnlineLane(events: LaneEvents, config: OnlineLaneConfig = 
     const gen = sessionGen;
     const versionAtSave = sessionLinesVersion;
     const exp = buildSessionExport(collectSessionLines(), {
+      eventId: sessionEventId || undefined,
       startedAt: sessionStartedAt || Date.now(),
       endedAt: Date.now(),
       sourceLanguage: o?.sourceLanguage ?? 'vi',
@@ -1259,7 +1292,7 @@ export function createOnlineLane(events: LaneEvents, config: OnlineLaneConfig = 
     scriptSnaps += 1;
     emitLine({ lid, sourceText: head, targetText: target, interim: false, corrected: true });
     latency.markRefineShown(lid, performance.now()); // final quality reached, just without the round trip
-    recordSessionLine(lid, finalizedAt, head, target);
+    recordSessionLine(lid, finalizedAt, head, target, true); // answered by the approved script, word for word
     if (config.getSpeakEnabled?.()) void speakSnap(target, dl.target, lid, order);
     // eslint-disable-next-line no-console
     console.info(`[onlineLane][script] snap lid=${lid} score=${result.score} line=${result.index + 1}/${scriptRows}`);
@@ -1309,7 +1342,13 @@ export function createOnlineLane(events: LaneEvents, config: OnlineLaneConfig = 
         headers: { 'Content-Type': 'application/json' },
         body,
       });
-      if (!res.ok) return { ok: false, retriable: res.status >= 500, message: `refine HTTP ${res.status}` };
+      if (!res.ok) {
+        // TASK 16: the server names the cause in a code that identifies nothing. Read it before giving
+        // up — "refine HTTP 502" was a message nobody could act on.
+        let reason = '';
+        try { reason = String(((await res.json()) as { reason?: unknown }).reason ?? ''); } catch { /* no body */ }
+        return { ok: false, retriable: res.status >= 500, message: reason ? refineReasonText(reason) : `refine HTTP ${res.status}` };
+      }
       const data = (await res.json()) as Record<string, unknown>;
       return { ok: true, data };
     } catch (err) {
@@ -1403,6 +1442,10 @@ export function createOnlineLane(events: LaneEvents, config: OnlineLaneConfig = 
         // operator can see that on the console instead of discovering it from a Chinese subtitle.
         const langs = Array.isArray(msg.asrLanguages) ? msg.asrLanguages.filter((l) => typeof l === 'string') : [];
         asrLanguages = langs.length ? langs.join('+') : null;
+        // The codec has been putting this on the event since language detection was introduced and nothing
+        // has ever read it. Without it, a vendor that silently declines detection produces a session that
+        // looks healthy on screen while every sentence is routed with no evidence at all.
+        asrLanguageDetection = typeof msg.languageDetection === 'boolean' ? msg.languageDetection : null;
         // M11: the commit clock starts here on EVERY dial, including reconnects — the first moment a
         // commit could actually reach upstream.
         resetScribeCommitState(true);
@@ -1453,6 +1496,7 @@ export function createOnlineLane(events: LaneEvents, config: OnlineLaneConfig = 
       session = await fetchAsrSession({
         targetLanguage: opts!.targetLanguage,
         language: twoWay ? 'auto' : opts!.sourceLanguage,
+        pauseSecs: config.getPauseSecs?.(),
         corpus: buildAsrCorpus(),
       });
     } catch (err) {
@@ -1473,6 +1517,7 @@ export function createOnlineLane(events: LaneEvents, config: OnlineLaneConfig = 
     // previous_text rides the FIRST chunk on a RECONNECT only (never a fresh session); a partial is never
     // fed back (a mistake fed back propagates).
     codec = session.transport === 'direct' ? createAsrCodec(initial ? undefined : (lastFinalForReconnect || undefined)) : null;
+    asrPauseSecs = typeof session.pauseSecs === 'number' ? session.pauseSecs : null;
     // TASK 12.6: on the proxied (qwen3) path the session terms travel as the FIRST WS message, not in the
     // URL query string (query strings land in access logs and hit proxy length limits). On the direct
     // path terms are keyterms in the vendor's own handshake — not ours to move. `codec === null` ⇒ proxy.
@@ -1492,6 +1537,12 @@ export function createOnlineLane(events: LaneEvents, config: OnlineLaneConfig = 
       if (typeof ev.data !== 'string') return; // JSON text frames only (both transports)
       if (codec) {
         const decoded = codec.decode(ev.data);
+        // TASK 9: a decode can rescue a sentence the codec had been holding for a twin that never came.
+        // Drained BEFORE this decode's own event, because the rescued sentence was spoken first.
+        for (const rescued of codec.drain?.() ?? []) {
+          lastEventAt = Date.now();
+          handleEvent(rescued as unknown as Record<string, unknown>);
+        }
         if (!decoded) return;
         lastEventAt = Date.now();
         if (decoded.fatal) {
@@ -1703,6 +1754,10 @@ export function createOnlineLane(events: LaneEvents, config: OnlineLaneConfig = 
     const scriptSeed = config.getScript?.() ?? [];
     scriptMatcher = scriptSeed.length ? createScriptMatcher(scriptSeed) : null;
     scriptRows = scriptSeed.length;
+    // TASK 6: the names on the approved rows are known hours before the ceremony — prime the recogniser
+    // with them instead of letting it guess at them live. Latched here with the rows themselves, so the
+    // corpus rebuilt at each dial keeps using the script this session actually started with.
+    scriptKeytermCorpus = scriptSeed.length ? scriptKeyterms(scriptSeed, SCRIPT_KEYTERM_LIMIT).join('\n') : '';
     scriptSnaps = 0;
     scriptSuggests = 0;
     lastScriptReason = '';
@@ -1731,6 +1786,7 @@ export function createOnlineLane(events: LaneEvents, config: OnlineLaneConfig = 
     // Phase 4 session ops: reset counters/lines, (re)start the auto-save + usage-report timers.
     sessionLines.clear();
     sessionLinesVersion = 0;
+    sessionEventId = (config.getEventId?.() ?? '').trim(); // TASK 14 — latched with the script, for the same reason
     lastSavedVersion = -1;
     finals = 0;
     ttsSentences = 0;
@@ -1748,7 +1804,9 @@ export function createOnlineLane(events: LaneEvents, config: OnlineLaneConfig = 
     foreignDrops = 0;
     languageTurns = 0;
     vendorTags = 0;
+    asrPauseSecs = null;
     asrLanguages = null;
+    asrLanguageDetection = null;
     // M13: a new session is a new speaker in a new room — never inherit the previous event's pauses. The
     // key starts at the technician's chosen source language, so the very first turn is already measured
     // into the right bucket instead of into a nameless one.
@@ -1868,7 +1926,9 @@ export function createOnlineLane(events: LaneEvents, config: OnlineLaneConfig = 
       foreignDrops,
       languageTurns,
       vendorTags,
+      asrPauseSecs,
       asrLanguages,
+      asrLanguageDetection,
       pauseWindowMs: lastStableWindowMs,
       pauseSamples: learned?.samples ?? 0,
       pauseAdaptive: lastStableWindowAdaptive,

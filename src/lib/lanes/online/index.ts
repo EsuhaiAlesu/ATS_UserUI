@@ -21,6 +21,7 @@ import {
   loadWallOutputs, saveWallOutputs, detectWallScreens, scanWallScreens, openWallWindows, getOpenWallIds, closeWallWindows,
   type WallOutput, type ScreenSupport, type WallScreen,
 } from './audienceWindows'
+import { loadSpeechRhythm, rhythmPauseSecs, saveSpeechRhythm, type SpeechRhythm } from './speechRhythm'
 
 export type { LaneLine, LaneStatus } from '../types'
 export type { OnlineDiagnostics, TtsGateMode } from './onlineLane'
@@ -41,6 +42,10 @@ export {
 export type { SaveOutcome } from './sessionExport'
 export type { AudienceLine } from '../../audienceChannel'
 export type { ScriptMatcherEntry } from './scriptMatcher'
+// TASK 7: the console shows the operator what their glossary becomes. Same reason as the mishearing
+// parser below — components go through the facade root.
+export { previewKeyterms, KEYTERM_MAX, KEYTERM_MAX_LEN } from './keytermBudget'
+export type { KeytermPreview } from './keytermBudget'
 // TASK 5: the console renders the "Sửa nghe nhầm" box and needs the parser to tell the operator which
 // lines are not usable yet. It is re-exported here rather than imported from './mishearing' directly, so
 // components keep going through the facade root — the same way SUBTITLE_FONT does.
@@ -48,6 +53,12 @@ export { applyMishearings, formatMishearingRules, parseMishearingRules, splitMis
 export type { MishearingRule } from './mishearing'
 export type { WallOutput, WallView, WallDock, ScreenSupport, WallScreen } from './audienceWindows'
 export { SUBTITLE_FONT } from '../../audienceSubtitles'
+// TASK 13 — "nhịp nói của buổi". The console picks the step; the lane sends the seconds.
+export type { SpeechRhythm } from './speechRhythm'
+export {
+  SPEECH_RHYTHM_KEY, SPEECH_RHYTHM_DEFAULT, SPEECH_RHYTHM_OPTIONS, PAUSE_SECS_MIN, PAUSE_SECS_MAX,
+  isSpeechRhythm, loadSpeechRhythm, saveSpeechRhythm, speechRhythmLabel, rhythmPauseSecs, clampPauseSecs,
+} from './speechRhythm'
 // M14 — the pre-session document summariser. A plain async function, not part of the hook: it belongs to
 // Chuẩn bị, runs at most once per session, and must never be reachable from anything a live session does.
 export { summarizePrepDocs, PREP_DOCS_MAX, PREP_DOC_MAX_CHARS } from './prepBrief'
@@ -170,6 +181,13 @@ export interface UseOnlineLane {
   // Bắt đầu, exactly like terms/brief.
   script: ScriptMatcherEntry[]
   setScript: (rows: ScriptMatcherEntry[]) => void
+  // TASK 13 — the meeting's speech rhythm, persisted per machine.
+  speechRhythm: SpeechRhythm
+  setSpeechRhythm: (v: SpeechRhythm) => void
+  // TASK 14 — which meeting the saved transcript belongs to. Set by the console from the same resolved
+  // pointer the script is loaded from, so the file and the script can never disagree about the meeting.
+  eventId: string
+  setEventId: (v: string) => void
   // voices + speed (TASK 5)
   voices: Record<'ja' | 'vi', OnlineVoice[]>
   voicesStatus: 'idle' | 'loading' | 'ready' | 'error'
@@ -233,6 +251,8 @@ export function useOnlineLane(): UseOnlineLane {
   const [brief, setBrief] = useState('')
   const [listenPaused, setListenPaused] = useState(false)
   const [script, setScript] = useState<ScriptMatcherEntry[]>([])
+  const [speechRhythm, setSpeechRhythmState] = useState<SpeechRhythm>(() => loadSpeechRhythm())
+  const [eventId, setEventIdState] = useState('')
 
   // voices + speed (TASK 5) — persisted so the operator's choice survives a reload.
   const [voices, setVoices] = useState<Record<'ja' | 'vi', OnlineVoice[]>>({ ja: [], vi: [] })
@@ -284,6 +304,12 @@ export function useOnlineLane(): UseOnlineLane {
   gateModeRef.current = gateMode
   const scriptRef = useRef<ScriptMatcherEntry[]>([])
   scriptRef.current = script
+  const speechRhythmRef = useRef<SpeechRhythm>('normal')
+  speechRhythmRef.current = speechRhythm
+  const setSpeechRhythm = useCallback((v: SpeechRhythm) => { setSpeechRhythmState(v); saveSpeechRhythm(v) }, [])
+  const eventIdRef = useRef('')
+  eventIdRef.current = eventId
+  const setEventId = useCallback((v: string) => { setEventIdState(v) }, [])
   const listenPausedRef = useRef(false)
   listenPausedRef.current = listenPaused
   const laneRef = useRef<OnlineLaneController | null>(null)
@@ -456,6 +482,9 @@ export function useOnlineLane(): UseOnlineLane {
         // two-lane treaty (src/lib/lanes/types.ts) and the offline lane has no script. The lane calls
         // this once at Bắt đầu and latches the rows for the whole session.
         getScript: () => scriptRef.current,
+        // TASK 13: read at ticket time, so changing the step applies from the next dial.
+        getPauseSecs: () => rhythmPauseSecs(speechRhythmRef.current),
+        getEventId: () => eventIdRef.current,
         onDirectedLine: (line) => {
           dirByLid.current.set(line.lid, line.dir)
           publisherRef.current?.publish({ lid: line.lid, sourceText: line.sourceText, targetText: line.targetText, interim: line.interim, corrected: line.corrected, at: line.at, dir: line.dir })
@@ -516,6 +545,7 @@ export function useOnlineLane(): UseOnlineLane {
     nearMicGate, setNearMicGate, micSensitivity, setMicSensitivity, loudGate, setLoudGate, speakEnabled, setSpeakEnabled, gateMode, setGateMode,
     listenPaused, setListenPaused,
     direction, setDirection, terms, setTerms, mishearing, setMishearing, brief, setBrief, script, setScript,
+    speechRhythm, setSpeechRhythm, eventId, setEventId,
     voices, voicesStatus, refreshVoices, voiceJa, setVoiceJa, voiceVi, setVoiceVi,
     speedMode, setSpeedMode, manualSpeed, setManualSpeed,
     twoWay, setTwoWay, directedLines, subtitleFont, setSubtitleFont,
