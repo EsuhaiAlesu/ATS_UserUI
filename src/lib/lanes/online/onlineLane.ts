@@ -21,6 +21,7 @@ import { createSpeechPauseProfile } from './speechPauseProfile';
 import { createSpeechShapeMonitor } from './speechShape';
 import { checkTtsLanguage } from './ttsLanguageGuard';
 import { createScriptMatcher, scriptKeyterms, type ScriptMatch, type ScriptMatcher, type ScriptMatcherEntry } from './scriptMatcher';
+import { judgeGuided, GUIDED_OFF, type GuidedState } from './guidedScript';
 import { applyMishearings, formatMishearingRules, splitMishearingLines, MISHEARING_MAX_CHARS, type MishearingRule } from './mishearing';
 import { nextScribeForceCommitDelay, planStableScribeCommit, planStillnessCommit, type ScribeManualCommitReason } from './scribeManualCommit';
 import { estimateSourceSpeechPace } from './sourceSpeechPace';
@@ -99,6 +100,12 @@ const REPEAT_GUARD_MIN_CHARS = 12; // finals this long that repeat verbatim are 
 // nothing changes for anyone who has not chosen the new step.
 const GHOST_SILENCE_MARGIN_MS = 2_500;
 const FALLBACK_PAUSE_SECS = 1.5;
+// TASK 37 — the floor, and it is not decoration. The derivation above was written to WIDEN this window,
+// but it applies to every step, and `fast` sends 0.9s ⇒ 3 400ms: TIGHTER than the 4 000 this replaced.
+// `fast` is the step whose own hint reads "Lễ, MC đọc theo kịch bản" — the one most likely to be running
+// at a ceremony — and the thing this window guards is a sentence vanishing with only a console.debug to
+// show for it. So the derivation may raise this window and may never lower it.
+const GHOST_WINDOW_FLOOR_MS = 4_000; // never stricter than the constant TASK 29 replaced
 
 // M5 — fast draft tier
 const DRAFT_DEBOUNCE_MS = 500; // interim text changed -> wait 500ms before considering a draft
@@ -201,6 +208,9 @@ export interface OnlineLaneConfig {
   // running ceremony would move the cursor mid-sentence. Rows in either direction are fine: the matcher
   // only considers rows whose source language is the one actually being spoken.
   getScript?: () => readonly ScriptMatcherEntry[] | undefined;
+  // TASK 34: where the operator says the ceremony has got to. Read LIVE on every finalised sentence, the
+  // opposite of getScript above — the whole point is that a human moves it WHILE the ceremony runs.
+  getGuided?: () => GuidedState | undefined;
   // TASK 14: which meeting the saved transcript belongs to. Read ONCE at start(), like the script.
   getEventId?: () => string | undefined;
   // TASK 5: the misheard-substitution layer, read LIVE on every event — deliberately NOT latched at
@@ -251,6 +261,9 @@ export interface OnlineDiagnostics {
   scriptLines: number;
   scriptSnaps: number; // sentences answered by the approved line (refine skipped entirely)
   scriptSuggests: number; // close, but judged not safe enough to speak — translated as usual
+  scriptFlips: number; // TASK 32 — snaps rescued by asking the script in the other language too
+  guidedReleases: number; // TASK 34 — answered verbatim because the operator pointed at the line
+  guidedMisses: number; // TASK 34 — armed but the sentence did not resemble the line
   scriptPosition: number; // 1-based script line expected next; 1 until something is accepted
   lastScriptReason: string; // why the last finalised sentence did not snap — verbatim for the operator
   // M11 — turn handling and the two-way guards.
@@ -466,6 +479,15 @@ export function createOnlineLane(events: LaneEvents, config: OnlineLaneConfig = 
   let scriptRows = 0; // approved rows this session; the matcher's own `size` counts candidates, not lines
   let scriptSnaps = 0;
   let scriptSuggests = 0;
+  // TASK 32 — snaps that only happened because the script was asked in the OTHER direction too, i.e. the
+  // recogniser had the language wrong. Worth counting on its own: a session where this climbs is a
+  // session where language detection is struggling, and that is invisible in the snap count alone.
+  let scriptFlips = 0;
+  // TASK 34 — the rows themselves, kept alongside the matcher so guided mode can read the pair for an
+  // arbitrary line. The matcher only exposes candidates, and a candidate is not addressable by row.
+  let scriptSeedRows: readonly ScriptMatcherEntry[] = [];
+  let guidedReleases = 0; // sentences answered because the OPERATOR pointed at the line
+  let guidedMisses = 0; // armed, but the sentence did not resemble the line — fell through to normal
   let lastScriptReason = '';
   let flushSeq = 0;
   const outstandingRefine = new Map<string, number>();
@@ -531,7 +553,8 @@ export function createOnlineLane(events: LaneEvents, config: OnlineLaneConfig = 
   // The silence threshold the SERVER reported as applied on the most recent dial — never the number the
   // client asked for, because the server clamps it. Re-latched on every dial (including reconnects).
   let appliedPauseSecs = FALLBACK_PAUSE_SECS;
-  const ghostWindowMs = (): number => Math.round(appliedPauseSecs * 1000) + GHOST_SILENCE_MARGIN_MS;
+  const ghostWindowMs = (): number =>
+    Math.max(GHOST_WINDOW_FLOOR_MS, Math.round(appliedPauseSecs * 1000) + GHOST_SILENCE_MARGIN_MS);
 
   function pruneVoiced(): number {
     const cutoff = Date.now() - ghostWindowMs();
@@ -1417,11 +1440,51 @@ export function createOnlineLane(events: LaneEvents, config: OnlineLaneConfig = 
     // zero candidates. That is deliberately NOT short-circuited here: letting the matcher answer puts
     // its own "kịch bản trống" into the diagnostics line, where a script silently doing nothing would
     // otherwise look exactly like a script that simply never matches.
+    // TASK 34 — the operator's cursor is asked FIRST. When somebody sitting beside the stage has pointed
+    // at a line, they are a better witness than any similarity score, and their line is released with a
+    // much lower bar. `judgeGuided` still refuses when the sentence does not resemble the line at all:
+    // a wrong cursor plus verbatim release puts entirely different words over the ballroom speakers.
+    const guided = config.getGuided?.() ?? GUIDED_OFF;
+    if (guided.armed) {
+      const verdict = judgeGuided(guided, scriptSeedRows, head);
+      if (verdict.kind === 'release') {
+        guidedReleases += 1;
+        // Deliberately NOT calling `scriptMatcher.accept()`. The two cursors are independent by design:
+        // the automatic one only shifts a candidate's score by ±0.04–0.06, so letting it fall behind
+        // costs almost nothing, whereas driving it from here would mean a disarm mid-ceremony hands the
+        // matcher a position no evidence ever put it in.
+        lastScriptReason = `dẫn tay · dòng ${guided.index + 1} (${verdict.score})`;
+        emitLine({ lid, sourceText: head, targetText: verdict.target, interim: false, corrected: true });
+        latency.markRefineShown(lid, performance.now());
+        recordSessionLine(lid, finalizedAt, head, verdict.target, true);
+        if (config.getSpeakEnabled?.()) void speakSnap(verdict.target, verdict.language, lid, order);
+        // eslint-disable-next-line no-console
+        console.info(`[onlineLane][guided] release lid=${lid} line=${guided.index + 1} score=${verdict.score}`);
+        return true;
+      }
+      if (verdict.kind === 'mismatch') {
+        guidedMisses += 1;
+        // Deliberately NOT `return false` — fall through to the automatic matcher below. A cursor one
+        // line behind the ceremony is the common case, and the matcher may well still find the right
+        // line on its own; refusing here would make guided mode WORSE than leaving it off.
+        //
+        // And deliberately NOT writing `verdict.reason` into `lastScriptReason`: the sentence is about to
+        // take the automatic path, and that path's own reason is the one the operator needs. The count in
+        // the diagnostics line is what says the cursor is off; `guidedMisses` climbing while
+        // `guidedReleases` stands still is the whole signal.
+      }
+    }
     if (!scriptMatcher) return false;
     const dl = dirLangs(lid, head, false); // settled at finalisation — never changes again
     let result: ScriptMatch;
+    let heardLanguage: 'vi' | 'ja';
     try {
-      result = scriptMatcher.match(head, dl.source);
+      // TASK 32: ask the script in the language the recogniser claimed AND in the other one. When the
+      // other direction is the one that snaps, the script is the better witness: a human approved that
+      // pair hours ago, whereas the language label came from a machine listening to a noisy ballroom.
+      const both = scriptMatcher.matchBothWays(head, dl.source);
+      result = both.result;
+      heardLanguage = both.language;
     } catch {
       return false; // a fault in the matcher must never cost the session a sentence
     }
@@ -1430,18 +1493,24 @@ export function createOnlineLane(events: LaneEvents, config: OnlineLaneConfig = 
       if (result.band === 'suggest') scriptSuggests += 1;
       return false;
     }
-    // The matched row must translate INTO the language this utterance is being shown in: the same row
-    // read from the other direction is a different sentence for this audience.
-    if (result.targetLanguage !== dl.target) return false;
+    // The row must translate INTO the language the OTHER side of the room needs. Normally that is
+    // `dl.target`. When the script overruled the recogniser, `dl` is describing the wrong direction
+    // entirely, so the script's own pair decides — that is the whole point of overruling it.
+    const flipped = heardLanguage !== dl.source;
+    const speakLanguage = flipped ? result.targetLanguage : dl.target;
+    if (result.targetLanguage !== speakLanguage) return false;
     const target = result.scriptTarget.trim();
     if (!target) return false;
+    if (flipped) scriptFlips += 1;
 
     scriptMatcher.accept(result); // the script cursor advances only on a line actually used
     scriptSnaps += 1;
     emitLine({ lid, sourceText: head, targetText: target, interim: false, corrected: true });
     latency.markRefineShown(lid, performance.now()); // final quality reached, just without the round trip
     recordSessionLine(lid, finalizedAt, head, target, true); // answered by the approved script, word for word
-    if (config.getSpeakEnabled?.()) void speakSnap(target, dl.target, lid, order);
+    // `speakLanguage`, not `dl.target`: when the script overruled the recogniser, `dl.target` names the
+    // language this line is NOT in, and the voice would read approved Japanese with a Vietnamese voice.
+    if (config.getSpeakEnabled?.()) void speakSnap(target, speakLanguage, lid, order);
     // eslint-disable-next-line no-console
     console.info(`[onlineLane][script] snap lid=${lid} score=${result.score} line=${result.index + 1}/${scriptRows}`);
     return true;
@@ -1907,12 +1976,16 @@ export function createOnlineLane(events: LaneEvents, config: OnlineLaneConfig = 
     const scriptSeed = config.getScript?.() ?? [];
     scriptMatcher = scriptSeed.length ? createScriptMatcher(scriptSeed) : null;
     scriptRows = scriptSeed.length;
+    scriptSeedRows = scriptSeed; // TASK 34 — guided mode addresses rows by number, not by candidate
     // TASK 6: the names on the approved rows are known hours before the ceremony — prime the recogniser
     // with them instead of letting it guess at them live. Latched here with the rows themselves, so the
     // corpus rebuilt at each dial keeps using the script this session actually started with.
     scriptKeytermCorpus = scriptSeed.length ? scriptKeyterms(scriptSeed, SCRIPT_KEYTERM_LIMIT).join('\n') : '';
     scriptSnaps = 0;
     scriptSuggests = 0;
+    scriptFlips = 0;
+    guidedReleases = 0;
+    guidedMisses = 0;
     lastScriptReason = '';
     flushSeq = 0;
     outstandingRefine.clear();
@@ -2072,6 +2145,9 @@ export function createOnlineLane(events: LaneEvents, config: OnlineLaneConfig = 
       scriptLines: scriptRows,
       scriptSnaps,
       scriptSuggests,
+      scriptFlips,
+      guidedReleases,
+      guidedMisses,
       scriptPosition: (scriptMatcher?.position() ?? 0) + 1,
       lastScriptReason,
       manualCommits,

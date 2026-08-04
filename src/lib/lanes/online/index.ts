@@ -16,6 +16,7 @@ import { loadLoudGate, saveLoudGate, type LoudGateMode } from './loudGate'
 import type { SaveOutcome } from './sessionExport'
 import { createAudiencePublisher, type AudienceLine } from '../../audienceChannel'
 import type { ScriptMatcherEntry } from './scriptMatcher'
+import { GUIDED_OFF, clampGuidedIndex, stepGuidedIndex, guidedReadout, guidedAllowed, type GuidedState, type SpeakerMode } from './guidedScript'
 import { SUBTITLE_FONT, clampSubtitleFont } from '../../audienceSubtitles'
 import {
   loadWallOutputs, saveWallOutputs, detectWallScreens, scanWallScreens, openWallWindows, getOpenWallIds, closeWallWindows,
@@ -41,6 +42,7 @@ export {
 export type { SaveOutcome } from './sessionExport'
 export type { AudienceLine } from '../../audienceChannel'
 export type { ScriptMatcherEntry } from './scriptMatcher'
+export { GUIDED_OFF, GUIDED_FLOOR, clampGuidedIndex, stepGuidedIndex, guidedReadout, judgeGuided, guidedAllowed, guidedBlockedReason, speakerModeLabel, SPEAKER_MODES, type GuidedState, type SpeakerMode } from './guidedScript'
 // TASK 7: the console shows the operator what their glossary becomes. Same reason as the mishearing
 // parser below — components go through the facade root.
 export { previewKeyterms, KEYTERM_MAX, KEYTERM_MAX_LEN } from './keytermBudget'
@@ -190,6 +192,18 @@ export interface UseOnlineLane {
   // Bắt đầu, exactly like terms/brief.
   script: ScriptMatcherEntry[]
   setScript: (rows: ScriptMatcherEntry[]) => void
+  // TASK 35 — the operator's own cursor. Unlike `script`, this is read LIVE by the lane on every
+  // finalised sentence: moving it is the one thing the operator does WHILE the ceremony runs.
+  guided: GuidedState
+  // TASK 36 — who is at the microphone now, and how closely they follow the script.
+  speakerName: string
+  setSpeakerName: (v: string) => void
+  speakerMode: SpeakerMode
+  setSpeakerMode: (v: SpeakerMode) => void
+  setGuidedArmed: (armed: boolean) => void
+  setGuidedIndex: (index: number) => void
+  stepGuided: (delta: number) => void
+  guidedText: string
   // TASK 14 — which meeting the saved transcript belongs to. Set by the console from the same resolved
   // pointer the script is loaded from, so the file and the script can never disagree about the meeting.
   eventId: string
@@ -257,6 +271,15 @@ export function useOnlineLane(): UseOnlineLane {
   const [brief, setBrief] = useState('')
   const [listenPaused, setListenPaused] = useState(false)
   const [script, setScript] = useState<ScriptMatcherEntry[]>([])
+  // TASK 35 — deliberately NOT persisted to localStorage. A cursor left over from yesterday's rehearsal
+  // pointing at line 14 of a script that has since been re-imported is exactly how a wrong line gets
+  // read aloud; guided mode must start every session parked and off.
+  const [guided, setGuided] = useState<GuidedState>(GUIDED_OFF)
+  // TASK 36 — who is at the microphone. Declared HERE, beside the other state, rather than beside
+  // `setGuidedArmed` where the prompt drew it: `speakerModeRef` below reads `speakerMode` during render,
+  // and a `const` declared after that line is in the temporal dead zone — a runtime crash, not a warning.
+  const [speakerName, setSpeakerName] = useState('')
+  const [speakerMode, setSpeakerModeState] = useState<SpeakerMode>('script')
   const [eventId, setEventIdState] = useState('')
 
   // voices + speed (TASK 5) — persisted so the operator's choice survives a reload.
@@ -309,6 +332,29 @@ export function useOnlineLane(): UseOnlineLane {
   gateModeRef.current = gateMode
   const scriptRef = useRef<ScriptMatcherEntry[]>([])
   scriptRef.current = script
+  const guidedRef = useRef<GuidedState>(GUIDED_OFF)
+  guidedRef.current = guided
+  const speakerModeRef = useRef<SpeakerMode>('script')
+  speakerModeRef.current = speakerMode
+  const setGuidedArmed = useCallback((armed: boolean) => {
+    // Arming is refused for a speaker who does not follow the script; disarming is always allowed.
+    setGuided((prev) => (armed && !guidedAllowed(speakerModeRef.current) ? { ...prev, armed: false } : { ...prev, armed }))
+  }, [])
+  const setSpeakerMode = useCallback((mode: SpeakerMode) => {
+    setSpeakerModeState(mode)
+    // ONE-WAY: a mode may switch guided mode OFF, never on. Handing the microphone to somebody who
+    // speaks off the cuff must stop verbatim release immediately — the operator has enough to do.
+    if (!guidedAllowed(mode)) setGuided((prev) => ({ ...prev, armed: false }))
+  }, [])
+  const setGuidedIndex = useCallback((index: number) => {
+    setGuided((prev) => ({ ...prev, index: clampGuidedIndex(index, scriptRef.current.length) }))
+  }, [])
+  const stepGuided = useCallback((delta: number) => {
+    setGuided((prev) => stepGuidedIndex(prev, delta, scriptRef.current.length))
+  }, [])
+  // Re-importing the script mid-preparation must not leave the cursor pointing into the old one.
+  useEffect(() => { setGuided(GUIDED_OFF) }, [script])
+  const guidedText = guidedReadout(guided, script)
   const eventIdRef = useRef('')
   eventIdRef.current = eventId
   const setEventId = useCallback((v: string) => { setEventIdState(v) }, [])
@@ -484,6 +530,8 @@ export function useOnlineLane(): UseOnlineLane {
         // two-lane treaty (src/lib/lanes/types.ts) and the offline lane has no script. The lane calls
         // this once at Bắt đầu and latches the rows for the whole session.
         getScript: () => scriptRef.current,
+        // TASK 35: LIVE, not latched — see the note on the state above.
+        getGuided: () => guidedRef.current,
         getEventId: () => eventIdRef.current,
         onDirectedLine: (line) => {
           dirByLid.current.set(line.lid, line.dir)
@@ -545,6 +593,8 @@ export function useOnlineLane(): UseOnlineLane {
     nearMicGate, setNearMicGate, micSensitivity, setMicSensitivity, loudGate, setLoudGate, speakEnabled, setSpeakEnabled, gateMode, setGateMode,
     listenPaused, setListenPaused,
     direction, setDirection, terms, setTerms, mishearing, setMishearing, brief, setBrief, script, setScript,
+    guided, setGuidedArmed, setGuidedIndex, stepGuided, guidedText,
+    speakerName, setSpeakerName, speakerMode, setSpeakerMode,
     eventId, setEventId,
     voices, voicesStatus, refreshVoices, voiceJa, setVoiceJa, voiceVi, setVoiceVi,
     speedMode, setSpeedMode, manualSpeed, setManualSpeed,

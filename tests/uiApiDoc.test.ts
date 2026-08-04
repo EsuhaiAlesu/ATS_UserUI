@@ -47,3 +47,18 @@ describe('the notes that stop somebody "tidying up"', () => {
     expect(DOC).toContain('filter_background_audio cannot be combined with');
   });
 });
+
+// TASK 38 — hai chỗ treo từ PHẦN 4/5, nay đóng lại.
+describe('hai chỗ treo đã đóng', () => {
+  it('hợp đồng cuối cùng cũng ghi /online-api/voices', () => {
+    const CONTRACT = readFileSync(new URL('../docs/ONLINE-LANE-CONTRACT.md', import.meta.url), 'utf8');
+    expect(CONTRACT).toContain('/online-api/voices');
+  });
+
+  it('màn Cài đặt in "3,0s" chứ không còn "3s"', () => {
+    // String(3) rụng mất phần thập phân trong khi String(2.4) thì giữ, nên cùng một màn hình nói hai kiểu.
+    const UI = readFileSync(new URL('../src/lib/lanes/online/components/OnlineRhythmSettings.tsx', import.meta.url), 'utf8');
+    expect(UI).toContain("secs.toFixed(1).replace('.', ',')");
+    expect(UI).not.toContain("String(secs).replace('.', ',')");
+  });
+});

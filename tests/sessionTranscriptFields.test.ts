@@ -104,12 +104,22 @@ describe('where the values come from', () => {
     expect(LANE).not.toContain('sourceLanguage: o.sourceLanguage, targetLanguage: o.targetLanguage');
   });
 
-  it('passes the script flag from exactly one call site; the other three pass four arguments', () => {
+  // PART 6 TASK 34 added a SECOND path that answers from an approved script line: the operator-guided
+  // release (`recordSessionLine(lid, finalizedAt, head, verdict.target, true)`). The rule this case was
+  // written to protect is unchanged and is what is still asserted — `fromScript: true` is reserved for
+  // lines a human approved, and every ORDINARY path passes four arguments. Only the counts moved: 4 → 5
+  // call sites, 1 → 2 flagged, still 3 unflagged.
+  it('passes the script flag ONLY from the approved-line paths; every ordinary path passes four arguments', () => {
     const calls = LANE.split('\n').filter((l) => /(?<!function )recordSessionLine\(/.test(l) && !l.startsWith('  function '));
-    expect(calls).toHaveLength(4);
-    const flagged = calls.filter((l) => l.includes('recordSessionLine(lid, finalizedAt, head, target, true)'));
-    expect(flagged).toHaveLength(1);
-    for (const other of calls.filter((l) => !flagged.includes(l))) {
+    expect(calls).toHaveLength(5);
+    const flagged = calls.filter((l) => /, true\)/.test(l));
+    expect(flagged).toHaveLength(2);
+    // and they are exactly the two approved-line paths, not some third thing that crept in
+    expect(flagged.some((l) => l.includes('recordSessionLine(lid, finalizedAt, head, target, true)'))).toBe(true);
+    expect(flagged.some((l) => l.includes('recordSessionLine(lid, finalizedAt, head, verdict.target, true)'))).toBe(true);
+    const ordinary = calls.filter((l) => !flagged.includes(l));
+    expect(ordinary).toHaveLength(3);
+    for (const other of ordinary) {
       const args = /recordSessionLine\(([^)]*)\)/.exec(other)?.[1] ?? '';
       expect(args.split(',')).toHaveLength(4);
     }

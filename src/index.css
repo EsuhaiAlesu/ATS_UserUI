@@ -533,3 +533,27 @@
     text-shadow: 0 1px 2px rgba(0, 0, 0, 0.55), 0 0 18px rgba(244, 208, 106, 0.18);
 }
 @media (prefers-reduced-motion: reduce) { .sub-para { transition: none; } }
+
+
+/* TASK 35 — "dẫn theo kịch bản": the operator's paper script, on screen, during a ceremony.
+   Sized for a finger in a dark hall rather than a mouse under office light. */
+.guided-panel { margin-top: 0.5rem; padding: 0.5rem 0.625rem; border: 1px solid var(--color-outline-variant); border-radius: 0.5rem; background: var(--color-surface-container-low); }
+.guided-readout { margin-top: 0.25rem; color: var(--color-on-surface-variant); }
+.guided-buttons { display: flex; gap: 0.5rem; margin-top: 0.5rem; }
+.guided-buttons button { min-height: 2.5rem; flex: 1; border: 1px solid var(--color-outline-variant); border-radius: 0.5rem; background: var(--color-surface-container); color: var(--color-on-surface); }
+.guided-buttons button:disabled { opacity: 0.4; cursor: not-allowed; }
+/* Scrolls inside itself so a 60-line script never pushes the rest of the console off the screen. */
+.guided-list { max-height: 40vh; overflow-y: auto; margin-top: 0.5rem; padding-left: 0; list-style: none; }
+.guided-line { display: flex; gap: 0.5rem; align-items: baseline; min-height: 2rem; padding: 0.375rem 0.5rem; cursor: pointer; border-radius: 0.375rem; }
+.guided-line:hover { background: var(--color-surface-container); }
+.guided-num { min-width: 2ch; text-align: right; color: var(--color-on-surface-variant); font-variant-numeric: tabular-nums; }
+/* The ONE thing on screen that answers "where does the machine think we are". It has to be unmissable. */
+.guided-line-now { background: var(--color-surface-container-high); font-weight: 700; color: var(--color-on-surface); box-shadow: inset 3px 0 0 var(--gold-line, #f4d06a); }
+.guided-draft { color: var(--color-error, #ef4444); }
+.guided-note { margin-top: 0.5rem; color: var(--color-on-surface-variant); line-height: 1.5; }
+
+/* TASK 36 — "đang tới lượt ai". Wraps on a narrow console; the controls stay finger-sized. */
+.guided-speaker { display: flex; flex-wrap: wrap; gap: 0.5rem 0.75rem; align-items: center; margin-bottom: 0.5rem; }
+.guided-speaker input, .guided-speaker select { min-height: 2.25rem; border: 1px solid var(--color-outline-variant); border-radius: 0.375rem; background: var(--color-surface); color: var(--color-on-surface); padding: 0 0.5rem; }
+.guided-hint { flex-basis: 100%; font-size: 0.75rem; color: var(--color-on-surface-variant); }
+.guided-blocked { margin-top: 0.25rem; font-size: 0.75rem; color: var(--color-error, #ef4444); line-height: 1.5; }

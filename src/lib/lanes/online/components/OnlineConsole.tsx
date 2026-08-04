@@ -20,6 +20,7 @@ import { collectPrepPack, collectPrepDocuments, collectPrepHeader, type PrepPack
 import { savePrepSummary, clearPrepSummary, getPrepSummary, type PrepSummary } from '../../../prepSummary'
 import { kbScopeId } from '../../../kbscope'
 import { loadScriptForSession, approveTranslatedRows, scriptLoadMessage, type ScriptLoad } from '../../../scriptLoad'
+import { GUIDED_FLOOR, SPEAKER_MODES, guidedAllowed, guidedBlockedReason } from '../guidedScript'
 import SubtitleParagraphs from '../../../../components/SubtitleParagraphs'
 
 type CfgStatus = Awaited<ReturnType<typeof fetchOnlineConfigStatus>>
@@ -403,6 +404,96 @@ const OnlineConsole: React.FC = () => {
       {/* M9 — an empty or unapproved script behaves exactly like a script that never matches, so it must
           be said out loud here; nothing else on this screen would tell the operator before going live. */}
       <div>{scriptLoadMessage(scriptLoad)}</div>
+      {/* TASK 35 — dẫn theo kịch bản. Only offered once the script actually loaded: arming a cursor over
+          zero rows is a button that can only disappoint. Kept right under the script status line so the
+          two are read together — "kịch bản nào" and "đang ở dòng nào" are one question in practice. */}
+      {lane.script.length > 0 && (
+        <div className="guided-panel">
+          {/* TASK 36 — the speaker list already exists on the meeting (`Conference.speakers[]`); nothing
+              is added to the script format for this. An empty list is normal for a meeting nobody filled
+              in, so the box stays usable as free text. */}
+          <div className="guided-speaker">
+            <label>
+              Đang tới lượt{' '}
+              <input
+                type="text"
+                list="guided-speaker-names"
+                value={lane.speakerName}
+                onChange={(e) => lane.setSpeakerName(e.target.value)}
+                placeholder="tên người đang nói"
+              />
+            </label>
+            <datalist id="guided-speaker-names">
+              {(event?.speakers ?? []).map((s) => (
+                <option key={s.id} value={s.name} />
+              ))}
+            </datalist>
+            <label>
+              Kiểu nói{' '}
+              <select
+                value={lane.speakerMode}
+                onChange={(e) => lane.setSpeakerMode(e.target.value as typeof lane.speakerMode)}
+              >
+                {SPEAKER_MODES.map((m) => (
+                  <option key={m.value} value={m.value}>{m.label}</option>
+                ))}
+              </select>
+            </label>
+            <div className="guided-hint">
+              {SPEAKER_MODES.find((m) => m.value === lane.speakerMode)?.hint}
+            </div>
+          </div>
+          <label>
+            <input
+              type="checkbox"
+              checked={lane.guided.armed}
+              disabled={!guidedAllowed(lane.speakerMode)}
+              onChange={(e) => lane.setGuidedArmed(e.target.checked)}
+            />{' '}
+            Dẫn theo kịch bản
+          </label>
+          {!guidedAllowed(lane.speakerMode) && (
+            <div className="guided-blocked">{guidedBlockedReason(lane.speakerMode)}</div>
+          )}
+          <div className="guided-readout">{lane.guidedText}</div>
+          {lane.guided.armed && (
+            <>
+              <div className="guided-buttons">
+                <button type="button" onClick={() => lane.stepGuided(-1)} disabled={lane.guided.index <= 0}>
+                  ← Lùi
+                </button>
+                <button
+                  type="button"
+                  onClick={() => lane.stepGuided(1)}
+                  disabled={lane.guided.index >= lane.script.length - 1}
+                >
+                  Tới →
+                </button>
+              </div>
+              {/* The list is the operator's paper script on screen. Clicking a line IS the cursor move —
+                  during a ceremony nobody counts button presses to get from line 3 to line 17. */}
+              <ol className="guided-list">
+                {lane.script.map((row, i) => (
+                  <li
+                    key={row.id}
+                    className={i === lane.guided.index ? 'guided-line guided-line-now' : 'guided-line'}
+                    onClick={() => lane.setGuidedIndex(i)}
+                  >
+                    <span className="guided-num">{i + 1}</span>
+                    <span className="guided-src">{row.src}</span>
+                    {row.status !== 'approved' ? <span className="guided-draft"> · chưa duyệt</span> : null}
+                  </li>
+                ))}
+              </ol>
+              <div className="guided-note">
+                Máy chỉ đọc nguyên văn dòng đang chọn khi câu vừa nghe giống dòng đó ít nhất{' '}
+                {Math.round(GUIDED_FLOOR * 100)}%. Nếu không giống, máy tự dịch như bình thường — bấm sai
+                dòng không làm buổi lễ tệ hơn khi tắt chế độ này.
+              </div>
+            </>
+          )}
+        </div>
+      )}
       {/* TASK 20 — the operator has to be able to tell "this will be here tomorrow" from "this is in this
           tab only". One short line; it appears under both boxes because both are saved together. */}
       <div>{boxesSaved ? 'Đã nhớ Thuật ngữ và Bối cảnh cho buổi này' : 'Chưa lưu — gõ xong vài giây là tự nhớ cho buổi này'}</div>
@@ -1120,7 +1211,12 @@ const OnlineConsole: React.FC = () => {
                     {/* M9 — snaps vs gần-khớp, and where the script thinks it is. `lastScriptReason` is the
                         matcher's own words for why the last sentence did not snap. */}
                     {diag.scriptLines > 0 && (
-                      <div>kịch bản {diag.scriptSnaps} khớp · {diag.scriptSuggests} gần khớp · dòng {diag.scriptPosition}/{diag.scriptLines}{diag.lastScriptReason ? ` · ${diag.lastScriptReason}` : ''}</div>
+                      <div>kịch bản {diag.scriptSnaps} khớp{diag.scriptFlips > 0 ? ` (${diag.scriptFlips} nhờ dò lại thứ tiếng)` : ''} · {diag.scriptSuggests} gần khớp · dòng {diag.scriptPosition}/{diag.scriptLines}{diag.lastScriptReason ? ` · ${diag.lastScriptReason}` : ''}</div>
+                    )}
+                    {/* TASK 35 — dẫn tay vs. tự khớp, tách riêng: khi con trỏ lệch buổi lễ thì `guidedMisses`
+                        leo còn `guidedReleases` đứng yên, và đó là dấu hiệu duy nhất nhìn thấy được. */}
+                    {(diag.guidedReleases > 0 || diag.guidedMisses > 0) && (
+                      <div>dẫn tay {diag.guidedReleases} lần đọc thẳng · {diag.guidedMisses} lần không giống dòng</div>
                     )}
                     <div>ttsQueue {diag.ttsQueueLength} · gate {diag.gateActive ? 'on' : 'off'} · gatedMs {diag.gatedMs}</div>
                     {/* M13 — câu ĐÃ hiện phụ đề nhưng KHÔNG đọc lên loa, vì chữ không đúng thứ tiếng của

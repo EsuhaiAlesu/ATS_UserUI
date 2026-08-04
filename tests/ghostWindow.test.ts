@@ -40,4 +40,23 @@ describe('ghostWindow — cửa sổ đi theo mức chờ im lặng đang dùng'
     expect(lane).toContain("appliedPauseSecs = typeof session.pauseSecs === 'number' ? session.pauseSecs : FALLBACK_PAUSE_SECS;");
     expect(lane).not.toContain('appliedPauseSecs = rhythmPauseSecs');
   });
+
+  // TASK 37 — lỗi của chính PHẦN 5, đã lên deploy. Công thức suy ra được viết để NỚI cửa sổ này, nhưng nó
+  // áp cho MỌI nấc, và nấc `fast` gửi 0,9s ⇒ 3 400ms — HẸP hơn 4 000 mà nó thay thế. Mà `fast` chính là
+  // nấc có gợi ý "Lễ, MC đọc theo kịch bản", tức nấc nhiều khả năng chạy ngày 08/08. Nới một chốt chặn là
+  // sửa lỗi; siết nó là một lỗi mới đội lốt bản sửa.
+  it('7 · chốt chặn được phép NỚI RỘNG và không bao giờ được siết chặt', () => {
+    expect(lane).toContain('Math.max(GHOST_WINDOW_FLOOR_MS, Math.round(appliedPauseSecs * 1000) + GHOST_SILENCE_MARGIN_MS)');
+    const floor = Number(/GHOST_WINDOW_FLOOR_MS = ([\d_]+);/.exec(lane)![1].replace(/_/g, ''));
+    expect(floor).toBe(4_000); // đúng hằng số cũ mà TASK 29 đã thay
+
+    const windowFor = (secs: number) => Math.max(floor, Math.round(secs * 1000) + margin);
+    expect(windowFor(0.9)).toBe(4_000); // nấc `fast` — không có sàn thì chỉ được 3 400
+    expect(windowFor(1.5)).toBe(4_000);
+    expect(windowFor(2.4)).toBe(4_900);
+    expect(windowFor(3.0)).toBe(5_500);
+    for (const secs of [0.9, 1.5, 2.4, 3.0]) {
+      expect(windowFor(secs), `${secs}s`).toBeGreaterThanOrEqual(4_000);
+    }
+  });
 });

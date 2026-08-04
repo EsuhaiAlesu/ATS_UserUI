@@ -115,7 +115,9 @@ const OnlineRhythmSettings: React.FC = () => {
       </p>
       <p className="text-xs text-on-surface-variant/60">
         Chốt chặn cuối gửi lên máy nhận dạng:{' '}
-        {secs === undefined ? 'giữ cài đặt sẵn (1,5s)' : `${String(secs).replace('.', ',')}s`} — phần này
+        {/* `toFixed(1)`, not `String()`: String(3) drops the decimal and prints "3s" while String(2.4)
+            keeps it, so the same screen said "3,0s" in the sentence above and "3s" here. */}
+        {secs === undefined ? 'giữ cài đặt sẵn (1,5s)' : `${secs.toFixed(1).replace('.', ',')}s`} — phần này
         nằm trong lần bắt tay đầu phiên nên chỉ đổi từ lần bấm Bắt đầu kế tiếp. Lưu trên máy này.
       </p>
     </div>

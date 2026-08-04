@@ -392,9 +392,41 @@ export function createScriptMatcher(
         return { ...result, band: 'snap', reason: 'khớp kịch bản' };
     }
 
+    /**
+     * TASK 32 — judge the same sentence as Vietnamese AND as Japanese, and hand back the better answer.
+     *
+     * Speech recognition decides what language a sentence was in, and it is wrong often enough to matter:
+     * at the 2026-08-01 rehearsal it labelled Vietnamese as Japanese three times. `match()` filters
+     * candidates by that label (`candidate.sourceLanguage !== language` → skip), so one wrong label
+     * throws away a perfect approved line in complete silence.
+     *
+     * Asking both ways cannot invent a match across languages. The measure is Dice over character
+     * bigrams with diacritics and whitespace stripped; a Vietnamese sentence and a Japanese one share
+     * almost no bigrams and score near 0, while `snap` sits at 0.82. The only sentences this rescues are
+     * the ones that were already the right line.
+     *
+     * Ties go to `preferred` — the language the recogniser claimed — because when both directions score
+     * the same the recogniser has told us nothing to overrule.
+     */
+    function matchBothWays(text: string, preferred: ScriptLanguage): { result: ScriptMatch; language: ScriptLanguage } {
+        const first = { result: match(text, preferred), language: preferred };
+        const other: ScriptLanguage = preferred === 'vi' ? 'ja' : 'vi';
+        // Only pay for the second pass when the first did not already answer outright.
+        if (first.result.band === 'snap') return first;
+        const second = { result: match(text, other), language: other };
+        if (second.result.band !== 'snap') {
+            // Neither direction snapped. Keep the preferred side's verdict so the diagnostics line still
+            // reports the reason for the language the operator believes is being spoken.
+            return first.result.band === 'suggest' || second.result.band !== 'suggest' ? first : second;
+        }
+        return second;
+    }
+
     return {
         /** Judge one finalised sentence. Does NOT remember the result — call `accept()` when it is used. */
         match,
+        /** TASK 32 — judge in both directions; see the comment above. */
+        matchBothWays,
         /**
          * Record that a line was used, so the order window advances with the script. Kept separate from
          * `match()` because the operator can veto, and a vetoed line must not drag the cursor forward.
