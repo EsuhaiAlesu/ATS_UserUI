@@ -31,6 +31,17 @@ import { toast } from '../../../toast'
 /** 600 → "0,6s". The operator thinks in seconds, not milliseconds. */
 const secsOf = (ms: number): string => (ms / 1000).toFixed(1).replace('.', ',')
 
+/**
+ * Does this step still close the recogniser's turn when it sees punctuation?
+ *
+ * TASK 27's fifth step does not. Its `sentenceMs`/`longMs` survive only so every option has the same
+ * shape; printing them would state a number that decides nothing. Read off `SPEECH_RHYTHM_OPTIONS`, which
+ * this file already imports, rather than through a facade helper — a display fix must not widen the
+ * facade's surface.
+ */
+const usesManualCommit = (v: SpeechRhythm): boolean =>
+  SPEECH_RHYTHM_OPTIONS.find((o) => o.value === v)?.manualCommit !== false
+
 const OnlineRhythmSettings: React.FC = () => {
   const [value, setValue] = useState<SpeechRhythm>(() => loadSpeechRhythm())
 
@@ -39,9 +50,11 @@ const OnlineRhythmSettings: React.FC = () => {
     saveSpeechRhythm(v)
     const w = rhythmCommitWindows(v)
     toast.success(
-      w.adaptive
-        ? `Đã chọn ${speechRhythmLabel(v)} — máy sẽ tự đo nhịp của người đang nói`
-        : `Đã chọn ${speechRhythmLabel(v)} — chờ ${secsOf(w.sentenceMs)}s im lặng mới chốt câu`,
+      !usesManualCommit(v)
+        ? `Đã chọn ${speechRhythmLabel(v)} — máy nghe chạy liền mạch, chốt khi chữ đứng im 2,5s`
+        : w.adaptive
+          ? `Đã chọn ${speechRhythmLabel(v)} — máy sẽ tự đo nhịp của người đang nói`
+          : `Đã chọn ${speechRhythmLabel(v)} — chờ ${secsOf(w.sentenceMs)}s im lặng mới chốt câu`,
     )
   }
 
@@ -77,7 +90,11 @@ const OnlineRhythmSettings: React.FC = () => {
                 <span className={`font-label-caps text-label-caps ${on ? 'text-secondary' : 'text-on-surface'}`}>
                   {o.label}
                   <span className="ml-2 tabular-nums text-on-surface-variant">
-                    {o.adaptive ? 'tự đo' : `cắt sau ${secsOf(o.sentenceMs)}s`}
+                    {o.manualCommit === false
+                      ? 'chốt khi im 2,5s'
+                      : o.adaptive
+                        ? 'tự đo'
+                        : `cắt sau ${secsOf(o.sentenceMs)}s`}
                   </span>
                 </span>
                 <span className="block text-xs text-on-surface-variant leading-relaxed mt-0.5">{o.hint}</span>
@@ -89,9 +106,11 @@ const OnlineRhythmSettings: React.FC = () => {
 
       <p className="text-xs text-on-surface-variant/80">
         Đang chọn: <strong>{speechRhythmLabel(value)}</strong>
-        {rhythmCommitWindows(value).adaptive
-          ? ' — mốc chờ do máy tự đo theo người đang nói (tối đa 2,0s); chưa đo đủ thì tạm chờ 0,9s.'
-          : ` — máy chờ ${secsOf(rhythmCommitWindows(value).sentenceMs)}s im lặng mới chốt một câu.`}{' '}
+        {!usesManualCommit(value)
+          ? ' — máy nghe không bao giờ bị cắt vì dấu chấm; câu chốt khi chữ đứng im 2,5s, hoặc khi máy nghe tự đóng sau 3,0s im lặng.'
+          : rhythmCommitWindows(value).adaptive
+            ? ' — mốc chờ do máy tự đo theo người đang nói (tối đa 2,0s); chưa đo đủ thì tạm chờ 0,9s.'
+            : ` — máy chờ ${secsOf(rhythmCommitWindows(value).sentenceMs)}s im lặng mới chốt một câu.`}{' '}
         <strong>Có hiệu lực ngay</strong>, kể cả đang chạy giữa buổi.
       </p>
       <p className="text-xs text-on-surface-variant/60">

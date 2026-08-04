@@ -180,6 +180,17 @@ const server = http.createServer(async (req, res) => {
     if (!isAuthed(req)) {
         return send(res, 200, loginPage(false), { 'Content-Type': 'text/html; charset=utf-8' });
     }
+
+    // Who is logged in. The Settings page used to have "leson@esuhai.com" written into its source, so
+    // changing AUTH_USER on Railway made the screen state something untrue about the operator's own
+    // session. This route sits AFTER the gate above, so only somebody already logged in can read it, and it
+    // returns nothing beyond the username that the login form already displays — no password, no session
+    // secret, no token. With the gate off it says so plainly instead of inventing a name.
+    if (url === '/whoami') {
+        return send(res, 200, JSON.stringify({ user: GATE_ON ? AUTH_USER : null, gate: GATE_ON }), {
+            'Content-Type': 'application/json; charset=utf-8',
+        });
+    }
     // --- ONLINE lane backend: same origin, HTTP /online-api/* (+ WS /online-api/asr via upgrade) ---
     // Runs AFTER the auth gate (so it inherits the same login) and BEFORE the SPA fallback.
     if (handleOnlineApi && (await handleOnlineApi(req, res))) return;

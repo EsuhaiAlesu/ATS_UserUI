@@ -55,6 +55,89 @@ export function endsWithStrongSentenceBreak(text: string, includePeriods: boolea
   return findLastStrongSentenceBreak(trimmed, includePeriods) === trimmed.length;
 }
 
+/** Punctuation that follows a sentence break and belongs to the same sentence, never to the next one. */
+const TRAILING_PUNCTUATION = new Set(['…', '.', '．', '"', '”', '»', '」', '』', ')', '）', '’', "'"]);
+
+/**
+ * EVERY sentence boundary in `text`, as exclusive end offsets that already include the punctuation.
+ *
+ * Different from `findLastStrongSentenceBreak` in that it returns the whole list rather than the final
+ * one — which is what counting "have we got 2–3 sentences yet?" needs, without slicing the string over and
+ * over. A run of punctuation ("?!", "。」") is swallowed into ONE boundary; otherwise "Thật không?!" counts
+ * as two sentences. `…` is deliberately NOT a boundary: an ellipsis announces that more is coming, and
+ * `SOFT_BREAK_END_PATTERN` in livePipelinePolicy already treats it that way.
+ */
+export function findSentenceEnds(text: string, includePeriods = true): number[] {
+  const ends: number[] = [];
+  const isBreakAt = (index: number) => {
+    const character = text[index] ?? '';
+    if (ALWAYS_STRONG_BREAKS.has(character)) return true;
+    return includePeriods && PERIOD_BREAKS.has(character) && !isNumericSeparator(text, index);
+  };
+  for (let index = 0; index < text.length; index += 1) {
+    if (!isBreakAt(index)) continue;
+    let last = index;
+    while (last + 1 < text.length && (isBreakAt(last + 1) || TRAILING_PUNCTUATION.has(text[last + 1] ?? ''))) {
+      last += 1;
+    }
+    ends.push(last + 1);
+    index = last;
+  }
+  return ends;
+}
+
+/**
+ * The length of the LAST sentence in `text`, its punctuation included. When the string does not end on a
+ * boundary, the unfinished tail is what gets measured. One question only: is the thing at the end being
+ * CALLED a sentence actually long enough to be one?
+ */
+export function lastSentenceLength(text: string): number {
+  const trimmed = text.trimEnd();
+  if (!trimmed) return 0;
+  const ends = findSentenceEnds(trimmed);
+  if (!ends.length || ends[ends.length - 1] !== trimmed.length) {
+    const start = ends.length ? ends[ends.length - 1] : 0;
+    return trimmed.slice(start).trim().length;
+  }
+  const start = ends.length >= 2 ? ends[ends.length - 2] : 0;
+  return trimmed.slice(start).trim().length;
+}
+
+/**
+ * Was this trailing full stop INVENTED BY THE RECOGNISER as it closed the turn?
+ *
+ * 04/08 evidence: "Nếu mà tính." / "năng nó bật lên" — the speaker hesitated between the two syllables of
+ * the compound word "tính năng", the recogniser heard enough silence to close the turn, and added a full
+ * stop nobody spoke. Everything downstream then treats that stop as proof the thought is over: the stub
+ * waits only the base continuation window, is flushed alone, and drags a stub translation and a stub
+ * loudspeaker line with it.
+ *
+ * The tell is LENGTH, not vocabulary: the last sentence is shorter than the minimum this lane requires
+ * before it will call anything a sentence. Deliberately the same ruler `handleFinal` uses for `complete` —
+ * if these two ever disagree, one of them is throwing away what the other is waiting for.
+ *
+ * Only full stops count. A question mark or an exclamation mark has to be heard in the intonation, and the
+ * recogniser essentially never invents one.
+ */
+export function endsProvisionalSentence(text: string, baseMinChars: number): boolean {
+  const trimmed = text.trimEnd();
+  if (!/[.．。]$/.test(trimmed)) return false;
+  return lastSentenceLength(trimmed) < segmentCharLimit(baseMinChars, trimmed);
+}
+
+/**
+ * Drop the invented full stop at a join, but only once there is EVIDENCE the speaker carried on: the
+ * continuation starts with a lowercase letter. An uppercase start means the recogniser believes a new
+ * sentence began — and then the full stop stays, because deleting a real one would glue two sentences into
+ * a run-on that the paragraph rule can no longer break.
+ */
+export function stripProvisionalSentenceEnd(previous: string, next: string, baseMinChars: number): string {
+  const head = next.trimStart();
+  if (!head || !/^\p{Ll}/u.test(head)) return previous;
+  if (!endsProvisionalSentence(previous, baseMinChars)) return previous;
+  return previous.trimEnd().slice(0, -1).trimEnd();
+}
+
 // ---- one character does not carry the same amount of meaning in both languages ----
 //
 // The two segmentation ceilings (SEGMENT_MAX_CHARS 120 / SEGMENT_MIN_CHARS 18) COUNT CHARACTERS, and

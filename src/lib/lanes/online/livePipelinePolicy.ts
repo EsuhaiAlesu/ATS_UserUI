@@ -53,9 +53,15 @@ const CEREMONY_SHORT_PATTERN = /(?:^|\s)(?:vâng|xin chào|cảm ơn|kính thưa
 // (character cap + hold time), so a speaker who never punctuates can still never hang the pipeline.
 
 export const CONTINUATION_MIN_WAIT_MS = 400;
-export const CONTINUATION_MAX_WAIT_MS = 1_200;
+// 04/08: the old 1 200 ceiling was sized for a 1.5s silence threshold — this window only has to cover
+// what is LEFT of a pause after the recogniser has finished counting its own silence. Somebody thinking
+// while they talk leaves 3s in the middle of a sentence; the remainder is 1.5s, over the old ceiling, and
+// the half-sentence went out alone. 2 000 covers pauses up to ~3.5s. SEGMENT_MAX_HOLD_MS still bounds the
+// total hold from above, so nothing can hang here.
+export const CONTINUATION_MAX_WAIT_MS = 2_000;
 export const CONTINUATION_BASE_WAIT_MS = 700; // unfinished, but nothing says more is coming
-export const CONTINUATION_OPEN_ENDED_WAIT_MS = 1_100; // ends on a word/comma that CANNOT end a sentence
+// Ending on a word that CANNOT close a sentence is the strongest evidence there is that more is coming.
+export const CONTINUATION_OPEN_ENDED_WAIT_MS = 1_600;
 export const CONTINUATION_SELF_CONTAINED_WAIT_MS = 600; // a greeting or a bare term stands on its own
 export const CONTINUATION_FILLER_WAIT_MS = 2_500; // "à…", "ええと…" — legacy conservative delay
 // Middle of the 'normal' band in sourceSpeechPace (2.3–3.6 units/s): the pace the windows are tuned for.
@@ -63,7 +69,19 @@ const NOMINAL_UNITS_PER_SECOND = 3;
 
 const SOFT_BREAK_END_PATTERN = /[,，、;；:：…]\s*$/u;
 // Vietnamese function words that cannot close a sentence: a final ending here is mid-thought, full stop.
-const VI_OPEN_ENDED_PATTERN = /(?:^|\s)(?:và|với|cùng|hoặc|hay|nhưng|mà|thì|là|của|cho|để|khi|nếu|vì|do|nên|rằng|các|những|một|trong|ngoài|trên|dưới|về|từ|đến|tới|theo|bằng|tại|như|sẽ|đang|được|cũng|rất|hơn|sau|trước|giữa|gồm|nhằm|qua)\s*$/iu;
+//
+// The second group was added on 04/08 from a REAL transcript, not from imagination: one continuous story
+// broke at "…của anh trong", "…nhìn thấy cái", "…việc mẹ có" and "…tượng trưng cho cuộc" — four stray
+// lines, four separate translations, four separate trips through the loudspeaker. Only "trong" was in the
+// list; the other three were therefore judged "possibly finished" and waited 700ms instead of 1 100ms
+// before being pushed out on their own.
+//
+// Why widening this is free: this pattern is ONLY consulted for text that does not already end in strong
+// punctuation. A genuinely finished sentence ("Dạ có.") carries its full stop and never matches here, so
+// the whole cost of a wrong guess is ~1 extra second of waiting, while the cost of a miss is a sentence
+// torn in half in front of the hall. Deliberately NOT added: "rồi" and "con" — both really do end
+// sentences ("Chuẩn bị xong rồi", "Nhà mẹ có hai con").
+const VI_OPEN_ENDED_PATTERN = /(?:^|\s)(?:và|với|cùng|hoặc|hay|nhưng|mà|thì|là|của|cho|để|khi|nếu|vì|do|nên|rằng|các|những|một|trong|ngoài|trên|dưới|về|từ|đến|tới|theo|bằng|tại|như|sẽ|đang|được|cũng|rất|hơn|sau|trước|giữa|gồm|nhằm|qua|có|cái|cuộc|chiếc|sự|nỗi|niềm|mỗi|từng|mọi|bị|khiến|bởi|dù|tuy|vẫn|chưa|đã|đều|nơi)\s*$/iu;
 // Japanese particles + connectives in the same role (te-form, "…から", "…ので", "…ですが").
 const JA_OPEN_ENDED_PATTERN = /(?:[のがをにはでともへやしばて]|から|まで|けど|けれど|ので|のに|ため|ですが|ますが|そして|しかし|または)\s*$/u;
 
@@ -83,6 +101,13 @@ export type ContinuationWaitInput = {
   sessionTerms?: string;
   /** Measured speech units per second for the utterance in progress, when the timing is known. */
   unitsPerSecond?: number;
+  /**
+   * Does this text end on a full stop the RECOGNISER invented while closing the turn (see
+   * `endsProvisionalSentence`)? The CALLER decides, because the ruler for "long enough to be a sentence"
+   * belongs to the lane, not to this policy module — importing it here would make two modules own the same
+   * number. True means the fragment is held like an unfinished thought rather than like a finished one.
+   */
+  provisionalEnd?: boolean;
 };
 
 /**
@@ -106,7 +131,11 @@ export function getContinuationWaitMs(input: ContinuationWaitInput): number {
     .some((term) => normalized.includes(term));
   // ↑↑↑ end of the unchanged block ↑↑↑
 
-  const openEnded = endsOpenEnded(text);
+  // 04/08: a full stop the recogniser added while closing the turn is NOT evidence that the thought is
+  // over. Hold it like an unfinished one — if the speaker does carry on, the join is caught; if they had
+  // genuinely finished, it costs under a second. Note this can only ever LENGTHEN the window: the
+  // self-contained shortcut below is skipped whenever `openEnded` is true.
+  const openEnded = endsOpenEnded(text) || input.provisionalEnd === true;
   let wait = openEnded ? CONTINUATION_OPEN_ENDED_WAIT_MS : CONTINUATION_BASE_WAIT_MS;
   // A greeting or a bare session term is a complete utterance by itself — unless it ends open, in which
   // case the opening words are just the start of a longer ceremonial sentence and the wait stands.

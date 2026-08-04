@@ -99,7 +99,7 @@ describe('livePipelinePolicy — M12: cửa sổ chờ phần tiếp (getContinu
     expect(fast).toBe(Math.round(CONTINUATION_BASE_WAIT_MS * 0.6)) // 3/6 = 0.5 → chặn ở 0.6
   })
 
-  it('cửa sổ luôn nằm trong khoảng 0,4–1,2 s mà hội trường chịu được', () => {
+  it('cửa sổ luôn nằm trong khoảng 0,4–2,0 s mà hội trường chịu được', () => {
     const texts = ['nó tốt', 'xin chào', 'Kính thưa quý vị,', 'Chúng tôi rất vinh dự được đón tiếp và', '皆様に']
     for (const text of texts) {
       for (const unitsPerSecond of [undefined, 0.5, 2, 3, 6, 12]) {

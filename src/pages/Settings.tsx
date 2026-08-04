@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import PageHeader from '../components/PageHeader';
 import { useLiveSession } from '../lib/LiveSessionContext';
 import { API_BASE } from '../lib/api';
@@ -42,6 +42,27 @@ const Settings: React.FC = () => {
     // Connection
     const [apiBase, setApiBase] = useState(initial.apiBase ?? '');
     const [testStatus, setTestStatus] = useState('');
+
+    // Who is logged in — ASK the server, never hard-code. FOUR states, and all four are shown:
+    // `undefined` = the answer has not come back yet · `null` = the server SAID the gate is off, which is
+    // only ever concluded from `gate === false`, never from a failure · `'?'` = the question could not be
+    // answered at all · a string = the real username.
+    //
+    // The `'?'` state is not defensive padding, it is the whole point. A gated server answers /whoami with
+    // the login PAGE at status 200 whenever the cookie is missing or expired, so `r.ok` is true and
+    // `r.json()` throws. Collapsing that into `null` would print "đăng nhập đang tắt" on a deploy where the
+    // gate is emphatically ON — the exact class of lie this task exists to remove, just pointing the other
+    // way. Running `vite dev` with no `node server.js` next to it lands in the same state.
+    // `alive` guards against setting state after the page has been left.
+    const [authUser, setAuthUser] = useState<string | null | undefined>(undefined);
+    useEffect(() => {
+        let alive = true;
+        fetch('/whoami', { credentials: 'same-origin' })
+            .then((r) => (r.ok ? r.json() : null))
+            .then((d) => { if (alive) setAuthUser(typeof d?.user === 'string' ? d.user : (d && d.gate === false ? null : '?')); })
+            .catch(() => { if (alive) setAuthUser('?'); });
+        return () => { alive = false; };
+    }, []);
 
     // Display (caption size — the previously keyboard-only /stream zoom)
     const [capScale, setCapScale] = useState(() => {
@@ -149,7 +170,15 @@ const Settings: React.FC = () => {
 
                     {/* TÀI KHOẢN */}
                     <Section id="tk" icon="account_circle" title="Tài khoản & Bảo mật" desc="Đăng nhập được bật/tắt trên máy chủ (Railway · AUTH_PASSWORD).">
-                        <div className="text-sm text-on-surface-variant">Người dùng: <span className="text-on-surface">leson@esuhai.com</span></div>
+                        <div className="text-sm text-on-surface-variant">
+                            {authUser === undefined
+                                ? 'Đang hỏi máy chủ…'
+                                : authUser === null
+                                    ? <>Đăng nhập <span className="text-on-surface">đang tắt</span> — ai mở đúng địa chỉ cũng vào được. Đặt AUTH_PASSWORD trên Railway để bật.</>
+                                    : authUser === '?'
+                                        ? <>Không hỏi được máy chủ — có thể phiên đăng nhập đã hết hạn. Xin tải lại trang.</>
+                                        : <>Người dùng: <span className="text-on-surface">{authUser}</span></>}
+                        </div>
                         <a href="/logout" className={`${BTN} border border-error text-error hover:bg-error hover:text-on-error`}>
                             <span className="material-symbols-outlined text-[18px]" aria-hidden="true">logout</span>Đăng xuất
                         </a>

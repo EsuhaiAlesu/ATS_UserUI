@@ -4,14 +4,14 @@
 //   1. the "there is a voice here" floor, inside the capture worklet (`pcm16Capture.ts` →
 //      `resolveVoiceFloor`) — it DOES follow the setting: the far step lowers it to a quarter of close;
 //   2. the "loud enough to count as sound" threshold — `AUDIO_LOUD_LEVEL_THRESHOLD = 0.09`, hard-coded in
-//      `onlineLane.ts`, following nothing. Only a VU frame above it refreshes `lastLoudAt`; four seconds
-//      (`LONG_SILENCE_MS`) without one and EVERY final is dropped as `long-silence` and partials are
-//      blocked outright.
+//      `onlineLane.ts`, following nothing. Only a VU frame above it refreshes `lastLoudAt`; go one ghost
+//      window (`ghostWindowMs()` — the silence threshold in force plus 2.5s) without one and EVERY final
+//      is dropped as `long-silence` and partials are blocked outright.
 // With a speakerphone in the middle of a table the same speech is counted as a voice by (1) and as "no
 // sound has occurred" by (2) — heard, and thrown away. The peak the far step already accepts as speech is
 // ≈ 0.00875, more than ten times below 0.09.
 //
-// This file loosens NOTHING else. `LONG_SILENCE_MS`, the voiced-ms window and the floors in
+// This file loosens NOTHING else. The ghost window, the voiced-ms window and the floors in
 // `asrSpeechEvidence.ts` are untouched; it decides exactly one number: what counts as "loud enough".
 //
 // THE INVARIANT: at the **close** step the threshold must come out at EXACTLY 0.09, the number that has

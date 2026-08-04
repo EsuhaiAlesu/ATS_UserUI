@@ -12,7 +12,8 @@
 import type { LaneController, LaneEvents, LaneLine, LaneStatus } from '../types';
 import { startPcm16Capture, type CaptureHandle, type CapturePacket, type MicSensitivity } from './pcm16Capture';
 import { resolveLoudThreshold, type LoudGateMode } from './loudGate';
-import { endsWithStrongSentenceBreak, findFirstCommaClauseBreak, findLastStrongSentenceBreak, segmentCharLimit } from './transcriptSegmentation';
+import { endsProvisionalSentence, endsWithStrongSentenceBreak, findFirstCommaClauseBreak, findLastStrongSentenceBreak, segmentCharLimit, stripProvisionalSentenceEnd } from './transcriptSegmentation';
+import { planParagraphCut } from './paragraphStream';
 import { ASR_FINAL_MIN_VOICED_MS, ASR_PARTIAL_MIN_VOICED_MS, hasClearSpeechEvidence, isInventedNumber, isNonSpeechAnnotation } from './asrSpeechEvidence';
 import { isStableDraftPrefix, joinLiveDraftSource, stripPromotedPrefix } from './liveDraftTranslation';
 import { DRAFT_RATE_WINDOW_MS, decideCaptureFrame, decideDraftAdmission, getContinuationWaitMs } from './livePipelinePolicy';
@@ -21,14 +22,14 @@ import { createSpeechShapeMonitor } from './speechShape';
 import { checkTtsLanguage } from './ttsLanguageGuard';
 import { createScriptMatcher, scriptKeyterms, type ScriptMatch, type ScriptMatcher, type ScriptMatcherEntry } from './scriptMatcher';
 import { applyMishearings, formatMishearingRules, splitMishearingLines, MISHEARING_MAX_CHARS, type MishearingRule } from './mishearing';
-import { nextScribeForceCommitDelay, planStableScribeCommit, type ScribeManualCommitReason } from './scribeManualCommit';
+import { nextScribeForceCommitDelay, planStableScribeCommit, planStillnessCommit, type ScribeManualCommitReason } from './scribeManualCommit';
 import { estimateSourceSpeechPace } from './sourceSpeechPace';
 import { enqueueTtsSentence, getTtsQueueLength, resetTtsPlayback, setTtsPlaybackStartHandler, stopTtsPlayback, subscribeTtsSpeaking } from './ttsPlayback';
 import { buildSessionExport, saveSessionExport, type SaveOutcome, type SessionLine } from './sessionExport';
 import { createLatencyTracker, type LatencyReport } from './latencyTracker';
 import { classifyInterimUtterance, createDirectionTracker, decideFinalLanguage, directionOf, type DirectionTracker, type Lang } from './utteranceDirection';
 import { fetchAsrSession, createAsrCodec, type AsrCodec } from './asrTransport';
-import { SPEECH_RHYTHM_DEFAULT, loadSpeechRhythm, rhythmCommitWindows, rhythmPauseSecs, speechRhythmLabel } from './speechRhythm';
+import { SPEECH_RHYTHM_DEFAULT, loadSpeechRhythm, rhythmCommitWindows, rhythmPauseSecs, rhythmUsesManualCommit, speechRhythmLabel } from './speechRhythm';
 import { refineReasonText } from './refineFailure';
 
 const ONLINE_BASE = '/online-api';
@@ -61,15 +62,43 @@ const SEGMENT_MIN_CHARS = 18; // shorter fragments wait to merge with the next o
 // M12 — the two hard ceilings on the continuation window (livePipelinePolicy). A buffer past either one
 // is flushed even mid-thought: a late sentence is recoverable, a sentence that never appears is not.
 const SEGMENT_MAX_HOLD_MS = 3_000; // how long finalised text may keep waiting for the rest of its thought
+// TASK 28 — SOFT ceiling vs HARD ceiling. The 3s above used to apply to every buffer, including one sitting
+// in the middle of an unfinished sentence, and it cut wherever the buffer happened to be. The 04/08
+// transcript shows the result verbatim: "Ở đây mình có những viên s" / "ét- ...", "Lúc này anh có" /
+// "thể chọn" — cut mid-word, and a stub like that drags its translation and its loudspeaker line down with
+// it.
+//
+// From now on 3s may only cut AFTER a sentence-ending mark. With no legal place to cut, the sentence keeps
+// running until the hard ceiling below, so in practice "cut mid-sentence" disappears instead of merely
+// becoming rarer.
+//
+// 8s, not longer, and the reason is the room rather than the language. A continuous run of speech with no
+// sentence-ending mark at all is rare, so the ceiling is reached rarely — but when it IS reached, this
+// number is how long a hall full of people watches a line that does not move. Eight seconds is already a
+// long time to stare at a frozen subtitle; the earlier draft said twelve, which is longer than most people
+// will tolerate before assuming the machine has died. A forced cut is the lesser harm. Raise it after the
+// ceremony if a measured session says the cut lands badly.
+const SEGMENT_HARD_HOLD_MS = 8_000;
 // M12 — how long an unfinished head stays available as "the first half" for the NEXT line. Long enough to
 // cover the recogniser's 1.5s silence close plus a real thinking pause, short enough that a genuinely new
 // thought is never translated as the continuation of something the speaker had already abandoned.
 const FRAGMENT_LINK_MAX_GAP_MS = 10_000;
 
 // M4 — ghost-transcript guard
-const VOICED_WINDOW_MS = 4_000; // sliding window over which voiced evidence is summed
 const REPEAT_GUARD_MIN_CHARS = 12; // finals this long that repeat verbatim are hallucinations
-const LONG_SILENCE_MS = 4_000; // a transcript after this long with no sound -> ghost
+// TASK 29 — these two windows must NOT be constants, and that lesson was paid for on 04/08.
+//
+// They used to be 4 000 each, and 4 000 was not arbitrary: it is the 1.5s default silence threshold plus a
+// 2.5s margin. A final can never arrive sooner than the vendor's own silence threshold, so raising that
+// threshold to 3.0s (TASK 27's step) leaves under 1 000ms of margin for the vendor's own pass, the network
+// and the event loop — where there used to be 2 500ms. Finals that overran the remainder landed past the
+// 4 000ms line and were thrown away by this very guard. `dropGhost` only writes `console.debug`: no toast,
+// no red line, nothing on the wall. A whole sentence vanished in complete silence.
+//
+// Derived from the threshold ACTUALLY IN FORCE, the pair produces exactly 4 000 again at the default, so
+// nothing changes for anyone who has not chosen the new step.
+const GHOST_SILENCE_MARGIN_MS = 2_500;
+const FALLBACK_PAUSE_SECS = 1.5;
 
 // M5 — fast draft tier
 const DRAFT_DEBOUNCE_MS = 500; // interim text changed -> wait 500ms before considering a draft
@@ -499,8 +528,13 @@ export function createOnlineLane(events: LaneEvents, config: OnlineLaneConfig = 
     if (config.onDirectedLine) config.onDirectedLine({ ...full, dir: dirLangs(full.lid, full.sourceText, full.interim).dir });
   };
 
+  // The silence threshold the SERVER reported as applied on the most recent dial — never the number the
+  // client asked for, because the server clamps it. Re-latched on every dial (including reconnects).
+  let appliedPauseSecs = FALLBACK_PAUSE_SECS;
+  const ghostWindowMs = (): number => Math.round(appliedPauseSecs * 1000) + GHOST_SILENCE_MARGIN_MS;
+
   function pruneVoiced(): number {
-    const cutoff = Date.now() - VOICED_WINDOW_MS;
+    const cutoff = Date.now() - ghostWindowMs();
     while (voicedWindow.length && voicedWindow[0].at < cutoff) voicedWindow.shift();
     let sum = 0;
     for (const e of voicedWindow) sum += e.voicedMs;
@@ -656,7 +690,14 @@ export function createOnlineLane(events: LaneEvents, config: OnlineLaneConfig = 
     segmentTimer = setTimeout(() => {
       segmentTimer = null;
       flushSegment('waited');
-    }, getContinuationWaitMs({ text, sessionTerms: opts?.terms, unitsPerSecond: currentSegmentUnitsPerSecond(text) }));
+    }, getContinuationWaitMs({
+      text,
+      sessionTerms: opts?.terms,
+      unitsPerSecond: currentSegmentUnitsPerSecond(text),
+      // The ruler for "long enough to be a sentence" is SEGMENT_MIN_CHARS, and it lives here rather than in
+      // the policy module so that this decision and `complete` below can never drift apart.
+      provisionalEnd: endsProvisionalSentence(text, SEGMENT_MIN_CHARS),
+    }));
   }
 
   function clearSegmentTimer(): void {
@@ -1018,6 +1059,23 @@ export function createOnlineLane(events: LaneEvents, config: OnlineLaneConfig = 
     }
     clearScribeCommitTimer();
     if (!text || scribeCommitPending) return;
+    // TASK 27: the "Chạy liền mạch" step never commits BECAUSE OF PUNCTUATION — punctuation is what was
+    // cutting words in half. Read LIVE, exactly as `stableCommitWindows` below does, so moving the knob
+    // mid-session takes effect at once instead of waiting for the next Bắt đầu. One net remains, and it is
+    // not optional: leaving the close entirely to the vendor's VAD was measured on 04/08 to produce a
+    // session with no close at all (AGC on the hall microphone lifts every pause into noise), leaving only
+    // the 25s ceiling — dim text, nothing ever going bold.
+    if (!rhythmUsesManualCommit(loadSpeechRhythm())) {
+      const still = planStillnessCommit(text, scribePartialChangedAt, scribeLastCommitAt, Date.now());
+      if (!still) return;
+      lastStableWindowMs = still.stableMs;
+      lastStableWindowAdaptive = false;
+      scribeCommitTimer = setTimeout(() => {
+        scribeCommitTimer = null;
+        sendManualCommit(still.reason);
+      }, still.delayMs);
+      return;
+    }
     // M13 + the rhythm knob: this speaker's own measured windows, or the step the operator chose; null
     // means neither had an answer and the planner falls back to its constants.
     const chosen = stableCommitWindows();
@@ -1067,7 +1125,7 @@ export function createOnlineLane(events: LaneEvents, config: OnlineLaneConfig = 
     const stash = applyMishearings(typeof msg.stash === 'string' ? msg.stash : '', rules).text;
     // M4: only display partials backed by clear speech evidence / recent sound.
     if (!hasClearSpeechEvidence(pruneVoiced(), ASR_PARTIAL_MIN_VOICED_MS)) return;
-    if (Date.now() - lastLoudAt >= LONG_SILENCE_MS) return;
+    if (Date.now() - lastLoudAt >= ghostWindowMs()) return;
     // M13: loud is not the same as spoken. Keep the lyrics of the song playing in the hall off the
     // audience wall — where an interim line is the most visible thing in the room.
     if (!speechShape.verdict().speechLike) return;
@@ -1077,7 +1135,10 @@ export function createOnlineLane(events: LaneEvents, config: OnlineLaneConfig = 
     scheduleStableCommit((text + stash).trim());
     if (!segmentLid) segmentLid = `online-${++counter}`;
     latency.markFirstPartial(segmentLid, performance.now());
-    currentInterimSource = joinSeg(segmentBuffer, (text + stash).trim());
+    // The wall must not show the invented stop either: while the dim text is still moving, the sentence is
+    // demonstrably not over, and a full stop sitting in the middle of a live line reads as a mistake.
+    const live = (text + stash).trim();
+    currentInterimSource = joinSeg(stripProvisionalSentenceEnd(segmentBuffer, live, SEGMENT_MIN_CHARS), live);
     emitLine({ lid: segmentLid, sourceText: currentInterimSource, targetText: lastInterimTarget, interim: true, corrected: false });
     scheduleDraft();
   }
@@ -1095,7 +1156,7 @@ export function createOnlineLane(events: LaneEvents, config: OnlineLaneConfig = 
       dropGhost('low-voiced', transcript);
       return;
     }
-    if (Date.now() - lastLoudAt >= LONG_SILENCE_MS) {
+    if (Date.now() - lastLoudAt >= ghostWindowMs()) {
       dropGhost('long-silence', transcript);
       return;
     }
@@ -1165,7 +1226,10 @@ export function createOnlineLane(events: LaneEvents, config: OnlineLaneConfig = 
 
     // M3: append to the segment buffer; the finalized sentence is not yet its own line.
     const hadWaitingText = segmentBuffer.trim().length > 0;
-    segmentBuffer = joinSeg(segmentBuffer, transcript);
+    // 04/08: the speaker carries on in lowercase ⇒ the full stop the recogniser added when it closed the
+    // turn is invented, so drop it before joining. Leave it in and "Nếu mà tính. năng nó bật lên" is both
+    // misspelled and counted as TWO sentences by TASK 26's paragraph rule, and refine is handed a stub.
+    segmentBuffer = joinSeg(stripProvisionalSentenceEnd(segmentBuffer, transcript, SEGMENT_MIN_CHARS), transcript);
     if (!segmentLid) segmentLid = `online-${++counter}`;
     // M11: settle the direction from the strongest evidence available rather than letting dirLangs guess
     // from the script at flush time. This is what finally routes toneless Vietnamese correctly — the
@@ -1191,12 +1255,35 @@ export function createOnlineLane(events: LaneEvents, config: OnlineLaneConfig = 
     // as Japanese, while Japanese was glued into whole thoughts and Vietnamese almost never was. So the
     // ruler now follows the language of the text it measures.
     const complete = endsWithStrongSentenceBreak(buf, true) && buf.length >= segmentCharLimit(SEGMENT_MIN_CHARS, buf);
-    if (complete) {
+    // TASK 28 — ONE SENTENCE IS NOT A PARAGRAPH. Until now, the moment the buffer read as a finished
+    // sentence it went out, so the hall received a column of one-sentence stubs and every translation lost
+    // the sentence before it. A finished sentence now still has to reach 2–3 sentences before the line
+    // breaks; if no continuation ever arrives, the continuation window below closes the paragraph — and a
+    // genuinely long pause IS the right place to break.
+    if (complete && planParagraphCut(buf).ready) {
       flushSegment('complete');
       return;
     }
-    if (buf.length >= segmentCharLimit(SEGMENT_MAX_CHARS, buf) || Date.now() - segmentFirstFinalAt >= SEGMENT_MAX_HOLD_MS) {
+    const held = Date.now() - segmentFirstFinalAt;
+    // The soft ceiling may only fire when there is a legal place to cut — a sentence-ending mark that is
+    // NOT at the very end (one at the end is what `complete` above already handles, and cutting there
+    // leaves nothing behind).
+    const softCeiling = buf.length >= segmentCharLimit(SEGMENT_MAX_CHARS, buf) || held >= SEGMENT_MAX_HOLD_MS;
+    // A cut position that COINCIDES with the end of the buffer is not a cut position: cutting there leaves
+    // nothing behind, i.e. it ships the whole fragment alone — the exact disease being treated. There has to
+    // be a sentence-ending mark with TEXT STILL AFTER IT, or a full paragraph's worth. Neither ⇒ wait for
+    // the hard ceiling.
+    //
+    // Without this, TASK 30 is only half done: "Nếu mà tính." satisfies the old test ON ITS OWN INVENTED
+    // FULL STOP and is flushed alone three seconds later, no matter how long the continuation window is.
+    const lastBreak = findLastStrongSentenceBreak(buf, true);
+    const innerBreak = lastBreak > 0 && lastBreak < buf.trimEnd().length;
+    if (softCeiling && (innerBreak || planParagraphCut(buf).ready)) {
       flushSegment('ceiling');
+      return;
+    }
+    if (held >= SEGMENT_HARD_HOLD_MS) {
+      flushSegment('ceiling'); // out of road: cutting mid-sentence beats a sentence that never appears
       return;
     }
     if (hadWaitingText) continuationMerges += 1; // this fragment was glued onto a thought already waiting
@@ -1216,12 +1303,28 @@ export function createOnlineLane(events: LaneEvents, config: OnlineLaneConfig = 
     }
     let head = text;
     let remainder = '';
-    if (text.length > segmentCharLimit(SEGMENT_MAX_CHARS, text)) {
-      const cut = findLastStrongSentenceBreak(text, true);
-      if (cut > 0 && cut < text.length) {
-        head = text.slice(0, cut).trim();
-        remainder = text.slice(cut).trim();
+    // TASK 28 — the only LEGAL place to cut is immediately after a sentence-ending mark. This rule used to
+    // apply only when the buffer was over-long; every ceiling expiry cut wherever the buffer stood.
+    const cutAt = ((): number => {
+      // 'stop' and 'turn-end' must NOT leave a remainder behind: one is shutting the session down, the
+      // other has just handed the microphone to the other language. A remainder there would never find a
+      // continuation, and would be glued to the next speaker's turn. Both keep the old behaviour.
+      if (reason === 'stop' || reason === 'turn-end') {
+        return text.length > segmentCharLimit(SEGMENT_MAX_CHARS, text) ? findLastStrongSentenceBreak(text, true) : 0;
       }
+      const para = planParagraphCut(text);
+      // A paragraph's worth is ready and the buffer holds more: the extra sentence opens the NEXT paragraph
+      // instead of being crammed into this one.
+      if (para.ready && para.cut < text.length) return para.cut;
+      if (reason === 'complete') return 0;
+      // A ceiling: fall back to the last sentence-ending mark. 0 means the buffer holds no whole sentence
+      // at all — only the hard ceiling reaches that point, and cutting mid-sentence is the last resort
+      // rather than the default.
+      return findLastStrongSentenceBreak(text, true);
+    })();
+    if (cutAt > 0 && cutAt < text.length) {
+      head = text.slice(0, cutAt).trim();
+      remainder = text.slice(cutAt).trim();
     }
     if (!head) {
       head = text;
@@ -1560,6 +1663,10 @@ export function createOnlineLane(events: LaneEvents, config: OnlineLaneConfig = 
     // The awaited fetch is guarded by the session generation AND the dial counter: a single-use token
     // that resolves after Dừng/restart is dropped instead of opening a stray socket.
     if (gen !== sessionGen || dial !== dialCounter || !running) return;
+
+    // TASK 29: the ghost windows follow the threshold the SERVER says it applied. Latched here rather than
+    // read from the knob, because the server clamps and a client-side number can be out of range.
+    appliedPauseSecs = typeof session.pauseSecs === 'number' ? session.pauseSecs : FALLBACK_PAUSE_SECS;
 
     // previous_text rides the FIRST chunk on a RECONNECT only (never a fresh session); a partial is never
     // fed back (a mistake fed back propagates).

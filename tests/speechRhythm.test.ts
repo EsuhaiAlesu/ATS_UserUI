@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest'
+import { readFileSync } from 'node:fs'
 import {
   SPEECH_RHYTHM_OPTIONS,
   SPEECH_RHYTHM_DEFAULT,
@@ -8,6 +9,7 @@ import {
   isSpeechRhythm,
   rhythmPauseSecs,
   rhythmCommitWindows,
+  rhythmUsesManualCommit,
   clampPauseSecs,
   speechRhythmLabel,
   type SpeechRhythm,
@@ -35,9 +37,17 @@ const { buildScribeWsParams } = await import('../server/online-api.mjs')
 const base = { token: 't', language: 'auto', keyterms: [] as string[], roomFilter: undefined }
 
 describe('speechRhythm — the anti-fragment knob', () => {
-  it('1 · đúng bốn nấc, đúng thứ tự, và số giây gửi lên đúng như đã chốt', () => {
-    expect(SPEECH_RHYTHM_OPTIONS.map((o) => o.value)).toEqual(['slow', 'normal', 'fast', 'adaptive'])
-    expect(SPEECH_RHYTHM_OPTIONS.map((o) => o.secs)).toEqual([2.4, undefined, 0.9, 2.4])
+  it('1 · đúng NĂM nấc, đúng thứ tự, và số giây gửi lên đúng như đã chốt', () => {
+    expect(SPEECH_RHYTHM_OPTIONS.map((o) => o.value)).toEqual(['slow', 'normal', 'fast', 'adaptive', 'vendor'])
+    expect(SPEECH_RHYTHM_OPTIONS.map((o) => o.secs)).toEqual([2.4, undefined, 0.9, 2.4, 3.0])
+    // Nấc giữa cố ý KHÔNG gửi gì lên, để cài đặt sẵn của máy chủ giữ quyền.
+    expect(SPEECH_RHYTHM_OPTIONS[1].secs).toBeUndefined()
+    // Nấc thứ năm nằm đúng ở PAUSE_SECS_MAX, và KHÔNG nấc nào khác chạm tới trần đó: nếu có, im lặng lại
+    // giành lại việc cắt câu và nấc này mất hết ý nghĩa.
+    expect(SPEECH_RHYTHM_OPTIONS[4].secs).toBe(PAUSE_SECS_MAX)
+    for (const o of SPEECH_RHYTHM_OPTIONS.slice(0, 4)) {
+      expect(o.secs === undefined || o.secs < PAUSE_SECS_MAX, String(o.value)).toBe(true)
+    }
   })
 
   it('2 · mặc định là "normal" và nấc đó KHÔNG gửi gì lên — không ai bị đổi hành vi', () => {
@@ -160,5 +170,76 @@ describe('speechRhythm — the server has the last word', () => {
     expect(params.get('min_speech_duration_ms')).toBe('100')
     expect(params.get('min_silence_duration_ms')).toBe('100')
     expect(params.get('commit_strategy')).toBe('vad')
+  })
+})
+
+describe('speechRhythm — the step that never closes a turn', () => {
+  it('17 · chỉ nấc thứ năm được miễn; bốn nấc kia vẫn đóng lượt như cũ', () => {
+    expect(rhythmUsesManualCommit('vendor')).toBe(false)
+    for (const v of ['slow', 'normal', 'fast', 'adaptive'] as SpeechRhythm[]) {
+      expect(rhythmUsesManualCommit(v), v).toBe(true)
+    }
+  })
+
+  it('18 · nấc lạ giữ hành vi CŨ chứ không lặng lẽ tắt việc đóng lượt', () => {
+    expect(rhythmUsesManualCommit('turbo' as never)).toBe(true)
+  })
+
+  it('19 · hai mốc chờ của nấc thứ năm còn đó cho trang Cài đặt, nhưng không còn quyết định gì', () => {
+    expect(rhythmCommitWindows('vendor')).toMatchObject({ sentenceMs: 900, longMs: 1_200, adaptive: false })
+    expect(rhythmUsesManualCommit('vendor')).toBe(false)
+  })
+
+  it('20 · cổng chặn phải đứng TRƯỚC lúc hẹn giờ, không phải sau', () => {
+    const lane = readFileSync(new URL('../src/lib/lanes/online/onlineLane.ts', import.meta.url), 'utf8')
+    const from = lane.indexOf('function scheduleStableCommit')
+    expect(from).toBeGreaterThan(0)
+    const body = lane.slice(from)
+    const gate = body.indexOf('rhythmUsesManualCommit(loadSpeechRhythm())')
+    const timer = body.indexOf('scribeCommitTimer = setTimeout')
+    expect(gate).toBeGreaterThan(-1)
+    expect(timer).toBeGreaterThan(-1)
+    expect(gate).toBeLessThan(timer)
+  })
+})
+
+describe('nấc thứ năm phải tự mô tả đúng', () => {
+  const ui = readFileSync(new URL('../src/lib/lanes/online/components/OnlineRhythmSettings.tsx', import.meta.url), 'utf8')
+  const doc = readFileSync(new URL('../docs/ONLINE-LANE-UI-API.md', import.meta.url), 'utf8')
+
+  it('21 · hàm phụ đọc thẳng danh sách nấc, không đi qua facade', () => {
+    expect(ui).toContain('const usesManualCommit = (v: SpeechRhythm): boolean =>')
+    expect(ui).toContain("SPEECH_RHYTHM_OPTIONS.find((o) => o.value === v)?.manualCommit !== false")
+  })
+
+  it('22 · nhãn xám không còn in một con số đã chết', () => {
+    expect(ui).toContain("'chốt khi im 2,5s'")
+    const from = ui.indexOf('{o.label}')
+    const to = ui.indexOf('{o.hint}')
+    expect(from).toBeGreaterThan(0)
+    expect(to).toBeGreaterThan(from)
+    expect(ui.slice(from, to)).toContain('o.manualCommit === false')
+  })
+
+  it('23 · toast cũng nói đúng sự thật', () => {
+    expect(ui).toContain('máy nghe chạy liền mạch, chốt khi chữ đứng im 2,5s')
+  })
+
+  it('24 · dòng tóm tắt cũng nói đúng sự thật', () => {
+    expect(ui).toContain('máy nghe không bao giờ bị cắt vì dấu chấm')
+  })
+
+  it('25 · không lén thêm import mới vào facade cho một sửa đổi hiển thị', () => {
+    const from = ui.indexOf('import {')
+    const to = ui.indexOf("} from '../index'")
+    expect(from).toBeGreaterThan(-1)
+    expect(to).toBeGreaterThan(from)
+    expect(ui.slice(from, to)).not.toContain('rhythmUsesManualCommit')
+  })
+
+  it('26 · tài liệu đếm đúng số nấc', () => {
+    expect(doc).toContain('(five steps, lives in Settings)')
+    expect(doc).not.toContain('(four steps, lives in Settings)')
+    expect(doc).not.toContain('Each of the four steps')
   })
 })

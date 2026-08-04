@@ -19,8 +19,9 @@ export const SCRIBE_MANUAL_LONG_STABLE_MS = 800; // no punctuation but very long
 export const SCRIBE_MANUAL_LONG_PARTIAL_CHARS = 200; // "very long" — past this a turn is already too big
 export const SCRIBE_MANUAL_FORCE_COMMIT_MS = 25_000; // nothing may hold the microphone longer than this
 export const SCRIBE_MANUAL_MIN_COMMIT_GAP_MS = 2_500; // upstream throttles commits; do not machine-gun them
+export const SCRIBE_MANUAL_STILL_MS = 2_500; // the partial has not moved at all this long → close the turn
 
-export type ScribeManualCommitReason = 'sentence' | 'length' | 'max-duration';
+export type ScribeManualCommitReason = 'sentence' | 'length' | 'max-duration' | 'stillness';
 
 /**
  * Plan the next client-side commit, or `null` when this partial does not deserve one yet.
@@ -61,6 +62,39 @@ export function planStableScribeCommit(
     stableMs,
     adaptive: Boolean(windows),
   };
+}
+
+/**
+ * The backstop for the step that never commits on punctuation ("Chạy liền mạch").
+ *
+ * That step hands turn-closing to the vendor's own VAD, which is right — until the hall microphone runs
+ * automatic gain control. AGC lifts every pause into audible noise, the VAD never hears its threshold's
+ * worth of silence, and a session measured on 04/08 went through with the vendor closing NO turn at all:
+ * the only net left was the 25s ceiling, and 25s of dim text with nothing going bold is not usable.
+ *
+ * So the step is not "never commit" but "never commit ON PUNCTUATION". This trigger looks at one thing
+ * only: the partial has not changed AT ALL for `stillMs`. That cannot cut a word in half the way the
+ * punctuation trigger did — a word being spoken keeps moving the partial, so stillness means the
+ * recogniser itself has stopped producing, not that we grew impatient at a full stop.
+ *
+ * Deliberately ignores punctuation and length, which is the whole difference from `planStableScribeCommit`.
+ */
+export function planStillnessCommit(
+  partial: string,
+  changedAt: number,
+  lastCommitAt: number,
+  now: number,
+  stillMs?: number | null,
+): { reason: 'stillness'; delayMs: number; stableMs: number } | null {
+  if (!partial.trim()) return null;
+  const stableMs = typeof stillMs === 'number' && Number.isFinite(stillMs) && stillMs > 0
+    ? stillMs
+    : SCRIBE_MANUAL_STILL_MS;
+  const stableRemaining = Math.max(0, stableMs - (now - changedAt));
+  const gapRemaining = lastCommitAt > 0
+    ? Math.max(0, SCRIBE_MANUAL_MIN_COMMIT_GAP_MS - (now - lastCommitAt))
+    : 0;
+  return { reason: 'stillness', delayMs: Math.max(stableRemaining, gapRemaining), stableMs };
 }
 
 /** How long until the hard ceiling: no single turn may run longer than SCRIBE_MANUAL_FORCE_COMMIT_MS. */

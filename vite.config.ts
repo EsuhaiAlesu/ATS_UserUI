@@ -22,6 +22,13 @@ const apiProxy = {
     changeOrigin: true,
     ws: true,
   },
+  '/whoami': {
+    // Who is logged in. Answered by server.js itself — not by the offline backend and not by the online
+    // lane — so dev has to forward it to :3000. Without this line vite serves index.html and the Settings
+    // page concludes the login gate is off. No `ws`: this is a plain GET.
+    target: process.env.ONLINE_BACKEND ?? 'http://127.0.0.1:3000',
+    changeOrigin: true,
+  },
 }
 
 // https://vite.dev/config/

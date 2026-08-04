@@ -146,14 +146,14 @@ still implements the three-state rule (`true` → set it; `false` → send nothi
 body. The client simply always takes the "absent" branch now, so switching it back on is one environment
 variable — no code change, no client redeploy.
 
-## Speech rhythm — "Nhịp nói của buổi" (four steps, lives in Settings)
+## Speech rhythm — "Nhịp nói của buổi" (five steps, lives in Settings)
 
 The per-meeting rhythm knob is **Settings → "Chế độ ONLINE — Nhịp nói của buổi"** (`Section id="rh"`,
 component `OnlineRhythmSettings`, exported from the facade root). It is NOT in the console drawer and it
 is NOT hook state — the Settings page and the lane both go through `speechRhythm.ts` and one localStorage
 key, so they can never disagree.
 
-Each of the four steps carries THREE numbers, split across the two halves of the pipeline:
+Each step carries THREE numbers, split across the two halves of the pipeline:
 
 - the client pair `sentenceMs`/`longMs` (via `rhythmCommitWindows`) — the stability waits that actually
   cut sentences. The lane re-reads the step on every partial, so a change applies IMMEDIATELY,
@@ -170,3 +170,12 @@ learner; `normal` behaves exactly as the lane did before the knob existed.
 
 The diagnostics line `ngưỡng cắt … · <tên nấc>` names the step in force (`diag.pauseRhythm`), and its
 "đặt sẵn"/"theo người nói" flag says whether the wait in use was hand-picked or measured.
+
+The fifth step, `vendor` ("Chạy liền mạch, chỉ ngắt khi hết câu"), is the only one that carries
+`manualCommit: false`, and it is a different KIND of step rather than a longer wait: the client never sends
+a commit because it saw punctuation, so bolding a line stops touching the audio path at all. Turn-closing
+belongs to the vendor's VAD at `PAUSE_SECS_MAX` (3.0s), with `planStillnessCommit` as the net for halls
+whose microphone gain lifts every pause into noise — the partial standing completely still for 2.5s. Its
+`sentenceMs`/`longMs` are inert and exist only to keep the option shape uniform; `rhythmUsesManualCommit`
+is the predicate every caller must ask, never `rhythmCommitWindows`. Line breaking moves entirely to the
+display layer: sentence-ending punctuation, then 2–3 sentences grouped by `paragraphStream`.
