@@ -16,6 +16,7 @@ import { endsProvisionalSentence, endsWithStrongSentenceBreak, findFirstCommaCla
 import { planParagraphCut } from './paragraphStream';
 import { ASR_FINAL_MIN_VOICED_MS, ASR_PARTIAL_MIN_VOICED_MS, hasClearSpeechEvidence, isInventedNumber, isNonSpeechAnnotation } from './asrSpeechEvidence';
 import { isStableDraftPrefix, joinLiveDraftSource, stripPromotedPrefix } from './liveDraftTranslation';
+import { decidePromotion, livePromoteStableMs, loadLivePromote, LIVE_PROMOTE_MIN_CHARS } from './livePromote';
 import { DRAFT_RATE_WINDOW_MS, decideCaptureFrame, decideDraftAdmission, getContinuationWaitMs } from './livePipelinePolicy';
 import { createSpeechPauseProfile } from './speechPauseProfile';
 import { createSpeechShapeMonitor } from './speechShape';
@@ -23,7 +24,7 @@ import { checkTtsLanguage } from './ttsLanguageGuard';
 import { createScriptMatcher, scriptKeyterms, type ScriptMatch, type ScriptMatcher, type ScriptMatcherEntry } from './scriptMatcher';
 import { judgeGuided, GUIDED_FLOOR, GUIDED_OFF, type GuidedState } from './guidedScript';
 import { applyMishearings, formatMishearingRules, splitMishearingLines, MISHEARING_MAX_CHARS, type MishearingRule } from './mishearing';
-import { nextScribeForceCommitDelay, planStableScribeCommit, planStillnessCommit, type ScribeManualCommitReason } from './scribeManualCommit';
+import { planForceCommit, planStableScribeCommit, planStillnessCommit, type ScribeManualCommitReason } from './scribeManualCommit';
 import { estimateSourceSpeechPace } from './sourceSpeechPace';
 import { enqueueTtsSentence, getTtsQueueLength, resetTtsPlayback, setTtsPlaybackStartHandler, stopTtsPlayback, subscribeTtsSpeaking } from './ttsPlayback';
 import { buildSessionExport, saveSessionExport, type SaveOutcome, type SessionLine } from './sessionExport';
@@ -250,6 +251,13 @@ export interface OnlineDiagnostics {
   secondsSinceLastEvent: number;
   voicedMsRecent: number;
   droppedGhosts: number;
+  /** Bảy chốt chặn của `dropGhost`, tách theo lý do — xem chú thích ở `dropGhost`. */
+  droppedByReason: Record<string, number>;
+  /**
+   * Số đo của chốt "chờ bản có nhãn" trong codec. `tagWaitMaxMs` là câu trả lời bằng số cho "cái khựng
+   * giữa hai câu dài bao nhiêu", `tagTimeouts` là số câu đã phải nhả sớm và mất nhãn tiếng.
+   */
+  asrTag: { waitLastMs: number; waitMaxMs: number; timeouts: number; plainFinals: number; taggedFinals: number };
   draftCalls: number;
   draftSkipped: { duplicate: number; 'rate-limit': number; 'in-flight': number };
   refineCalls: number;
@@ -304,6 +312,11 @@ export interface OnlineDiagnostics {
   lastScriptReason: string; // why the last finalised sentence did not snap — verbatim for the operator
   // M11 — turn handling and the two-way guards.
   manualCommits: number; // turns the CLIENT closed instead of waiting for the vendor's silence
+  /** Câu được nhả SỚM từ dòng partial, không chờ máy nghe chốt lượt. Xem `livePromote.ts`. */
+  promotions: number;
+  /** Lần trần 25s phải CHỜ một khe im lặng thay vì cắt ngay, và lần chờ lâu nhất. */
+  forceGapWaits: number;
+  forceGapWaitMaxMs: number;
   foreignDrops: number; // finals discarded because neither signal called them Vietnamese or Japanese
   languageTurns: number; // buffers closed because the other language started speaking
   vendorTags: number; // finals that arrived carrying the recogniser's own language verdict
@@ -438,6 +451,18 @@ export function createOnlineLane(events: LaneEvents, config: OnlineLaneConfig = 
   const voicedWindow: { at: number; voicedMs: number }[] = [];
   let previousFinalTranscript = '';
   let droppedGhosts = 0;
+  const droppedByReason: Record<string, number> = {};
+  // NHẢ CÂU SỚM. `promotedPrefix` là đoạn ĐẦU của lượt đang mở mà ta đã nhả đi rồi — nó vẫn nằm nguyên
+  // trong mọi partial kế tiếp (máy nghe chưa chốt gì cả), nên phải trừ ra ở cả chỗ hiển thị lẫn lúc lượt
+  // thật sự chốt. `promoteCandidate` là tiền tố đang được theo dõi xem có đứng yên đủ lâu chưa.
+  let promotedPrefix = '';
+  let promoteCandidate = '';
+  let promoteCandidateAt = 0;
+  let promotions = 0;
+  // Trần 25s giờ chờ một khe im lặng mới cắt (`planForceCommit`). Hai số này là bằng chứng nó có phải
+  // chờ thật hay không — chờ lâu bất thường nghĩa là hội trường không bao giờ im, và ta muốn thấy điều đó.
+  let forceGapWaits = 0;
+  let forceGapWaitMaxMs = 0;
 
   const recentFinals: string[] = [];
 
@@ -816,6 +841,10 @@ export function createOnlineLane(events: LaneEvents, config: OnlineLaneConfig = 
 
   function dropGhost(reason: string, transcript: string): void {
     droppedGhosts += 1;
+    // Đếm RIÊNG từng lý do. Trước đây bảy chốt chặn dưới đây chỉ ghi `console.debug` rồi cộng vào một
+    // con số tổng, nên trên màn hình một câu bị CHÍNH MÁY NÀY bỏ trông y hệt một câu nhà cung cấp nuốt
+    // mất. Muốn phân xử "lỗi tại đâu" thì phải biết chốt nào đã bắn, và bắn bao nhiêu lần.
+    droppedByReason[reason] = (droppedByReason[reason] ?? 0) + 1;
     // eslint-disable-next-line no-console
     console.debug(`[onlineLane] dropped ghost (${reason}): ${transcript.slice(0, 40)}`);
   }
@@ -885,6 +914,13 @@ export function createOnlineLane(events: LaneEvents, config: OnlineLaneConfig = 
               forceReconnect('send backlog too high (uplink cannot keep up)', quiet);
             } else {
               ws.send(codec ? codec.encodeAudio(pcm) : pcm);
+              // Câu bị giữ quá hạn chờ nhãn được nhả ra ngay ở nhịp gói tiếng (~256 ms). Đây là đường
+              // DUY NHẤT còn chạy khi người nói đã dứt lời và im — cũng chính là lúc việc giữ câu gây
+              // khó chịu nhất, vì không còn tin nào về để đánh thức `decode`.
+              if (codec) for (const rescued of codec.drain?.() ?? []) {
+                lastEventAt = Date.now();
+                handleEvent(rescued as unknown as Record<string, unknown>);
+              }
             }
           }
         },
@@ -1119,6 +1155,12 @@ export function createOnlineLane(events: LaneEvents, config: OnlineLaneConfig = 
   // The hard ceiling. Nothing — not applause, not a speaker who never pauses — may hold the microphone
   // for more than SCRIBE_MANUAL_FORCE_COMMIT_MS. With nothing to commit, restart the window rather than
   // poll a quiet room every tick.
+  //
+  // 05/08: it no longer cuts the moment the timer expires. `planForceCommit` holds it until the
+  // microphone goes quiet for a couple of hundred milliseconds — the gap between two words — because a
+  // commit cuts the AUDIO and this was the one trigger with no boundary test at all. Two names were
+  // bisected in the 08/05 rehearsal ("của Esuh" | "ai lên phát biểu"), and each half was then translated
+  // on its own. `graceMs` inside the planner guarantees the hold always ends.
   function armForceCommit(): void {
     if (scribeForceCommitTimer) {
       clearTimeout(scribeForceCommitTimer);
@@ -1126,13 +1168,23 @@ export function createOnlineLane(events: LaneEvents, config: OnlineLaneConfig = 
     }
     const now = Date.now();
     if (!scribeLastCommitAt) scribeLastCommitAt = now;
-    scribeForceCommitTimer = setTimeout(() => {
-      scribeForceCommitTimer = null;
+    const plan = planForceCommit({ lastCommitAt: scribeLastCommitAt, now, lastLoudAt });
+    if (plan.commit) {
+      if (plan.waitedMs > 0) {
+        forceGapWaits += 1;
+        if (plan.waitedMs > forceGapWaitMaxMs) forceGapWaitMaxMs = plan.waitedMs;
+      }
+      // `sendManualCommit` re-arms on success; only the "nothing to commit" path has to restart the clock.
       if (!sendManualCommit('max-duration')) {
         scribeLastCommitAt = Date.now();
         armForceCommit();
       }
-    }, nextScribeForceCommitDelay(scribeLastCommitAt, now));
+      return;
+    }
+    scribeForceCommitTimer = setTimeout(() => {
+      scribeForceCommitTimer = null;
+      armForceCommit(); // look again — never cut blind
+    }, plan.delayMs);
   }
 
   // TASK 24: which two waits the planner should use for THIS partial, given the step the operator picked
@@ -1218,6 +1270,11 @@ export function createOnlineLane(events: LaneEvents, config: OnlineLaneConfig = 
   /** Forget the turn. Called when a final lands, on reconnect, and at start/teardown. */
   function resetScribeCommitState(rearm: boolean): void {
     clearScribeCommitTimer();
+    // Lượt chết thì đoạn đã nhả cũng hết nghĩa: nó là tiền tố của MỘT lượt cụ thể. Giữ lại qua một lần
+    // nối lại socket là lượt sau bị trừ mất đoạn đầu — chính là kiểu nuốt chữ mà cả cơ chế này phải tránh.
+    // (`handleFinal` đã tự dọn trước khi gọi vào đây; chỗ này lo cho nối lại, Dừng, và teardown.)
+    promotedPrefix = '';
+    promoteCandidate = '';
     scribeLastPartial = '';
     scribePartialChangedAt = 0;
     scribeCommitPending = false;
@@ -1231,6 +1288,47 @@ export function createOnlineLane(events: LaneEvents, config: OnlineLaneConfig = 
         scribeForceCommitTimer = null;
       }
     }
+  }
+
+  /**
+   * Nhả một câu đã xong ra khỏi dòng partial, không chờ máy nghe chốt lượt.
+   *
+   * Nấc đọc LẠI ở từng partial, cùng nếp với nhịp nói và độ khớp: đổi nấc trong Cài đặt là ăn ngay, không
+   * phải Dừng rồi Bắt đầu lại — giữa buổi lễ đó là khác biệt giữa sửa được và không.
+   *
+   * `promotedPrefix` được ghi theo **chuỗi con thật của `base`**, không phải theo số ký tự đã tiêu. Máy
+   * nghe sửa lại đoạn đầu thì `stripPromotedPrefix` không khớp và ta giữ nguyên bản đã sửa: lặp một câu,
+   * chứ không nuốt mất chữ.
+   */
+  function maybePromote(base: string, detectedLanguage: string | undefined): void {
+    const stableMs = livePromoteStableMs(loadLivePromote());
+    if (stableMs <= 0) { promoteCandidate = ''; return; }
+    const seen = stripPromotedPrefix(base, promotedPrefix);
+    if (seen.coveredByPromoted) { promoteCandidate = ''; return; }
+    const live = seen.text;
+    const decision = decidePromotion({
+      live,
+      candidate: promoteCandidate,
+      candidateAt: promoteCandidateAt,
+      now: Date.now(),
+      stableMs,
+      // Cùng cái thước đã dùng cho bộ đệm đoạn: một ký tự tiếng Nhật gánh nhiều nghĩa hơn một ký tự tiếng
+      // Việt (đo được 1,85×), nên sàn phải đi theo tiếng của chính đoạn đang đo.
+      minChars: segmentCharLimit(LIVE_PROMOTE_MIN_CHARS, live),
+      breakAt: (t) => findLastStrongSentenceBreak(t, true),
+      boundaryOk: isStableDraftPrefix,
+    });
+    if (decision.candidate !== promoteCandidate) {
+      promoteCandidate = decision.candidate;
+      promoteCandidateAt = Date.now();
+    }
+    if (!decision.promote) return;
+    // Vị trí cắt tính trên `base`, vì `live` là một hậu tố của `base` (stripPromotedPrefix chỉ cắt đầu).
+    const offset = base.length - live.length;
+    promotedPrefix = base.slice(0, offset + decision.cut).trim();
+    promoteCandidate = '';
+    promotions += 1;
+    acceptFinalText(decision.candidate, detectedLanguage);
   }
 
   // ---- events ----
@@ -1250,25 +1348,59 @@ export function createOnlineLane(events: LaneEvents, config: OnlineLaneConfig = 
     noteSpeechTiming();
     // M11: judge the turn upstream is still HOLDING — not segmentBuffer, whose earlier sentences are
     // already committed and would make every partial look finished.
-    scheduleStableCommit((text + stash).trim());
+    // Vẫn là TOÀN BỘ đoạn máy nghe đang giữ, kể cả phần ta đã nhả sớm: bộ đếm nhịp chốt lượt đang đo việc
+    // của MÁY NGHE, không phải việc của màn hình.
+    const base = (text + stash).trim();
+    scheduleStableCommit(base);
     if (!segmentLid) segmentLid = `online-${++counter}`;
     latency.markFirstPartial(segmentLid, performance.now());
+    // NHẢ CÂU SỚM — làm TRƯỚC khi vẽ, để dòng vẽ ra không lặp lại câu vừa nhả.
+    maybePromote(base, typeof msg.detectedLanguage === 'string' ? msg.detectedLanguage : undefined);
     // The wall must not show the invented stop either: while the dim text is still moving, the sentence is
     // demonstrably not over, and a full stop sitting in the middle of a live line reads as a mistake.
-    const live = (text + stash).trim();
+    const shown = stripPromotedPrefix(base, promotedPrefix);
+    const live = shown.coveredByPromoted ? '' : shown.text;
+    if (!live) return; // cả đoạn đang nghe đã nhả đi rồi — không còn gì mờ để vẽ
     currentInterimSource = joinSeg(stripProvisionalSentenceEnd(segmentBuffer, live, SEGMENT_MIN_CHARS), live);
     emitLine({ lid: segmentLid, sourceText: currentInterimSource, targetText: lastInterimTarget, interim: true, corrected: false });
     scheduleDraft();
   }
 
   function handleFinal(msg: Record<string, unknown>): void {
+    // Giữ lại TRƯỚC khi dọn: `resetScribeCommitState` xoá `promotedPrefix` (đúng, vì lượt đã chết), nhưng
+    // chính lượt vừa chết mới là lượt cần trừ đi phần đã nhả sớm.
+    const promotedInTurn = promotedPrefix;
     // M11: the turn upstream was holding is closed, whatever closed it — clock a fresh window.
     resetScribeCommitState(true);
     // TASK 5: correct BEFORE every guard below. The repeat guard, the script matcher, the refine call,
     // the audience wall and the saved transcript must all see the same corrected string — otherwise the
     // name is fixed on screen and still wrong in the recording.
-    const transcript = applyMishearings((typeof msg.transcript === 'string' ? msg.transcript : '').trim(), activeMishearings()).text;
+    const raw = applyMishearings((typeof msg.transcript === 'string' ? msg.transcript : '').trim(), activeMishearings()).text;
+    if (!raw) return;
+    // NHẢ CÂU SỚM: phần đầu của lượt này có thể đã được nhả ra từ dòng partial rồi. Trừ đi đúng phần đó.
+    //
+    // `stripPromotedPrefix` cắt CHỈ KHI khớp tiền tố chính xác. Máy nghe sửa lại đoạn đầu ⇒ không khớp ⇒
+    // giữ nguyên bản đã sửa. Đó là lặp một câu trên tường, và lặp thì thấy được; cắt mù theo số ký tự là
+    // nuốt mất chữ, và nuốt thì không ai thấy. Đổi lấy cái thấy được là cố ý.
+    const rest = stripPromotedPrefix(raw, promotedInTurn);
+    // Máy nghe chốt lượt mà không có gì mới so với những gì đã nhả — bình thường, và không phải một câu.
+    if (rest.coveredByPromoted) return;
+    const transcript = rest.text;
     if (!transcript) return;
+    acceptFinalText(transcript, typeof msg.detectedLanguage === 'string' ? msg.detectedLanguage : undefined);
+  }
+
+  /**
+   * Đường đi của MỘT câu đã xong, dù nó đến từ đâu.
+   *
+   * Hai lối vào: máy nghe chốt lượt (`handleFinal`), hoặc một tiền tố đứng yên đủ lâu trong dòng partial
+   * được nhả sớm (`maybePromote`). Cố ý dùng CHUNG toàn bộ đoạn dưới đây — mọi chốt chặn ma, bộ khớp kịch
+   * bản, bộ đệm đoạn, refine, giọng đọc, dòng lưu lại. Một câu nhả sớm phải đi qua đúng những cái cổng mà
+   * một câu chốt bình thường đi qua, nếu không thì bật cơ chế nhả sớm lên là lặng lẽ tắt hết các lớp bảo
+   * vệ đã dựng suốt sáu tháng.
+   */
+  function acceptFinalText(transcript: string, detectedLanguage: string | undefined): void {
+    const msg: Record<string, unknown> = detectedLanguage ? { detectedLanguage } : {};
     // M4 ghost guards (drop finals, count them).
     if (!hasClearSpeechEvidence(pruneVoiced(), ASR_FINAL_MIN_VOICED_MS)) {
       dropGhost('low-voiced', transcript);
@@ -2133,6 +2265,7 @@ export function createOnlineLane(events: LaneEvents, config: OnlineLaneConfig = 
     // M11/M12: the force-commit clock starts at session.created, not at Start.
     resetScribeCommitState(false);
     manualCommits = 0;
+    promotions = 0;
     foreignDrops = 0;
     languageTurns = 0;
     vendorTags = 0;
@@ -2228,6 +2361,17 @@ export function createOnlineLane(events: LaneEvents, config: OnlineLaneConfig = 
       secondsSinceLastEvent: lastEventAt ? Math.max(0, (Date.now() - lastEventAt) / 1000) : 0,
       voicedMsRecent: Math.round(pruneVoiced()),
       droppedGhosts,
+      droppedByReason: { ...droppedByReason },
+      asrTag: (() => {
+        const s = codec?.stats?.();
+        return {
+          waitLastMs: s?.tagWaitLastMs ?? -1,
+          waitMaxMs: s?.tagWaitMaxMs ?? 0,
+          timeouts: s?.tagTimeouts ?? 0,
+          plainFinals: s?.plainFinals ?? 0,
+          taggedFinals: s?.taggedFinals ?? 0,
+        };
+      })(),
       draftCalls,
       draftSkipped: { ...draftSkipped },
       refineCalls,
@@ -2258,6 +2402,9 @@ export function createOnlineLane(events: LaneEvents, config: OnlineLaneConfig = 
       scriptPosition: (scriptMatcher?.position() ?? 0) + 1,
       lastScriptReason,
       manualCommits,
+      promotions,
+      forceGapWaits,
+      forceGapWaitMaxMs,
       foreignDrops,
       languageTurns,
       vendorTags,

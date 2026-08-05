@@ -102,3 +102,60 @@ export function nextScribeForceCommitDelay(lastCommitAt: number, now: number): n
   const base = lastCommitAt || now;
   return Math.max(0, SCRIBE_MANUAL_FORCE_COMMIT_MS - (now - base));
 }
+
+// ---- the ceiling must not cut a word in half ----
+//
+// 08/05 evidence, from the rehearsal transcript: `"...Hội đồng quản trị đặc biệt của Esuh" | "ai lên phát
+// biểu khai mạc."` and `'một lời tuyên bố: "Es" | "uhai, chúng ta sẵn sàng..."'`. Both halves were then
+// translated SEPARATELY, and the hall wall showed 「うはい、私たちは…」 — the company's own name, broken, in
+// the middle of its own anniversary.
+//
+// Nothing else in this file can do that. `planStableScribeCommit` needs punctuation (or 200 chars) AND
+// stillness; `planStillnessCommit` needs 2.5s of a partial that has not moved. The ceiling was the one
+// trigger that looked at NOTHING — a bare 25s timer firing wherever the speaker happened to be.
+//
+// A commit cuts the AUDIO at the instant it is sent, and the recogniser's text runs several hundred
+// milliseconds behind that instant. So no text-level test can tell us whether the cut is safe: by the
+// time the words arrive, the damage is done. The only honest signal is the microphone itself — a real
+// gap between two words, where there is no phoneme energy to cut through.
+//
+// Hence: at the ceiling, WAIT for the next quiet moment instead of cutting. Ordinary speech leaves a gap
+// this size several times a second, so the wait is normally imperceptible. `graceMs` is the promise that
+// this can never hang: a hall that is never quiet (applause, music, a second microphone) still gets its
+// commit, just late — and in a hall that loud, nobody is mid-word anyway.
+export const SCRIBE_FORCE_COMMIT_GAP_MS = 220; // quiet this long ⇒ we are between two words, not inside one
+export const SCRIBE_FORCE_COMMIT_RETRY_MS = 120; // not quiet yet ⇒ look again this soon
+export const SCRIBE_FORCE_COMMIT_GRACE_MS = 10_000; // never quiet ⇒ commit anyway rather than hold forever
+
+/**
+ * The ceiling, made boundary-aware. Answers one of two things: commit now, or look again in `delayMs`.
+ *
+ * @param lastLoudAt when the microphone was last above the "sound present" threshold. 0 = never — an
+ *                   idle room, where there is no word to cut and the commit is free.
+ */
+export function planForceCommit(args: {
+  lastCommitAt: number;
+  now: number;
+  lastLoudAt: number;
+  gapMs?: number;
+  retryMs?: number;
+  graceMs?: number;
+}): { commit: boolean; delayMs: number; waitedMs: number } {
+  const { lastCommitAt, now, lastLoudAt } = args;
+  const gapMs = args.gapMs ?? SCRIBE_FORCE_COMMIT_GAP_MS;
+  const retryMs = args.retryMs ?? SCRIBE_FORCE_COMMIT_RETRY_MS;
+  const graceMs = args.graceMs ?? SCRIBE_FORCE_COMMIT_GRACE_MS;
+
+  const due = nextScribeForceCommitDelay(lastCommitAt, now);
+  if (due > 0) return { commit: false, delayMs: due, waitedMs: 0 };
+
+  // How long we have already been holding PAST the ceiling — the number `graceMs` bounds, and the one
+  // the diagnostics line reports so the operator can see the ceiling straining.
+  const base = lastCommitAt || now;
+  const waitedMs = Math.max(0, now - base - SCRIBE_MANUAL_FORCE_COMMIT_MS);
+
+  if (!lastLoudAt) return { commit: true, delayMs: 0, waitedMs }; // silent room: nothing to cut through
+  if (now - lastLoudAt >= gapMs) return { commit: true, delayMs: 0, waitedMs };
+  if (waitedMs >= graceMs) return { commit: true, delayMs: 0, waitedMs };
+  return { commit: false, delayMs: Math.min(retryMs, graceMs - waitedMs), waitedMs };
+}

@@ -44,6 +44,22 @@ export interface AsrCodec {
    * the rescued sentence was spoken first. Optional so an older stub codec still satisfies the type.
    */
   drain?(): DecodedEvent[];
+  /**
+   * Số đo của chính cái chốt "chờ bản có nhãn" — để trả lời bằng SỐ, không bằng cảm giác, câu hỏi "cái
+   * khựng gần một giây giữa hai câu nằm ở đâu". Xem `ASR_TAG_WAIT_MS`.
+   */
+  stats?(): AsrCodecStats;
+}
+
+export interface AsrCodecStats {
+  /** ms chờ của lần gần nhất bản có nhãn về sau bản trơn. -1 = chưa lần nào. */
+  tagWaitLastMs: number;
+  /** ms chờ lâu nhất của cả phiên. */
+  tagWaitMaxMs: number;
+  /** số câu phải nhả ra vì chờ quá `ASR_TAG_WAIT_MS` — mỗi lần là một lần MẤT nhãn tiếng. */
+  tagTimeouts: number;
+  plainFinals: number;
+  taggedFinals: number;
 }
 
 // Reconnecting cannot fix any of these, so the lane must stop and tell the operator rather
@@ -54,6 +70,23 @@ const FATAL_TOKENS = ['auth_error', 'quota_exceeded', 'unaccepted_terms'];
 // hiccup and costs only a rescue; a run of three means the vendor has genuinely stopped sending it, and
 // from then on holding would put every sentence of the ceremony one behind.
 const BROKEN_PROMISE_LIMIT = 3;
+
+/**
+ * TRẦN cho việc giữ một bản final trơn để chờ bản có nhãn của nó.
+ *
+ * Vì sao cần trần. Nhà cung cấp gửi mỗi câu chốt HAI lần: bản trơn tới trước, bản có dấu thời gian tới
+ * sau và CHỈ bản sau mang nhãn tiếng. Codec giữ bản trơn lại để không vứt mất nhãn — đó là cách chữa
+ * đúng cho chuyện "我是海空啊" bị đọc thành tiếng Nhật. Nhưng tới 04/08/2026 việc giữ đó **không có hạn**:
+ * bản trơn chỉ được nhả khi bản có nhãn về, hoặc khi một bản trơn KHÁC về (tức câu sau đã nói xong).
+ * Nghĩa là toàn bộ độ trễ của một thứ nhà cung cấp tự khai là "delayed final message" bị biến thành
+ * điều kiện BẮT BUỘC trước khi phụ đề, bản dịch và giọng đọc của câu N được chạy. Máy nghe không hề
+ * dừng — nhưng mọi thứ phía sau thì có, và đó chính là cái khựng người điều khiển nhìn thấy.
+ *
+ * 600 ms là mức chặn trên, không phải mức thường gặp: bản có nhãn về trong 600 ms thì mọi thứ y như cũ
+ * và nhãn vẫn nguyên. Về muộn hơn thì câu được nhả ra trước, nhãn coi như mất, và `tagTimeouts` đếm
+ * đúng số lần đó — đo được, không phải đoán. Đổi số này là đổi thẳng cán cân "nhanh" ↔ "chắc nhãn".
+ */
+export const ASR_TAG_WAIT_MS = 600;
 
 // A committed sentence arrives twice (plain + timestamped); swallow the twin only if it repeats within
 // this window. Widened from 2000 ms on 02/08/2026: at the 01/08 rehearsal the timestamped twin of a long
@@ -140,7 +173,12 @@ export async function fetchAsrSession(opts: {
  *   when reconnecting so the recogniser picks the thread back up. Fresh sessions pass
  *   `undefined` and it is never sent.
  */
-export function createAsrCodec(previousText?: string): AsrCodec {
+export function createAsrCodec(
+  previousText?: string,
+  opts?: { tagWaitMs?: number; now?: () => number },
+): AsrCodec {
+  const tagWaitMs = opts?.tagWaitMs ?? ASR_TAG_WAIT_MS;
+  const clock = opts?.now ?? Date.now;
   let firstChunk = true;
   // Final-dedup memory: the normalised key of the last emitted `completed` transcript, when it was
   // emitted, and which of the two kinds of final it was.
@@ -164,9 +202,35 @@ export function createAsrCodec(previousText?: string): AsrCodec {
   // TASK 9: sentences owed to the caller — a held final rescued when its twin never came. Never dropped:
   // this is a sentence somebody actually said.
   const pending: DecodedEvent[] = [];
+  // Lúc bắt đầu giữ bản trơn hiện hành — mốc để cân với `tagWaitMs`.
+  let heldSince = 0;
+  const stats: AsrCodecStats = { tagWaitLastMs: -1, tagWaitMaxMs: 0, tagTimeouts: 0, plainFinals: 0, taggedFinals: 0 };
+
+  /**
+   * Hết hạn chờ thì nhả câu ra, đừng giữ nữa.
+   *
+   * Gọi ở CẢ HAI đường: mỗi tin nhắn về (`decode`) và mỗi gói tiếng gửi đi (`encodeAudio`, ~256 ms một
+   * lần). Đường thứ hai mới là đường quan trọng: người nói dứt câu rồi im thì KHÔNG có tin nào về nữa
+   * cả, và nếu chỉ trông vào `decode` thì đúng cái ca tệ nhất — câu cuối trước một quãng lặng — lại là
+   * ca bị giữ lâu nhất.
+   *
+   * Câu nhả ra được ghi vào bộ nhớ chống trùng y như đường phát bình thường, nên bản có nhãn về muộn sau
+   * đó bị nuốt đúng như một bản sinh đôi, không thành câu thứ hai trên tường.
+   */
+  const ageOutHeld = (): void => {
+    if (heldPlainFinal === null) return;
+    if (clock() - heldSince < tagWaitMs) return;
+    pending.push({ type: 'conversation.item.input_audio_transcription.completed', transcript: heldPlainFinal });
+    lastFinalKey = normaliseFinal(heldPlainFinal);
+    lastFinalAt = clock();
+    lastFinalTimestamped = false;
+    heldPlainFinal = null;
+    stats.tagTimeouts += 1;
+  };
 
   return {
     encodeAudio(pcm: ArrayBuffer): string {
+      ageOutHeld(); // nhịp ~256 ms — đường duy nhất còn chạy khi người nói đã im
       const frame: Record<string, unknown> = {
         message_type: 'input_audio_chunk',
         audio_base_64: bytesToBase64(pcm),
@@ -192,7 +256,12 @@ export function createAsrCodec(previousText?: string): AsrCodec {
       return pending.length ? pending.splice(0, pending.length) : [];
     },
 
+    stats(): AsrCodecStats {
+      return { ...stats };
+    },
+
     decode(raw: string): { event: DecodedEvent; fatal: boolean } | null {
+      ageOutHeld(); // trước khi đọc tin mới: câu đang giữ có thể đã quá hạn từ trước
       let msg: Record<string, unknown>;
       try {
         const parsed: unknown = JSON.parse(raw);
@@ -247,9 +316,18 @@ export function createAsrCodec(previousText?: string): AsrCodec {
           // one is expected. Adaptive, not assumed: a session that never delivers a timestamped final
           // keeps working exactly as before, so a vendor change can never silence the transcript.
           const timestamped = type.endsWith('_with_timestamps');
+          if (timestamped) stats.taggedFinals += 1; else stats.plainFinals += 1;
           if (timestamped) {
             if (transcript.trim()) sawTimestampedFinal = true;
             brokenPromises = 0; // the promise is being kept again
+            if (heldPlainFinal !== null) {
+              // Đây là con số trả lời thẳng câu hỏi "cái khựng nằm ở đâu": bản có nhãn về SAU bản trơn
+              // bao nhiêu mili-giây. Chỉ đo khi thật sự đang giữ một bản trơn, để không lẫn với những
+              // phiên nhà cung cấp không gửi bản sinh đôi.
+              const waited = clock() - heldSince;
+              stats.tagWaitLastMs = waited;
+              if (waited > stats.tagWaitMaxMs) stats.tagWaitMaxMs = waited;
+            }
             heldPlainFinal = null;
           } else if (sawTimestampedFinal || expectTaggedFinal) {
             // Self-healing: a SECOND plain final while the first is still waiting means the promised twin
@@ -275,14 +353,19 @@ export function createAsrCodec(previousText?: string): AsrCodec {
                 sawTimestampedFinal = false;
               } else {
                 heldPlainFinal = transcript; // keep waiting for THIS one's twin; the tag is still worth it
+                heldSince = clock();
                 return null;
               }
             } else {
               heldPlainFinal = transcript;
+              heldSince = clock();
               return null;
             }
           }
-          const now = Date.now();
+          // MỘT đồng hồ cho cả codec. Cửa sổ chống trùng và hạn chờ nhãn phải cùng thước đo, nếu không
+          // thì một câu nhả sớm ghi mốc bằng thước này rồi bị đo bằng thước kia, và bản sinh đôi về muộn
+          // lọt qua thành câu thứ hai trên tường.
+          const now = clock();
           const finalKey = normaliseFinal(transcript);
           // Swallow the twin — and only the twin. Three conditions, each earning its place:
           //   * same WORDS, not the same string: the two passes disagree about punctuation and width;

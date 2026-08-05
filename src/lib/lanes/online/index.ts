@@ -72,6 +72,13 @@ export {
   GUIDED_MATCH_KEY, GUIDED_MATCH_DEFAULT, GUIDED_MATCH_OPTIONS,
   loadGuidedMatch, saveGuidedMatch, guidedMatchFloor, guidedMatchLabel,
 } from './guidedMatch'
+// "Nhả câu sớm": cắt câu từ dòng partial thay vì chờ máy nghe chốt lượt. Cùng hình dạng với hai nấc trên —
+// Cài đặt chọn nấc, lane đọc LẠI ở từng partial. Mặc định TẮT: nó đổi đường đi của mọi câu.
+export type { LivePromote } from './livePromote'
+export {
+  LIVE_PROMOTE_KEY, LIVE_PROMOTE_DEFAULT, LIVE_PROMOTE_OPTIONS, LIVE_PROMOTE_MIN_CHARS,
+  loadLivePromote, saveLivePromote, livePromoteStableMs, livePromoteLabel, decidePromotion,
+} from './livePromote'
 // M14 — the pre-session document summariser. A plain async function, not part of the hook: it belongs to
 // Chuẩn bị, runs at most once per session, and must never be reachable from anything a live session does.
 export { summarizePrepDocs, PREP_DOCS_MAX, PREP_DOC_MAX_CHARS } from './prepBrief'
@@ -677,3 +684,6 @@ export { default as OnlineRhythmSettings } from './components/OnlineRhythmSettin
 //   OnlineGuidedMatchSettings — the Settings "Độ khớp khi dẫn theo kịch bản" section (TASK 57): how
 //   closely the machine must recognise the armed line before it releases the approved translation.
 export { default as OnlineGuidedMatchSettings } from './components/OnlineGuidedMatchSettings'
+//   OnlineLivePromoteSettings — the Settings "Nhả câu sớm" section: cut sentences out of the live partial
+//   instead of waiting for the recogniser to close its turn. Default OFF.
+export { default as OnlineLivePromoteSettings } from './components/OnlineLivePromoteSettings'

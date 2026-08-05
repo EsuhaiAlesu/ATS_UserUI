@@ -33,13 +33,32 @@ describe('the lane corrects on arrival', () => {
     expect(src.slice(finalAt, nextTop)).toContain('applyMishearings(')
   })
 
-  it('2 · trong handleFinal việc sửa xảy ra TRƯỚC mọi chốt chặn', () => {
+  // Ca này từng ghim cấu trúc của MỘT hàm (`handleFinal` chứa cả việc sửa lẫn các chốt chặn). Từ khi có
+  // "nhả câu sớm" thì một câu tới được các chốt chặn bằng HAI đường: máy nghe chốt lượt, hoặc một tiền tố
+  // đứng yên đủ lâu trong dòng partial. Các chốt dọn về `acceptFinalText` dùng chung. Bất biến không đổi —
+  // chữ phải được sửa TRƯỚC mọi chốt — nên ca này ghim đúng bất biến đó, trên cả hai đường.
+  it('2 · trên MỌI đường vào, việc sửa xảy ra TRƯỚC mọi chốt chặn', () => {
     const src = read(LANE)
+
+    // Các chốt chặn nay ở một chỗ, và chỗ đó KHÔNG tự sửa: nó nhận chữ đã sửa rồi.
+    const guardsAt = src.indexOf('function acceptFinalText')
+    expect(guardsAt).toBeGreaterThan(-1)
+    const guards = src.slice(guardsAt, src.indexOf('\n  function ', guardsAt))
+    expect(guards).toContain("dropGhost('repeat'")
+    expect(guards).not.toContain('applyMishearings(')
+
+    // Đường 1 — máy nghe chốt lượt.
     const finalAt = src.indexOf('function handleFinal')
-    const slice = src.slice(finalAt, src.indexOf('\n  function ', finalAt))
-    expect(slice.indexOf('applyMishearings(')).toBeGreaterThan(-1)
-    expect(slice.indexOf("dropGhost('repeat'")).toBeGreaterThan(-1)
-    expect(slice.indexOf('applyMishearings(')).toBeLessThan(slice.indexOf("dropGhost('repeat'"))
+    expect(finalAt).toBeGreaterThan(-1)
+    const fin = src.slice(finalAt, guardsAt)
+    expect(fin.indexOf('applyMishearings(')).toBeGreaterThan(-1)
+    expect(fin.indexOf('applyMishearings(')).toBeLessThan(fin.indexOf('acceptFinalText('))
+
+    // Đường 2 — nhả sớm từ dòng partial. Chữ đưa vào `maybePromote` là chữ đã sửa của `handlePartial`.
+    const partialAt = src.indexOf('function handlePartial')
+    const par = src.slice(partialAt, src.indexOf('\n  function ', partialAt))
+    expect(par.indexOf('maybePromote(')).toBeGreaterThan(-1)
+    expect(par.indexOf('applyMishearings(')).toBeLessThan(par.indexOf('maybePromote('))
   })
 
   it('3 · getter đọc LIVE từng lần, không chốt một lần lúc Bắt đầu', () => {

@@ -17,6 +17,10 @@ import {
   OnlineGuidedMatchSettings,                              // Settings: "Độ khớp khi dẫn theo kịch bản"
   GUIDED_MATCH_OPTIONS, GUIDED_MATCH_DEFAULT, GUIDED_MATCH_KEY,
   loadGuidedMatch, saveGuidedMatch, guidedMatchFloor, guidedMatchLabel, type GuidedMatch,
+  OnlineLivePromoteSettings,                              // Settings: "Nhả câu sớm" (mặc định TẮT)
+  LIVE_PROMOTE_OPTIONS, LIVE_PROMOTE_DEFAULT, LIVE_PROMOTE_KEY, LIVE_PROMOTE_MIN_CHARS,
+  loadLivePromote, saveLivePromote, livePromoteStableMs, livePromoteLabel, decidePromotion,
+  type LivePromote,
   type OnlineConfigStatus, type OnlineDirection,
   type LaneLine, type LaneStatus, type OnlineDiagnostics, type TtsGateMode, type SaveOutcome,
 } from '../lib/lanes/online'

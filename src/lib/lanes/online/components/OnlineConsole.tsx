@@ -1372,6 +1372,20 @@ const OnlineConsole: React.FC = () => {
                   <div className="font-label-caps text-label-caps text-on-surface-variant space-y-1" style={{ fontFamily: 'ui-monospace, monospace' }}>
                     <div>reconnects {diag.reconnectAttempts} · silent {diag.silentReconnects} · sinceEvent {diag.secondsSinceLastEvent.toFixed(1)}s</div>
                     <div>voiced {diag.voicedMsRecent}ms · ghosts {diag.droppedGhosts}</div>
+                    {/* Bốn con số để phân xử "câu biến mất là tại ai" bằng SỐ thay vì bằng cảm giác.
+                        `chờ nhãn` = bản final có nhãn tiếng về SAU bản trơn bao nhiêu ms; đó chính là cái
+                        khựng giữa hai câu, và tối đa là trần 600ms của codec. `nhả sớm` = số câu đã phải
+                        nhả khi hết trần, tức số lần MẤT nhãn tiếng. Đỏ khi đã chạm trần: lúc đó khựng là
+                        thật và trần đang phải làm việc. */}
+                    <div className={diag.asrTag.timeouts > 0 ? 'text-error' : undefined}>
+                      chờ nhãn {diag.asrTag.waitLastMs < 0 ? '—' : `${diag.asrTag.waitLastMs}ms`} · lâu nhất {diag.asrTag.waitMaxMs}ms
+                      {' · '}nhả sớm {diag.asrTag.timeouts} · final {diag.asrTag.plainFinals}/{diag.asrTag.taggedFinals}
+                    </div>
+                    {/* Chốt nào của CHÍNH MÁY NÀY đã ăn câu. Trống = không chốt nào bắn, tức câu thiếu
+                        không phải do phía máy khách bỏ. */}
+                    {Object.keys(diag.droppedByReason).length ? (
+                      <div>bỏ vì: {Object.entries(diag.droppedByReason).map(([r, n]) => `${r} ${n}`).join(' · ')}</div>
+                    ) : null}
                     {/* These two MUST be read together. `ngưỡng đủ to` is the level a frame has to reach
                         before the machine believes sound just happened; `VU đỉnh 3s` is the loudest frame
                         of the last three seconds. Peak BELOW threshold while somebody is speaking = this
@@ -1392,7 +1406,15 @@ const OnlineConsole: React.FC = () => {
                     {/* M11 — turn handling. `cắt` near zero during a busy hall means the client-side
                         commit is not firing and the long stalls are back; `bỏ lạ` and `đổi tiếng` are
                         the two-way guards, and both being zero in a bilingual session is also a signal. */}
-                    <div>cắt {diag.manualCommits} · bỏ tiếng lạ {diag.foreignDrops} · đổi tiếng {diag.languageTurns}</div>
+                    <div>cắt {diag.manualCommits} · nhả sớm {diag.promotions} câu · bỏ tiếng lạ {diag.foreignDrops} · đổi tiếng {diag.languageTurns}</div>
+                    {/* Trần 25s KHÔNG còn cắt mù: nó chờ một khe im lặng (~0,22s) rồi mới cắt, vì cắt là
+                        cắt TIẾNG, và cắt giữa một từ thì không bản dịch nào chữa lại được. Số ở đây lớn
+                        nghĩa là hội trường gần như không bao giờ im — lúc đó số ms mới là thứ đáng nhìn. */}
+                    {diag.forceGapWaits > 0 && (
+                      <div>
+                        trần 25s chờ khe im {diag.forceGapWaits} lần · lâu nhất {(diag.forceGapWaitMaxMs / 1000).toFixed(1)}s
+                      </div>
+                    )}
                     {/* M13 + TASK 24 — the sentence-cut wait in force for the current speaker. "theo
                         người nói" = the profile has measured enough (8+ pauses) and is using this
                         speaker's own rhythm; "đặt sẵn" = a fixed number, either the original 600/800ms
