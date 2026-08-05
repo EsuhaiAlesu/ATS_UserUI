@@ -1,4 +1,17 @@
-# Online Lane Contract — v0.9 (2026-08-05)
+# Online Lane Contract — v1.0 (2026-08-05)
+
+> **v1.0 changelog (PROMPT-16 — a push can now be REFUSED, and one more thing is shared):** every `PUT`
+> under `/online-api/prep/*` accepts `baseSavedAt` and answers **`409`** when the stored copy has moved on
+> since the sender last saw it (§12–§17), and every successful `PUT` now returns `savedAt` so the sender
+> has a base to remember. One new pair, `GET/PUT /online-api/prep/settings` (§17), carries the settings
+> that describe the MEETING — wall sizes in metres, character height, voices, speaking pace — while
+> everything belonging to one machine's hardware stays put. `GET /online-api/prep/manifest` (§16) gains a
+> `settings` block. Nothing here is on the live sentence path, and nothing about the offline lane changes.
+>
+> v0.9 made the store safe to pull from. It did not make it safe to push to: `schedule` is written whole,
+> every meeting's Chương trình rides inside it, and a second machine holding yesterday's copy would
+> overwrite the lot four seconds after its operator fixed a typo. The 409 is that hole closed.
+
 
 > **v0.9 changelog (PROMPT-12 — the Chuẩn bị data stops being hostage to one browser):** five new routes
 > under `/online-api/prep/*` (§12–§16), all behind the existing gate and all **off the live path**. The
@@ -96,9 +109,22 @@ Source of truth for the ONLINE lane (Esuhai Realtime Translation core). Do not i
 14. `GET /online-api/prep/event/script?eventId=<id>` → `{ rows:[ScriptEntry], savedAt, savedBy }`. `PUT` body `{ eventId, rows, savedBy }` → `{ saved:true, bytes }`. Missing `eventId`, or `rows` not an array → `400`. An `eventId` outside `^[A-Za-z0-9_-]{1,64}$` is **REFUSED**, never sanitised, and reads as `400` rather than `500`. Request body limit **12 MB**.
     - **Not `data/script.json`.** That is the Cascade Matcher channel on the OFFLINE backend (`pushToBackend` / `pullFromBackend`), a different destination for a different purpose. Both exist at once; neither replaces the other.
 15. `GET /online-api/prep/event/docs?eventId=<id>` → `{ rows:[SourceDoc], savedAt, savedBy }`; `PUT` as §14. Documents are why the per-event store exists and why its ceiling is 8 MB per event rather than the 1 MB the global stores use: `docs.ts` keeps up to 256 KB of extracted text per file.
-16. `GET /online-api/prep/manifest` → `{ schedule:{count,savedAt,savedBy}, speakers:{count,savedAt,savedBy}, script:[{eventId,bytes,savedAt}], docs:[{eventId,bytes,savedAt}], storeDir }`. What the store holds, without downloading it — the screen that offers to overwrite local work shows this first, because an operator is owed a list before a warning.
+16. `GET /online-api/prep/manifest` → `{ schedule:{count,savedAt,savedBy}, speakers:{count,savedAt,savedBy}, settings:{count,savedAt,savedBy}, script:[{eventId,bytes,savedAt}], docs:[{eventId,bytes,savedAt}], storeDir }`. What the store holds, without downloading it — the screen that offers to overwrite local work shows this first, because an operator is owed a list before a warning.
+17. `GET /online-api/prep/settings` → `{ values:{ [key:string]: string }, savedAt, savedBy }`. `PUT` body `{ values, savedBy }` → `{ saved:true, bytes, savedAt }`; `400` when `values` is not a plain object. Request body limit **1 MB**, matching the store's own write ceiling — these are a dozen short strings, and a 4 MB limit would only mean reading 4 MB before refusing it.
+    - `values` is a flat map of raw `localStorage` strings, and the server **does not know what any key means**. It keeps entries whose key starts with `proyaku_` and whose value is a string, and drops the rest. The day it starts validating individual settings is the day adding a setting needs a deploy.
+    - Only the settings that describe the MEETING travel — wall sizes in metres, character height, voices, speaking pace, subtitle layout. Anything belonging to the hardware in front of one operator (microphone, speaker, volumes, sensitivity) is deliberately excluded on the client side and never sent. The authoritative list is `SETTINGS_KEYS` in `src/lib/cloudSync.ts`.
 
-**About §12–§16.** `savedBy` is a random per-BROWSER id (`m-xxxxxx`), **not a person and not a login**: its only job is to let the screen say "the copy on the server came from a different machine". All five sit behind the same gate as everything else under `/online-api/*` and carry no authentication code of their own. **None of them is on the live sentence path** — if every one of them fails, Chuẩn bị merely stops syncing and the ceremony still runs from the browser's own `localStorage`.
+**About §12–§17.** `savedBy` is a random per-BROWSER id (`m-xxxxxx`), **not a person and not a login**: its only job is to let the screen say "the copy on the server came from a different machine". All six sit behind the same gate as everything else under `/online-api/*` and carry no authentication code of their own. **None of them is on the live sentence path** — if every one of them fails, Chuẩn bị merely stops syncing and the ceremony still runs from the browser's own `localStorage`.
+
+**Refusing a stale write (§12, §13, §14/§15, §17).** Every `PUT` above accepts an optional `baseSavedAt`: the `savedAt` the sending browser last saw for that item. If the stored copy has moved past that base, some other machine wrote in between and this write would erase them, so it is refused with **`409 { error, conflict:true, savedAt, savedBy }`** and nothing is written. The client's job on a 409 is to say so and offer a pull — never to retry, which would only 409 again.
+
+Three rules make this safe rather than merely strict:
+
+- An **empty store never conflicts**. A first push must not require a pull first.
+- **No `baseSavedAt`** is not permission. The write is allowed only when the stored copy already carries this same browser's id — the one case where overwriting cannot lose anybody's work. This is also what lets a machine that was already syncing before this existed keep syncing without any migration step.
+- Every successful `PUT` returns **`savedAt`**, which is the only way the sender can record a base at all. A response the client cannot read leaves it with no base rather than a wrong one.
+
+The comparison lives on the SERVER (`prepConflict` in `server/online-api.mjs`) because only the server sees the true order of two pushes. A client-side check is a race with a nicer name.
 
 
 **Storage.** §8, §9 and §10 are the only routes that persist anything. They share one small server-side JSON store: `DATA_DIR` names the directory (the deploy mounts a disk there); unset, it falls back to a local directory so a dev clone runs with nothing attached. Writes are atomic (temp file, then rename) and capped at 1 MB per file. No other route reads or writes it.

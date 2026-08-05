@@ -16,10 +16,11 @@ const to = SERVER.indexOf('// ---- TASK 19: the ONLINE glossary');
 const PREP = SERVER.slice(from, to);
 
 describe('prepEndpoints — bốn cặp có mặt', () => {
-  it('1 · bốn đường dẫn đều có', () => {
+  it('1 · bốn đường dẫn đều có, cộng đường cài đặt chung của PROMPT-16', () => {
     expect(from).toBeGreaterThan(0);
     expect(to).toBeGreaterThan(from);
-    for (const p of ['/online-api/prep/schedule', '/online-api/prep/speakers', '/online-api/prep/event/', '/online-api/prep/manifest']) {
+    for (const p of ['/online-api/prep/schedule', '/online-api/prep/speakers', '/online-api/prep/event/',
+      '/online-api/prep/manifest', '/online-api/prep/settings']) {
       expect(PREP, p).toContain(p);
     }
   });
@@ -66,11 +67,14 @@ describe('prepEndpoints — trả lời đúng mã lỗi', () => {
   });
 });
 
-describe('prepEndpoints — hai trần khác nhau, cố ý', () => {
-  it('6 · 4MB cho hai route toàn cục, 12MB cho route theo sự kiện', () => {
+describe('prepEndpoints — ba trần khác nhau, cố ý', () => {
+  it('6 · 4MB cho hai route toàn cục, 12MB cho route theo sự kiện, 1MB cho cài đặt chung', () => {
     const four = PREP.match(/readJsonBody\(req, 4 \* 1024 \* 1024\)/g) ?? [];
     expect(four).toHaveLength(2); // schedule + speakers
     expect(PREP).toContain('readJsonBody(req, 12 * 1024 * 1024)'); // docs cho phép 256KB mỗi tệp
+    // PROMPT-16: cài đặt chung là chục chuỗi ngắn, và kho tự nó đã chặn ở STORE_MAX_BYTES = 1MB. Đặt
+    // trần 4MB ở đây chỉ có nghĩa là đọc hết 4MB rồi mới từ chối.
+    expect(PREP).toContain('readJsonBody(req, 1024 * 1024)');
   });
 });
 
@@ -82,14 +86,48 @@ describe('prepEndpoints — cái màn hình cần để cảnh báo trước khi
     expect(bys.length).toBeGreaterThanOrEqual(3);
   });
 
-  it('8 · savedBy bị cắt ở 40 ký tự ở cả ba nơi ghi', () => {
+  // Con số đổi 3 → 4 vì PROMPT-16 thêm MỘT nơi ghi nữa (cài đặt chung), không phải vì luật cắt đổi.
+  // Ca này ghim "mọi nơi ghi đều cắt", nên thêm nơi ghi thì phải thêm vào đây — đó là việc của nó.
+  it('8 · savedBy bị cắt ở 40 ký tự ở cả BỐN nơi ghi', () => {
     const cuts = PREP.match(/normalizeText\(body\?\.savedBy\)\.slice\(0, 40\)/g) ?? [];
-    expect(cuts).toHaveLength(3); // schedule · speakers · event
+    expect(cuts).toHaveLength(4); // schedule · speakers · settings · event
   });
 
   it('9 · manifest hỏi listEventStore cho CẢ HAI kind', () => {
     expect(PREP).toContain("script: await listEventStore('script'),");
     expect(PREP).toContain("docs: await listEventStore('docs'),");
     expect(PREP).toContain('storeDir: storeDir(),');
+  });
+
+  it('11 · manifest có thêm ô cài đặt chung, để màn hình đọc được kho đang giữ mấy mục', () => {
+    expect(PREP).toContain("const settings = await readStore('settings', null);");
+    expect(PREP).toContain('settings: {');
+  });
+});
+
+// PROMPT-16 — cái chốt chặn đẩy đè. Vẫn là SOURCE GUARD: câu hỏi ở đây là "luật có nằm đúng chỗ không",
+// còn luật chạy đúng hay không thì `tests/cloudConflict.test.ts` gọi thẳng hàm ra mà thử.
+describe('prepEndpoints — không cho bản cũ đè bản mới', () => {
+  it('12 · CẢ BỐN route ghi đều hỏi kho trước rồi mới ghi', () => {
+    const asks = PREP.match(/if \(prepConflict\(prev, body, savedBy\)\) \{/g) ?? [];
+    expect(asks).toHaveLength(4); // schedule · speakers · settings · event
+    const refuse = PREP.match(/sendPrepConflict\(res, prev\);/g) ?? [];
+    expect(refuse).toHaveLength(4);
+  });
+
+  it('13 · luật so sánh nằm ở MÁY CHỦ, và trả 409 chứ không phải 400 hay 500', () => {
+    expect(SERVER).toContain('export const prepConflict = (stored, body, savedBy) => {');
+    expect(SERVER).toContain('sendJson(res, 409, {');
+    expect(SERVER).toContain('conflict: true,');
+  });
+
+  it('14 · mọi lần ghi đều trả savedAt về, nếu không máy gửi không có mốc nào để nhớ', () => {
+    const backs = PREP.match(/sendJson\(res, 200, \{ saved: true, bytes, savedAt \}\);/g) ?? [];
+    expect(backs).toHaveLength(4);
+  });
+
+  it('15 · kho TRỐNG thì không bao giờ là xung đột — lần đẩy đầu tiên không cần kéo về trước', () => {
+    const rule = SERVER.slice(SERVER.indexOf('const prepConflict ='), SERVER.indexOf('const sendPrepConflict ='));
+    expect(rule).toContain('if (!prevAt) return false;');
   });
 });

@@ -157,6 +157,37 @@ const normalizeLanguage = (value, fallback) => {
 const safeFilename = (value) => normalizeText(value).replace(/[^\w.-]+/g, '_').slice(0, 120) || `session_${Date.now()}`;
 const logLine = (event, data) => console.log(JSON.stringify({ at: new Date().toISOString(), lane: 'online', event, ...data }));
 
+/**
+ * PROMPT-16 — the compare-and-swap that stops a stale browser blanking the store.
+ *
+ * A push carries the `savedAt` that browser last saw for this item — its BASE. If the stored copy has
+ * moved past that base, somebody else wrote in between and this push would erase them, so it is refused
+ * with 409 and the operator is told to pull. THE SERVER decides, because only the server sees the true
+ * order of two pushes; a client-side check is a race with a nicer name.
+ *
+ * A base of 0 means "this browser has never seen the store". That is not treated as permission: the write
+ * is allowed only when the stored copy already carries this same browser's id, which is the one case
+ * where overwriting cannot lose anybody's work. It is also what makes the very first deploy painless —
+ * the machine that has been the only one pushing keeps pushing, base or no base.
+ *
+ * An EMPTY store never conflicts. Nothing is at risk, and a first push must not need a pull first.
+ */
+export const prepConflict = (stored, body, savedBy) => {
+  const prevAt = typeof stored?.savedAt === 'number' ? stored.savedAt : 0;
+  if (!prevAt) return false;
+  const base = Number(body?.baseSavedAt);
+  if (Number.isFinite(base) && base > 0) return base < prevAt;
+  return (typeof stored?.savedBy === 'string' ? stored.savedBy : '') !== savedBy;
+};
+
+/** One shape for every refusal, so the client has exactly one thing to recognise. */
+const sendPrepConflict = (res, stored) => sendJson(res, 409, {
+  error: 'The shared store has a newer copy. Pull before saving.',
+  conflict: true,
+  savedAt: typeof stored?.savedAt === 'number' ? stored.savedAt : 0,
+  savedBy: typeof stored?.savedBy === 'string' ? stored.savedBy : '',
+});
+
 function withTimeout(promise, timeoutMs, label) {
   let timer = null;
   const timeout = new Promise((_, reject) => {
@@ -1431,13 +1462,19 @@ export function installOnlineApi(server, { requireAuth } = {}) {
           sendJson(res, 400, { error: 'conferences must be an array.' });
           return true;
         }
+        const savedBy = normalizeText(body?.savedBy).slice(0, 40);
+        // The whole list is replaced here, and every meeting's Chương trình rides inside it — which is
+        // exactly why this route, of the four, most needed the guard.
+        const prev = await readStore('schedule', null);
+        if (prepConflict(prev, body, savedBy)) {
+          logLine('prep.schedule.conflict', { savedBy, storedBy: prev?.savedBy ?? '', base: Number(body?.baseSavedAt) || 0 });
+          sendPrepConflict(res, prev);
+          return true;
+        }
         try {
-          const bytes = await writeStore('schedule', {
-            conferences: body.conferences,
-            savedAt: Date.now(),
-            savedBy: normalizeText(body?.savedBy).slice(0, 40),
-          });
-          sendJson(res, 200, { saved: true, bytes });
+          const savedAt = Date.now();
+          const bytes = await writeStore('schedule', { conferences: body.conferences, savedAt, savedBy });
+          sendJson(res, 200, { saved: true, bytes, savedAt });
         } catch (error) {
           logLine('prep.schedule.save_fail', { message: String(error?.message ?? error).slice(0, 300) });
           sendJson(res, 500, { error: 'Failed to save the schedule.' });
@@ -1460,16 +1497,69 @@ export function installOnlineApi(server, { requireAuth } = {}) {
           sendJson(res, 400, { error: 'profiles must be an array.' });
           return true;
         }
+        const savedBy = normalizeText(body?.savedBy).slice(0, 40);
+        const prev = await readStore('speakers', null);
+        if (prepConflict(prev, body, savedBy)) {
+          logLine('prep.speakers.conflict', { savedBy, storedBy: prev?.savedBy ?? '', base: Number(body?.baseSavedAt) || 0 });
+          sendPrepConflict(res, prev);
+          return true;
+        }
         try {
-          const bytes = await writeStore('speakers', {
-            profiles: body.profiles,
-            savedAt: Date.now(),
-            savedBy: normalizeText(body?.savedBy).slice(0, 40),
-          });
-          sendJson(res, 200, { saved: true, bytes });
+          const savedAt = Date.now();
+          const bytes = await writeStore('speakers', { profiles: body.profiles, savedAt, savedBy });
+          sendJson(res, 200, { saved: true, bytes, savedAt });
         } catch (error) {
           logLine('prep.speakers.save_fail', { message: String(error?.message ?? error).slice(0, 300) });
           sendJson(res, 500, { error: 'Failed to save the speaker library.' });
+        }
+        return true;
+      }
+
+      // PROMPT-16 — the settings that belong to the MEETING, not to one machine: wall sizes in metres,
+      // character height, voices, speaking pace. One flat object of raw strings, replaced whole.
+      //
+      // The server does not know or care what any key means, and must not start: the day it validates
+      // `proyaku_online_voice_ja` is the day adding a setting means a deploy. It checks the shape (an
+      // object of strings), the size, and nothing else.
+      //
+      // 1MB, not the 4MB of the two routes above — these are a dozen short strings, and the store itself
+      // refuses anything over `STORE_MAX_BYTES` (1MB) regardless. A ceiling that matches the store's own
+      // is the honest one; 4MB here would only mean reading 4MB before refusing it.
+      if (pathname === '/online-api/prep/settings' && req.method === 'GET') {
+        const stored = await readStore('settings', null);
+        const values = stored?.values;
+        sendJson(res, 200, {
+          values: values && typeof values === 'object' && !Array.isArray(values) ? values : {},
+          savedAt: typeof stored?.savedAt === 'number' ? stored.savedAt : 0,
+          savedBy: typeof stored?.savedBy === 'string' ? stored.savedBy : '',
+        });
+        return true;
+      }
+      if (pathname === '/online-api/prep/settings' && req.method === 'PUT') {
+        const body = await readJsonBody(req, 1024 * 1024);
+        const values = body?.values;
+        if (!values || typeof values !== 'object' || Array.isArray(values)) {
+          sendJson(res, 400, { error: 'values must be an object.' });
+          return true;
+        }
+        const clean = {};
+        for (const [key, raw] of Object.entries(values)) {
+          if (typeof key === 'string' && key.startsWith('proyaku_') && typeof raw === 'string') clean[key] = raw;
+        }
+        const savedBy = normalizeText(body?.savedBy).slice(0, 40);
+        const prev = await readStore('settings', null);
+        if (prepConflict(prev, body, savedBy)) {
+          logLine('prep.settings.conflict', { savedBy, storedBy: prev?.savedBy ?? '', base: Number(body?.baseSavedAt) || 0 });
+          sendPrepConflict(res, prev);
+          return true;
+        }
+        try {
+          const savedAt = Date.now();
+          const bytes = await writeStore('settings', { values: clean, savedAt, savedBy });
+          sendJson(res, 200, { saved: true, bytes, savedAt });
+        } catch (error) {
+          logLine('prep.settings.save_fail', { message: String(error?.message ?? error).slice(0, 300) });
+          sendJson(res, 500, { error: 'Failed to save the settings.' });
         }
         return true;
       }
@@ -1507,13 +1597,17 @@ export function installOnlineApi(server, { requireAuth } = {}) {
           sendJson(res, 400, { error: 'rows must be an array.' });
           return true;
         }
+        const savedBy = normalizeText(body?.savedBy).slice(0, 40);
+        const prev = await readEventStore(kind, eventId, null);
+        if (prepConflict(prev, body, savedBy)) {
+          logLine('prep.event.conflict', { kind, savedBy, storedBy: prev?.savedBy ?? '', base: Number(body?.baseSavedAt) || 0 });
+          sendPrepConflict(res, prev);
+          return true;
+        }
         try {
-          const bytes = await writeEventStore(kind, eventId, {
-            rows: body.rows,
-            savedAt: Date.now(),
-            savedBy: normalizeText(body?.savedBy).slice(0, 40),
-          });
-          sendJson(res, 200, { saved: true, bytes });
+          const savedAt = Date.now();
+          const bytes = await writeEventStore(kind, eventId, { rows: body.rows, savedAt, savedBy });
+          sendJson(res, 200, { saved: true, bytes, savedAt });
         } catch (error) {
           // A rejected id is the caller's fault and must read as 400, not as "the server broke".
           const message = String(error?.message ?? error);
@@ -1529,6 +1623,7 @@ export function installOnlineApi(server, { requireAuth } = {}) {
       if (pathname === '/online-api/prep/manifest' && req.method === 'GET') {
         const schedule = await readStore('schedule', null);
         const speakers = await readStore('speakers', null);
+        const settings = await readStore('settings', null);
         sendJson(res, 200, {
           schedule: {
             count: Array.isArray(schedule?.conferences) ? schedule.conferences.length : 0,
@@ -1539,6 +1634,13 @@ export function installOnlineApi(server, { requireAuth } = {}) {
             count: Array.isArray(speakers?.profiles) ? speakers.profiles.length : 0,
             savedAt: typeof speakers?.savedAt === 'number' ? speakers.savedAt : 0,
             savedBy: typeof speakers?.savedBy === 'string' ? speakers.savedBy : '',
+          },
+          // PROMPT-16. `count` is how many settings are stored, not how many exist — the client compares
+          // `savedAt` and never reads this number for anything but a readout.
+          settings: {
+            count: settings?.values && typeof settings.values === 'object' ? Object.keys(settings.values).length : 0,
+            savedAt: typeof settings?.savedAt === 'number' ? settings.savedAt : 0,
+            savedBy: typeof settings?.savedBy === 'string' ? settings.savedBy : '',
           },
           script: await listEventStore('script'),
           docs: await listEventStore('docs'),

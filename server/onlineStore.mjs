@@ -30,6 +30,11 @@ const FILES = {
   // wrong is a property of the words themselves — a company name it mangles at the anniversary is the
   // same name it will mangle at next month's briefing — so one list, learned once, serves every meeting.
   mishearings: 'mishearings.json',
+  // PROMPT-16 — the settings that describe the MEETING rather than the machine: wall sizes in metres,
+  // character height, voices, speaking pace. Short strings, one small object, and the reason a second
+  // machine no longer opens the link to a console that has forgotten how the hall is laid out. What
+  // belongs to the hardware in front of one operator is NOT in here — see `SETTINGS_KEYS` on the client.
+  settings: 'prep-settings.json',
 };
 
 /** Kilobytes are expected; a megabyte means something upstream lost its mind. Refuse rather than fill the disk. */

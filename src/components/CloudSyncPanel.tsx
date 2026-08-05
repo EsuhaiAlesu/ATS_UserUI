@@ -21,12 +21,17 @@ const hhmm = (ms: number): string => {
     return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
 };
 
-/** One sentence per state, in the operator's language — during a ceremony nobody reads two. */
+/**
+ * One sentence per state, in the operator's language — during a ceremony nobody reads two.
+ *
+ * PROMPT-16: `conflict` comes first because it is the only state with something to DO, and it uses the
+ * message the channel itself put there rather than a second wording that could drift away from it.
+ */
 function statusLine(s: CloudState): string {
+    if (s.status === 'conflict') return s.message || 'Kho chung có bản mới hơn — hãy lấy về trước khi lưu';
     if (s.status === 'pushing') return 'Đang lưu…';
     if (s.status === 'pulling') return 'Đang lấy về…';
-    if (s.status === 'offline') return 'Chưa với tới kho chung — sẽ tự thử lại';
-    if (s.status === 'error') return 'Kho chung từ chối lưu';
+    if (s.status === 'offline' || s.status === 'error') return s.message || 'Chưa lưu được lên kho chung';
     if (s.pending.length) return `Còn ${s.pending.length} thay đổi chưa lưu`;
     if (s.lastPushAt) return `Đã lưu lên kho chung lúc ${hhmm(s.lastPushAt)}`;
     return 'Chưa có thay đổi nào cần lưu';
@@ -73,18 +78,42 @@ const CloudSyncPanel: React.FC = () => {
     return (
         <div className="space-y-3">
             <p className="text-sm text-on-surface-variant">
-                Lịch, kịch bản, tài liệu và diễn giả được <strong>tự lưu</strong> lên kho chung vài giây sau khi
-                sửa. Lấy về thì phải bấm — vì lấy về là <strong>ghi đè</strong> thứ đang có trên máy này.
+                Lịch, chương trình, kịch bản, tài liệu, diễn giả và các cài đặt chung của buổi được{' '}
+                <strong>tự lưu</strong> lên kho chung vài giây sau khi sửa. Lấy về thì phải bấm — vì lấy về là{' '}
+                <strong>ghi đè</strong> thứ đang có trên máy này.
+            </p>
+            <p className="text-xs text-on-surface-variant leading-relaxed">
+                Máy nào mở lần đầu, chưa có gì, sẽ <strong>tự lấy về</strong> — không hỏi, vì không có gì để mất.
+                Máy đã có dữ liệu cũ thì không: nếu trên kho có bản mới hơn, máy này sẽ bị{' '}
+                <strong>từ chối lưu</strong> cho tới khi lấy về, để không ghi đè mất việc của máy khác.
             </p>
 
-            <div className="text-sm text-on-surface">{state ? statusLine(state) : '…'}</div>
+            <div className={`text-sm ${state?.status === 'conflict' ? 'text-error font-semibold' : 'text-on-surface'}`}>
+                {state ? statusLine(state) : '…'}
+            </div>
+
+            {/* PROMPT-16 — the state that used to be invisible. A push the store refused leaves the edit on
+                this machine only, and the operator has no way to know unless they are told here, loudly,
+                with the one action that fixes it. */}
+            {state && (state.status === 'conflict' || state.remoteNewer) && (
+                <div className="rounded-xl border border-error p-3 text-sm text-error leading-relaxed">
+                    Kho chung đang giữ một bản <strong>mới hơn</strong> bản trên máy này
+                    {state.remoteBy ? ` (máy ${state.remoteBy} lưu sau cùng)` : ''}.{' '}
+                    {state.status === 'conflict'
+                        ? 'Máy này KHÔNG được ghi đè lên đó, nên thay đổi vừa rồi chưa lên kho.'
+                        : 'Sửa tiếp ở đây rồi lưu sẽ bị từ chối.'}{' '}
+                    Hãy bấm <strong>Lấy từ kho chung về máy này</strong> trước — nhưng nhớ là lấy về sẽ ghi đè
+                    những gì đang có ở đây.
+                </div>
+            )}
 
             {manifest && (
                 <div className="text-xs text-on-surface-variant leading-relaxed">
                     Kho chung đang có: <strong>{manifest.schedule.count}</strong> buổi ·{' '}
                     <strong>{manifest.speakers.count}</strong> diễn giả ·{' '}
                     <strong>{manifest.script.length}</strong> sự kiện có kịch bản ·{' '}
-                    <strong>{manifest.docs.length}</strong> sự kiện có tài liệu
+                    <strong>{manifest.docs.length}</strong> sự kiện có tài liệu ·{' '}
+                    <strong>{manifest.settings?.count ?? 0}</strong> cài đặt chung
                     {manifest.schedule.savedAt ? ` · lưu lần cuối lúc ${hhmm(manifest.schedule.savedAt)}` : ''}
                     {savedBy ? (mine ? ' · bản trên kho do chính máy này lưu' : ` · lưu bởi máy khác (${savedBy})`) : ''}
                 </div>
@@ -113,8 +142,10 @@ const CloudSyncPanel: React.FC = () => {
                             : savedBy ? ` Bản trên kho do máy khác lưu (${savedBy}).` : ''}
                     </div>
                     <div className="text-sm text-error leading-relaxed">
-                        Việc này sẽ <strong>GHI ĐÈ</strong> lịch, kịch bản, tài liệu và diễn giả đang có trên máy
-                        này. Không lấy lại được.
+                        Việc này sẽ <strong>GHI ĐÈ</strong> lịch, chương trình, kịch bản, tài liệu, diễn giả và
+                        các cài đặt chung đang có trên máy này. Không lấy lại được.
+                        <br />
+                        Micrô, loa, độ nhạy và âm lượng của <strong>riêng máy này</strong> thì không bị đụng tới.
                     </div>
                     <div className="flex flex-wrap gap-2">
                         <button onClick={() => { void doPull(); }} disabled={busy}
