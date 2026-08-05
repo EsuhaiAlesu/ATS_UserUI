@@ -62,6 +62,10 @@ function read(): Conference[] {
 
 function write(list: Conference[]): void {
     try { localStorage.setItem(KEY, JSON.stringify(list)); } catch { /* ignore quota/private-mode */ }
+    // PROMPT-12: tell the sync channel, AFTER the local write has already happened. Dynamic import and a
+    // swallowed rejection, so this module keeps working with no network and inside a node test with no
+    // `fetch` — saving on this machine must never depend on the store being reachable.
+    void import('./cloudSync').then((m) => m.markCloudDirty('schedule')).catch(() => {});
 }
 
 /** All conferences, sorted chronologically (date + start time). */

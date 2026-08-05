@@ -1,4 +1,13 @@
-# Online Lane Contract — v0.7 (2026-08-03)
+# Online Lane Contract — v0.9 (2026-08-05)
+
+> **v0.9 changelog (PROMPT-12 — the Chuẩn bị data stops being hostage to one browser):** five new routes
+> under `/online-api/prep/*` (§12–§16), all behind the existing gate and all **off the live path**. The
+> schedule, the speaker library, each meeting's script and each meeting's imported documents now have a
+> shared copy on the deploy's disk. `localStorage` remains the WORKING copy — reads stay synchronous and
+> Chuẩn bị still works with the network unplugged — and these routes are only the sync channel. Push is
+> automatic and debounced; pull is a button, because a push overwrites a backup while a pull overwrites
+> the work in front of you.
+
 
 > **v0.7 changelog (PROMPT-11 — the lane gets a store of its own, and four fields are recorded):** three
 > new resources, six routes, all behind the existing gate and all OFF the live path:
@@ -82,6 +91,15 @@ Source of truth for the ONLINE lane (Esuhai Realtime Translation core). Do not i
 
 11. `GET /online-api/voices?language=<vi|ja>` (documented in v0.8 — the route itself predates `3afcee3` and was simply never written down). Read once when the console opens, to fill a voice picker. `language` selects the list and defaults to `ja`, so ONE language comes back per request — not both, and not one mixed list. Response `{ voices: [ { slug, name, language, category, labels } ], current, cachedAt }`, sorted with `category:'personal'` first and then by name; `current` is the slug of the voice the server is configured to use for that language, or `''`. The slug is opaque by construction: entries are built field by field and the provider object is never spread, so no real voice id reaches the client. Failures are `503 { error:'TTS voice service is not configured.' }` and `502 { error:'Voice catalog is not responding.' }`.
     - Not on the live sentence path: a failure leaves the picker empty and the session still runs on the server's configured default voice.
+12. `GET /online-api/prep/schedule` → `{ conferences:[Conference], savedAt, savedBy }`. `PUT` body `{ conferences, savedBy }` → `{ saved:true, bytes }`; `400` when `conferences` is not an array. Request body limit **4 MB**; the store's own 1 MB write ceiling still applies, so a genuinely huge schedule fails loudly as a `500` rather than being written silently.
+13. `GET /online-api/prep/speakers` → `{ profiles:[SpeakerProfile], savedAt, savedBy }`. `PUT` body `{ profiles, savedBy }` → `{ saved:true, bytes }`; `400` when `profiles` is not an array. Same 4 MB request limit.
+14. `GET /online-api/prep/event/script?eventId=<id>` → `{ rows:[ScriptEntry], savedAt, savedBy }`. `PUT` body `{ eventId, rows, savedBy }` → `{ saved:true, bytes }`. Missing `eventId`, or `rows` not an array → `400`. An `eventId` outside `^[A-Za-z0-9_-]{1,64}$` is **REFUSED**, never sanitised, and reads as `400` rather than `500`. Request body limit **12 MB**.
+    - **Not `data/script.json`.** That is the Cascade Matcher channel on the OFFLINE backend (`pushToBackend` / `pullFromBackend`), a different destination for a different purpose. Both exist at once; neither replaces the other.
+15. `GET /online-api/prep/event/docs?eventId=<id>` → `{ rows:[SourceDoc], savedAt, savedBy }`; `PUT` as §14. Documents are why the per-event store exists and why its ceiling is 8 MB per event rather than the 1 MB the global stores use: `docs.ts` keeps up to 256 KB of extracted text per file.
+16. `GET /online-api/prep/manifest` → `{ schedule:{count,savedAt,savedBy}, speakers:{count,savedAt,savedBy}, script:[{eventId,bytes,savedAt}], docs:[{eventId,bytes,savedAt}], storeDir }`. What the store holds, without downloading it — the screen that offers to overwrite local work shows this first, because an operator is owed a list before a warning.
+
+**About §12–§16.** `savedBy` is a random per-BROWSER id (`m-xxxxxx`), **not a person and not a login**: its only job is to let the screen say "the copy on the server came from a different machine". All five sit behind the same gate as everything else under `/online-api/*` and carry no authentication code of their own. **None of them is on the live sentence path** — if every one of them fails, Chuẩn bị merely stops syncing and the ceremony still runs from the browser's own `localStorage`.
+
 
 **Storage.** §8, §9 and §10 are the only routes that persist anything. They share one small server-side JSON store: `DATA_DIR` names the directory (the deploy mounts a disk there); unset, it falls back to a local directory so a dev clone runs with nothing attached. Writes are atomic (temp file, then rename) and capped at 1 MB per file. No other route reads or writes it.
 

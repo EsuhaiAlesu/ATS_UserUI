@@ -51,6 +51,11 @@ export function writeScriptLocal(eventId: string, list: ScriptEntry[]): void {
         if ((localStorage.getItem(sk(eventId)) ?? '[]') === next) return;
         localStorage.setItem(sk(eventId), next);
         writeSync(eventId, { ...readSync(eventId), updatedAt: new Date().toISOString() });
+        // PROMPT-12 — the shared store, which is a DIFFERENT destination from the Cascade Matcher sync
+        // below (`pushToBackend` → data/script.json). Both can be in play at once; neither replaces the
+        // other. The early `return` above is why this sits here and not at the top: an unchanged list
+        // must not cost a network round trip.
+        void import('./cloudSync').then((m) => m.markCloudDirty('script')).catch(() => {});
     } catch { /* ignore quota/private-mode */ }
 }
 
@@ -60,6 +65,7 @@ export function markPulledLocal(eventId: string, list: ScriptEntry[]): void {
         localStorage.setItem(sk(eventId), JSON.stringify(list));
         const t = new Date().toISOString();
         writeSync(eventId, { updatedAt: t, syncedAt: t });   // equal timestamps → getSyncState().dirty === false
+        void import('./cloudSync').then((m) => m.markCloudDirty('script')).catch(() => {}); // PROMPT-12
     } catch { /* ignore quota/private-mode */ }
 }
 

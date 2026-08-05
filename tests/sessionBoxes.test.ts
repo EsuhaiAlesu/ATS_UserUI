@@ -206,7 +206,17 @@ describe('the console prefers what was saved', () => {
     for (const route of ['/online-api/session-boxes', '/online-api/glossary', '/online-api/mishearings']) {
       expect(CONTRACT).toContain(route);
     }
-    expect(SERVER_SRC.match(/pathname === '\/online-api\//g) ?? []).toHaveLength(16);
+    // PROMPT-12 added the Chuẩn bị sync surface, so the pinned number moved 16 → 21. The guard itself is
+    // unchanged in spirit: it still pins an EXACT count, so nothing can slip in unnoticed. Five of the six
+    // new routes use `pathname === …`; `prep/event/` uses `startsWith` because the kind rides the path, so
+    // it is pinned separately below rather than left unguarded.
+    expect(SERVER_SRC.match(/pathname === '\/online-api\//g) ?? []).toHaveLength(21);
+    // đúng MỘT route dùng startsWith. (Chỗ `startsWith('/online-api/')` trần ở đầu handler là cổng lọc
+    // "có phải của mình không", không phải một route — nên mẫu dưới đòi có đường dẫn đi tiếp phía sau.)
+    expect(SERVER_SRC.match(/pathname\.startsWith\('\/online-api\/\w/g) ?? []).toHaveLength(1);
+    // and the five that moved the number are exactly the ones PROMPT-12 declared — not something else
+    const prep = SERVER_SRC.match(/pathname === '\/online-api\/prep\/[a-z]+'/g) ?? [];
+    expect(prep).toHaveLength(5); // schedule ×2, speakers ×2, manifest ×1
   });
 });
 

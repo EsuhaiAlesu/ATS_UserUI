@@ -22,6 +22,10 @@ import path from 'node:path';
 const FILES = {
   glossary: 'online-glossary.json',
   boxes: 'session-boxes.json',
+  // PROMPT-12 — the Chuẩn bị data that used to live in ONE browser's localStorage. Both are global and
+  // small: a schedule is a few dozen conferences, a speaker library a few dozen people. Kilobytes.
+  schedule: 'prep-schedule.json',
+  speakers: 'prep-speakers.json',
   // TASK 20: the mishearing corrections, kept GLOBALLY rather than per meeting. What the recogniser gets
   // wrong is a property of the words themselves — a company name it mangles at the anniversary is the
   // same name it will mangle at next month's briefing — so one list, learned once, serves every meeting.
@@ -32,6 +36,96 @@ const FILES = {
 export const STORE_MAX_BYTES = 1024 * 1024;
 
 const FALLBACK_DIR = './online-data';
+
+// ---- PROMPT-12: per-event stores ----
+//
+// The script and the imported documents belong to ONE meeting, and documents are the reason this cannot
+// be a single shared file the way `boxes` is: `docs.ts` stores up to 256KB of extracted text per file,
+// so a handful of meetings is already megabytes while STORE_MAX_BYTES is one.
+//
+// A per-event file means a filename built from user data, which is exactly the door the three fixed
+// files were designed to keep shut. It is closed again by REFUSING rather than CLEANING: an id that is
+// not plainly safe throws, it is not trimmed into something that looks safe. Sanitising is where these
+// bugs hide — `..%2f`, a NUL byte, a name that normalises to `..` on one filesystem and not another.
+// There is nothing to smuggle through a whitelist that answers only yes or no.
+const EVENT_KINDS = {
+  script: 'script',
+  docs: 'docs',
+};
+
+/** Ids come from `uid()` — a UUID or a base36 pair. Anything else is a caller bug, not a request. */
+const EVENT_ID_OK = /^[A-Za-z0-9_-]{1,64}$/;
+
+/** Documents are the reason this exists; 8MB is generous for text and still refuses a runaway. */
+export const EVENT_STORE_MAX_BYTES = 8 * 1024 * 1024;
+
+function resolveEventFile(kind, eventId) {
+  const dir = EVENT_KINDS[kind];
+  if (!dir) throw new Error(`Unknown event store: ${String(kind).slice(0, 40)}`);
+  const id = String(eventId ?? '');
+  if (!EVENT_ID_OK.test(id)) throw new Error('Invalid event id.');
+  return path.join(storeDir(), 'events', dir, `${id}.json`);
+}
+
+/** Read one event's store. Same contract as `readStore`: never throws for missing/corrupt, returns `fallback`. */
+export async function readEventStore(kind, eventId, fallback) {
+  let file;
+  // A bad kind or id is a caller bug and must be loud; a missing or corrupt FILE is normal and must be quiet.
+  try {
+    file = resolveEventFile(kind, eventId);
+  } catch {
+    return fallback;
+  }
+  try {
+    const stat = await fs.stat(file);
+    if (!stat.isFile() || stat.size > EVENT_STORE_MAX_BYTES) return fallback;
+    const raw = await fs.readFile(file, 'utf8');
+    if (!raw.trim()) return fallback;
+    const parsed = JSON.parse(raw);
+    return parsed === null || parsed === undefined ? fallback : parsed;
+  } catch {
+    return fallback;
+  }
+}
+
+/** Write one event's store atomically. Throws on a bad id, an oversized payload, or a real disk error. */
+export async function writeEventStore(kind, eventId, value) {
+  const file = resolveEventFile(kind, eventId);
+  const body = JSON.stringify(value ?? null, null, 2);
+  const bytes = Buffer.byteLength(body, 'utf8');
+  if (bytes > EVENT_STORE_MAX_BYTES) throw new Error(`Event store payload too large (${bytes} bytes).`);
+  await fs.mkdir(path.dirname(file), { recursive: true });
+  const tmp = `${file}.tmp`;
+  await fs.writeFile(tmp, body, 'utf8');
+  await fs.rename(tmp, file);
+  return bytes;
+}
+
+/**
+ * Which events have something stored, and when. Powers the "what is on the server" readout — an operator
+ * about to overwrite their local work is owed a list, not a yes/no.
+ */
+export async function listEventStore(kind) {
+  const dir = EVENT_KINDS[kind];
+  if (!dir) throw new Error(`Unknown event store: ${String(kind).slice(0, 40)}`);
+  const base = path.join(storeDir(), 'events', dir);
+  try {
+    const names = await fs.readdir(base);
+    const out = [];
+    for (const name of names) {
+      if (!name.endsWith('.json')) continue; // skips any .tmp a crash left behind
+      const id = name.slice(0, -5);
+      if (!EVENT_ID_OK.test(id)) continue;
+      try {
+        const stat = await fs.stat(path.join(base, name));
+        out.push({ eventId: id, bytes: stat.size, savedAt: Math.round(stat.mtimeMs) });
+      } catch { /* vanished between readdir and stat — simply not listed */ }
+    }
+    return out.sort((a, b) => b.savedAt - a.savedAt);
+  } catch {
+    return []; // nothing stored yet is not an error
+  }
+}
 
 /** The directory in use right now. Exported so a diagnostic can say where things are without guessing. */
 export function storeDir() {

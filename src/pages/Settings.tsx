@@ -7,6 +7,7 @@ import {
 } from '../lib/settings';
 import { toast } from '../lib/toast';
 import { OnlineKeysSettings, OnlineMicSettings, OnlineRhythmSettings } from '../lib/lanes/online';
+import CloudSyncPanel from '../components/CloudSyncPanel';
 
 // Central Settings page (Giai đoạn 1) — consolidates the scattered per-feature config into one
 // professional place: Kết nối · Sự kiện · Hiển thị · Giọng đọc · Tài khoản · Dữ liệu · Giới thiệu.
@@ -185,7 +186,11 @@ const Settings: React.FC = () => {
                     </Section>
 
                     {/* DỮ LIỆU */}
-                    <Section id="dl" icon="database" title="Dữ liệu" desc="Cấu hình & xác nhận được lưu trên chính máy này (localStorage).">
+                    {/* PROMPT-12 — the description was true until now and is not any more: lịch, kịch bản,
+                        tài liệu and diễn giả have a shared copy. Cấu hình and xác nhận genuinely are still
+                        per-machine, so the sentence names both halves instead of picking one. */}
+                    <Section id="dl" icon="database" title="Dữ liệu" desc="Lịch, kịch bản, tài liệu và diễn giả có bản chung trên kho; cấu hình và xác nhận vẫn nằm trên chính máy này.">
+                        <CloudSyncPanel />
                         <div className="flex flex-wrap gap-2">
                             <button onClick={doExport} className={`${BTN} border border-outline-variant text-on-surface-variant hover:text-primary hover:border-primary`}>
                                 <span className="material-symbols-outlined text-[18px]" aria-hidden="true">download</span>Xuất cấu hình (JSON)

@@ -18,7 +18,8 @@ import path from 'node:path';
 import { getOnlineConfig, getConfigStatus, setOnlineConfig, ONLINE_KEY_SLUGS } from './online-config.mjs';
 // TASK 18 — the lane's own small persistent store (DATA_DIR, atomic JSON). Used by the online glossary
 // (TASK 19) and the per-meeting boxes (TASK 20).
-import { readStore, writeStore } from './onlineStore.mjs';
+// PROMPT-12 adds the per-event half (script + documents) and two more global stores.
+import { readStore, writeStore, storeDir, readEventStore, writeEventStore, listEventStore } from './onlineStore.mjs';
 import { createHash } from 'node:crypto';
 
 const env = (name, fallback = '') => (process.env[name] ?? fallback).trim();
@@ -1403,6 +1404,146 @@ export function installOnlineApi(server, { requireAuth } = {}) {
           logLine('mishearings.save_fail', { message: String(error?.message ?? error).slice(0, 300) });
           sendJson(res, 500, { error: 'Failed to save the mishearing list.' });
         }
+        return true;
+      }
+
+      // ---- PROMPT-12: the Chuẩn bị data, so a ceremony is not hostage to one browser ----
+      //
+      // Four pairs, one shape: GET returns `{ <payload>, savedAt, savedBy }`, PUT takes the same and
+      // answers `{ saved:true, bytes }`. `savedBy` is a random per-BROWSER id, never a person — its only
+      // job is to let the screen say "the copy on the server came from a different machine", which is
+      // the one fact an operator needs before overwriting their own work.
+      //
+      // These carry no auth code on purpose: everything under /online-api/* answered 401 above before
+      // any route matched, and adding a second opinion here is how gaps appear.
+      if (pathname === '/online-api/prep/schedule' && req.method === 'GET') {
+        const stored = await readStore('schedule', null);
+        sendJson(res, 200, {
+          conferences: Array.isArray(stored?.conferences) ? stored.conferences : [],
+          savedAt: typeof stored?.savedAt === 'number' ? stored.savedAt : 0,
+          savedBy: typeof stored?.savedBy === 'string' ? stored.savedBy : '',
+        });
+        return true;
+      }
+      if (pathname === '/online-api/prep/schedule' && req.method === 'PUT') {
+        const body = await readJsonBody(req, 4 * 1024 * 1024);
+        if (!Array.isArray(body?.conferences)) {
+          sendJson(res, 400, { error: 'conferences must be an array.' });
+          return true;
+        }
+        try {
+          const bytes = await writeStore('schedule', {
+            conferences: body.conferences,
+            savedAt: Date.now(),
+            savedBy: normalizeText(body?.savedBy).slice(0, 40),
+          });
+          sendJson(res, 200, { saved: true, bytes });
+        } catch (error) {
+          logLine('prep.schedule.save_fail', { message: String(error?.message ?? error).slice(0, 300) });
+          sendJson(res, 500, { error: 'Failed to save the schedule.' });
+        }
+        return true;
+      }
+
+      if (pathname === '/online-api/prep/speakers' && req.method === 'GET') {
+        const stored = await readStore('speakers', null);
+        sendJson(res, 200, {
+          profiles: Array.isArray(stored?.profiles) ? stored.profiles : [],
+          savedAt: typeof stored?.savedAt === 'number' ? stored.savedAt : 0,
+          savedBy: typeof stored?.savedBy === 'string' ? stored.savedBy : '',
+        });
+        return true;
+      }
+      if (pathname === '/online-api/prep/speakers' && req.method === 'PUT') {
+        const body = await readJsonBody(req, 4 * 1024 * 1024);
+        if (!Array.isArray(body?.profiles)) {
+          sendJson(res, 400, { error: 'profiles must be an array.' });
+          return true;
+        }
+        try {
+          const bytes = await writeStore('speakers', {
+            profiles: body.profiles,
+            savedAt: Date.now(),
+            savedBy: normalizeText(body?.savedBy).slice(0, 40),
+          });
+          sendJson(res, 200, { saved: true, bytes });
+        } catch (error) {
+          logLine('prep.speakers.save_fail', { message: String(error?.message ?? error).slice(0, 300) });
+          sendJson(res, 500, { error: 'Failed to save the speaker library.' });
+        }
+        return true;
+      }
+
+      // The per-event pair. `kind` comes off the path and is checked against the same two names the store
+      // knows — the store would refuse an unknown one anyway, but a 400 here is a better answer than a 500.
+      if (pathname.startsWith('/online-api/prep/event/') && (req.method === 'GET' || req.method === 'PUT')) {
+        const kind = pathname.slice('/online-api/prep/event/'.length);
+        if (kind !== 'script' && kind !== 'docs') {
+          sendJson(res, 404, { error: 'Unknown prep store.' });
+          return true;
+        }
+        if (req.method === 'GET') {
+          const eventId = normalizeText(url.searchParams.get('eventId')).slice(0, 64);
+          if (!eventId) {
+            sendJson(res, 400, { error: 'Missing eventId.' });
+            return true;
+          }
+          const stored = await readEventStore(kind, eventId, null);
+          sendJson(res, 200, {
+            rows: Array.isArray(stored?.rows) ? stored.rows : [],
+            savedAt: typeof stored?.savedAt === 'number' ? stored.savedAt : 0,
+            savedBy: typeof stored?.savedBy === 'string' ? stored.savedBy : '',
+          });
+          return true;
+        }
+        // 12MB: `docs.ts` allows 256KB of extracted text per file, and a meeting can import several.
+        const body = await readJsonBody(req, 12 * 1024 * 1024);
+        const eventId = normalizeText(body?.eventId).slice(0, 64);
+        if (!eventId) {
+          sendJson(res, 400, { error: 'Missing eventId.' });
+          return true;
+        }
+        if (!Array.isArray(body?.rows)) {
+          sendJson(res, 400, { error: 'rows must be an array.' });
+          return true;
+        }
+        try {
+          const bytes = await writeEventStore(kind, eventId, {
+            rows: body.rows,
+            savedAt: Date.now(),
+            savedBy: normalizeText(body?.savedBy).slice(0, 40),
+          });
+          sendJson(res, 200, { saved: true, bytes });
+        } catch (error) {
+          // A rejected id is the caller's fault and must read as 400, not as "the server broke".
+          const message = String(error?.message ?? error);
+          const bad = /Invalid event id|Unknown event store/.test(message);
+          logLine('prep.event.save_fail', { kind, message: message.slice(0, 300) });
+          sendJson(res, bad ? 400 : 500, { error: bad ? 'Invalid event id.' : 'Failed to save.' });
+        }
+        return true;
+      }
+
+      // What is on the server, without downloading it. The screen that offers to overwrite local work
+      // shows this first — an operator is owed a list before a warning.
+      if (pathname === '/online-api/prep/manifest' && req.method === 'GET') {
+        const schedule = await readStore('schedule', null);
+        const speakers = await readStore('speakers', null);
+        sendJson(res, 200, {
+          schedule: {
+            count: Array.isArray(schedule?.conferences) ? schedule.conferences.length : 0,
+            savedAt: typeof schedule?.savedAt === 'number' ? schedule.savedAt : 0,
+            savedBy: typeof schedule?.savedBy === 'string' ? schedule.savedBy : '',
+          },
+          speakers: {
+            count: Array.isArray(speakers?.profiles) ? speakers.profiles.length : 0,
+            savedAt: typeof speakers?.savedAt === 'number' ? speakers.savedAt : 0,
+            savedBy: typeof speakers?.savedBy === 'string' ? speakers.savedBy : '',
+          },
+          script: await listEventStore('script'),
+          docs: await listEventStore('docs'),
+          storeDir: storeDir(),
+        });
         return true;
       }
 

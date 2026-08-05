@@ -90,6 +90,7 @@ function read(): SpeakerProfile[] {
 
 function write(list: SpeakerProfile[]): void {
     try { localStorage.setItem(KEY, JSON.stringify(list)); } catch { /* ignore quota/private-mode */ }
+    void import('./cloudSync').then((m) => m.markCloudDirty('speakers')).catch(() => {}); // PROMPT-12
 }
 
 /** All profiles, sorted by name (Vietnamese collation). */

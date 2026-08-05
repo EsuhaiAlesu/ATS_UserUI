@@ -51,6 +51,7 @@ function read(eventId: string): SourceDoc[] {
 }
 function write(eventId: string, list: SourceDoc[]): void {
     try { localStorage.setItem(dk(eventId), JSON.stringify(list)); } catch { /* ignore quota/private-mode */ }
+    void import('./cloudSync').then((m) => m.markCloudDirty('docs')).catch(() => {}); // PROMPT-12
 }
 
 /** All docs for an event, newest first. */
