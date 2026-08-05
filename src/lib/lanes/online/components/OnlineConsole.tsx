@@ -13,7 +13,7 @@
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { useOnlineLane, fetchOnlineConfigStatus, summarizePrepDocs, ONLINE_SPEED_RANGE, SUBTITLE_FONT, type LaneStatus, type OnlineVoice, type AudienceLine, type WallOutput, type WallDock, MIC_SENSITIVITY_OPTIONS, micSensitivityLabel, LOUD_GATE_OPTIONS, resolveLoudThreshold, type MicSensitivity, type LoudGateMode, splitMishearingLines, previewKeyterms, KEYTERM_MAX, KEYTERM_MAX_LEN, fetchOnlineGlossary, saveOnlineGlossary, parseGlossaryLines, formatGlossaryLines, fetchSessionBoxes, saveSessionBoxes, EMPTY_SESSION_BOXES, fetchMishearings, saveMishearings } from '../index'
+import { useOnlineLane, fetchOnlineConfigStatus, summarizePrepDocs, ONLINE_SPEED_RANGE, SUBTITLE_FONT, type LaneStatus, type OnlineVoice, type AudienceLine, type WallOutput, type WallDock, HALL_CHAR_CM, WALL_M, clampWallM, hasPhysicalSize, hallMockupUrl, readingDistanceM, type HallWall, MIC_SENSITIVITY_OPTIONS, micSensitivityLabel, LOUD_GATE_OPTIONS, resolveLoudThreshold, type MicSensitivity, type LoudGateMode, splitMishearingLines, previewKeyterms, KEYTERM_MAX, KEYTERM_MAX_LEN, fetchOnlineGlossary, saveOnlineGlossary, parseGlossaryLines, formatGlossaryLines, fetchSessionBoxes, saveSessionBoxes, EMPTY_SESSION_BOXES, fetchMishearings, saveMishearings } from '../index'
 import { useConferenceMode } from '../../../ConferenceModeContext'
 import { useActiveEvent } from '../../../ActiveEventContext'
 import { collectPrepPack, collectPrepDocuments, collectPrepHeader, collectSegmentBrief, type PrepPack } from '../../../prepData'
@@ -452,6 +452,12 @@ const OnlineConsole: React.FC = () => {
   }, [panel, lane.guided.index])
   const enabledWallCount = lane.wallOutputs.filter((o) => o.enabled).length
   const wallNoteMsg = wallNote && wallNote.atCount === lane.wallOpenIds.length ? wallNote.msg : ''
+  // Màn tượng trưng: cả hội trường thu nhỏ trên MỘT màn để canh cỡ chữ trước buổi lễ. It is not a lane
+  // page and cannot read the stored outputs, so the hall travels on its query string (hallScreens.ts).
+  const hallWalls: HallWall[] = lane.wallOutputs
+    .filter((o) => o.enabled && hasPhysicalSize(o.widthM, o.heightM))
+    .map((o) => ({ id: o.id, label: o.label, view: o.view, showSource: o.showSource, widthM: o.widthM!, heightM: o.heightM! }))
+  const openWallMockup = () => { window.open(hallMockupUrl(hallWalls, lane.wallCharCm), 'proyaku-wall-mockup') }
 
   // ── derived state ──
   const st = lane.status
@@ -1197,6 +1203,29 @@ const OnlineConsole: React.FC = () => {
                             <label className="flex items-center gap-1 text-xs text-on-surface-variant cursor-pointer"><input type="checkbox" checked={o.showSource} onChange={(e) => updateWallOutput(o.id, { showSource: e.target.checked })} className="accent-secondary" />Hiện cả bản gốc</label>
                           </div>
                         )}
+                        {o.enabled && (
+                          // KÍCH THƯỚC THẬT của tấm màn, tính bằng mét (rộng × cao). Đây là thứ quyết định
+                          // chữ cao bao nhiêu centimet trên tường và cửa sổ mở ra đúng hình dạng nào — máy
+                          // chiếu nhận 1920 hay 3840 điểm ảnh cũng cho ra chữ cao bằng nhau.
+                          <div className="flex flex-wrap items-center gap-1.5 text-xs text-on-surface-variant">
+                            <span className="font-label-caps text-[10px]">CỠ MÀN THẬT</span>
+                            <input
+                              type="number" min={WALL_M.min} max={WALL_M.max} step={0.1} value={o.widthM ?? ''}
+                              onChange={(e) => updateWallOutput(o.id, { widthM: e.target.value === '' ? undefined : clampWallM(Number(e.target.value)) })}
+                              className={`${SELECT_CLS} w-16 text-xs py-1`} aria-label={`Chiều rộng ${o.label} (mét)`}
+                            />
+                            <span>m rộng ×</span>
+                            <input
+                              type="number" min={WALL_M.min} max={WALL_M.max} step={0.1} value={o.heightM ?? ''}
+                              onChange={(e) => updateWallOutput(o.id, { heightM: e.target.value === '' ? undefined : clampWallM(Number(e.target.value)) })}
+                              className={`${SELECT_CLS} w-16 text-xs py-1`} aria-label={`Chiều cao ${o.label} (mét)`}
+                            />
+                            <span>m cao</span>
+                          </div>
+                        )}
+                        {o.enabled && !hasPhysicalSize(o.widthM, o.heightM) && (
+                          <p className="text-[10px] text-on-surface-variant/80">Chưa điền cỡ màn thật — màn này vẫn chạy theo cỡ chữ tính bằng điểm ảnh như trước.</p>
+                        )}
                         {o.enabled && o.view === 'both' && !lane.twoWay && <p className="text-[10px] text-error/80">Phiên một-chiều: một cột của "cả 2" sẽ trống.</p>}
                         {o.enabled && (o.dock ?? 'full') !== 'full' && <p className="text-[10px] text-on-surface-variant/80">Cửa sổ hẹp: "cả 2" sẽ tự xếp trên–dưới thay vì 2 cột.</p>}
                       </div>
@@ -1204,12 +1233,27 @@ const OnlineConsole: React.FC = () => {
                   })}
                 </div>
                 <div>
-                  <label className="font-label-caps text-label-caps text-on-surface-variant block mb-1.5">CỠ CHỮ PHỤ ĐỀ</label>
+                  {/* Cỡ chữ THẬT trên tường. Điểm ảnh không nói lên kích thước: 47px trên màn 6 m nhận
+                      1920 điểm ảnh là chữ cao 15 cm, cũng 47px trên chính màn đó nhận 3840 điểm ảnh chỉ
+                      còn 7 cm. Nên người điều khiển chỉnh centimet, máy tự quy ra điểm ảnh lúc vẽ. */}
+                  <label className="font-label-caps text-label-caps text-on-surface-variant block mb-1.5">CHIỀU CAO CHỮ TRÊN TƯỜNG</label>
+                  <div className="flex items-center gap-2">
+                    <input type="range" min={HALL_CHAR_CM.min} max={HALL_CHAR_CM.max} step={HALL_CHAR_CM.step} value={lane.wallCharCm} onChange={(e) => lane.setWallCharCm(Number(e.target.value))} className="flex-1 accent-[var(--secondary)]" aria-label="Chiều cao chữ trên tường" />
+                    <span className="w-12 shrink-0 text-right tabular-nums text-sm text-on-surface">{lane.wallCharCm} cm</span>
+                  </div>
+                  <p className="text-[11px] text-on-surface-variant mt-1">Đọc tốt tới khoảng <b className="text-on-surface tabular-nums">{readingDistanceM(lane.wallCharCm)} m</b> — đo từ hàng ghế cuối lên màn. Chữ to hơn thì mỗi dòng chứa được ít chữ hơn.</p>
+                </div>
+                <div>
+                  <label className="font-label-caps text-label-caps text-on-surface-variant block mb-1.5">CỠ CHỮ TRÊN MÀN ĐIỀU KHIỂN</label>
                   <div className="flex items-center gap-2">
                     <input type="range" min={SUBTITLE_FONT.min} max={SUBTITLE_FONT.max} step={SUBTITLE_FONT.step} value={lane.subtitleFont} onChange={(e) => lane.setSubtitleFont(Number(e.target.value))} className="flex-1 accent-[var(--secondary)]" aria-label="Cỡ chữ phụ đề" />
                     <span className="w-10 shrink-0 text-right tabular-nums text-sm text-on-surface">{lane.subtitleFont}px</span>
                   </div>
+                  <p className="text-[11px] text-on-surface-variant mt-1">Chỉ đổi hai cột phụ đề ngay tại đây (và những màn chưa điền cỡ màn thật).</p>
                 </div>
+                <button onClick={openWallMockup} disabled={hallWalls.length === 0} title="Xem cả hội trường thu nhỏ đúng tỉ lệ trên một màn" className="w-full inline-flex items-center justify-center gap-1.5 rounded-lg border border-secondary/60 text-secondary px-3 py-2 text-sm hover:bg-secondary/10 transition-colors disabled:opacity-40">
+                  <span className="material-symbols-outlined text-[18px]" aria-hidden="true">aspect_ratio</span>Xem thử màn tượng trưng
+                </button>
                 <div className="flex items-center gap-2">
                   <button onClick={handleExportWall} className="flex-1 inline-flex items-center justify-center gap-1.5 rounded-lg btn-lux bg-secondary text-on-secondary px-3 py-2 text-sm font-semibold hover:opacity-90">
                     <span className="material-symbols-outlined text-[18px]" aria-hidden="true">cast</span>{lane.wallOpenIds.length > 0 ? 'Xuất lại' : 'Xuất ra màn hình'}

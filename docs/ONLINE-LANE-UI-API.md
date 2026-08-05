@@ -221,3 +221,60 @@ whose microphone gain lifts every pause into noise — the partial standing comp
 `sentenceMs`/`longMs` are inert and exist only to keep the option shape uniform; `rhythmUsesManualCommit`
 is the predicate every caller must ask, never `rhythmCommitWindows`. Line breaking moves entirely to the
 display layer: sentence-ending punctuation, then 2–3 sentences grouped by `paragraphStream`.
+
+## Màn khán giả đo bằng MÉT, không đo bằng điểm ảnh (`src/lib/hallScreens.ts`)
+
+Cỡ chữ trên tường trước nay tính bằng điểm ảnh: `wallLayout` trả `scale = 2.6`, nhân với cỡ nền 18px ra
+~47px. **Điểm ảnh không phải kích thước.** Cùng một tấm màn rộng 6 m: máy chiếu nhận 1920 điểm ảnh thì 47px
+là chữ cao ~15 cm, hàng ghế cuối đọc được; cũng tấm màn đó nhận 3840 điểm ảnh thì 47px chỉ còn ~7 cm. Cùng
+một dòng mã, cùng một tấm màn, hai kết quả trái ngược — và không có cách nào biết trước, vì bộ xử lý LED
+mới là thứ quyết định độ phân giải đầu vào.
+
+Thứ duy nhất không đổi khi đổi bộ xử lý là **chiều cao thật của con chữ**, nên đó là thứ người điều khiển
+chỉnh (`wallCharCm`, đơn vị cm), còn điểm ảnh do máy quy ra **lúc vẽ**:
+
+```
+hallFontPx(viewportPx, widthM, charCm) = (charCm/100) × (viewportPx / widthM) ÷ WALL_GLYPH_RATIO
+```
+
+`viewportPx` là bề ngang THẬT của cửa sổ lúc đó, không phải một độ phân giải lưu sẵn — nên phóng to trình
+duyệt 150 %, đổi máy chiếu, hay kéo cửa sổ sang màn khác đều tự bù. `WALL_GLYPH_RATIO = 0.72` là tỉ lệ giữa
+chữ hoa Latin và hộp em của cỡ chữ CSS; lấy theo Latin (thấp hơn kanji ~0.88) để lệch về phía chữ to hơn,
+không bao giờ về phía tường đo hụt. `readingDistanceM(cm) = cm × 2` là quy tắc 1:200 của phụ đề sân khấu.
+
+**Ba con số của hội trường 20 năm** nằm ở đúng MỘT chỗ — `DEFAULT_HALL_WALLS`: màn giữa 6 × 3 m, hai màn
+hông 3,5 × 2,5 m (rộng × cao). `DEFAULT_WALL_OUTPUTS` dựng từ danh sách đó và `/wall-mockup` mở trơn cũng
+rơi về đó, nên bảng điều khiển và màn xem thử không thể mô tả hai hội trường khác nhau. Sửa từng màn ngay
+trong bảng "Xuất màn khán giả" nếu hội trường khác.
+
+Điểm dễ nghĩ ngược: **một cỡ cm chung cho cả ba màn KHÔNG cho ra một cỡ px chung.** Cùng 1920 điểm ảnh, tấm
+màn 3,5 m có nhiều điểm ảnh trên mỗi mét hơn tấm 6 m, nên 12 cm ăn 91px ở màn hông và 53px ở màn giữa. Đặt
+một cỡ px chung cho cả ba màn — nếp cũ — chính là cách làm cho chữ trên ba tấm màn cao thấp khác nhau.
+
+Đường đi của mét:
+
+- `WallOutput.widthM` / `.heightM` — tuỳ chọn. Vắng cả hai → giữ nguyên nếp cũ tính theo điểm ảnh; thiếu
+  một cạnh cũng coi như vắng (nửa cỡ màn không suy ra hình dạng, đoán bừa tệ hơn giữ nguyên).
+- `wallWindowGeometry` — màn hình được gán vẫn thắng (màn hình ĐÃ LÀ tấm màn, lấy trọn); dải dọc cũng vẫn
+  thắng. Chỉ **lát tạm** mới được nắn theo tỉ lệ tấm màn: 6 × 3 m nhận lát 640 × 1080 thì mở 640 × 320 —
+  không nắn thì người điều khiển tập dượt trên cửa sổ DỌC rồi kết luận cho một tấm màn NGANG.
+- `openWallWindows(outputs, screens, fontSize, charCm)` — gắn thêm `&wm=&hm=&cm=` vào `/wall` khi biết mét.
+  `font` vẫn được gửi để ai xoá mét giữa buổi là quay về nếp cũ ngay, không cần tải lại trang.
+- `/wall` — có `wm` thì `+`/`−` đổi **centimet** chứ không đổi điểm ảnh, và thanh dưới đọc thẳng
+  "6×3 m · chữ 12 cm · đọc tốt tới ~24 m".
+
+### `/wall-mockup` — màn tượng trưng
+
+Cả hội trường thu nhỏ đúng tỉ lệ trên MỘT màn: `mockupLayout` xếp các màn cạnh nhau theo **một tỉ lệ chung**
+(trái · giữa · phải, treo theo một đường tâm, cách nhau `HALL_GAP_M = 1.5` m), kèm một vạch 1,7 m làm người
+đứng cạnh. Chữ trong mỗi khung nhỏ vẫn do `hallFontPx` tính từ bề ngang của **chính khung đó** — nên nó là
+mô hình thu nhỏ thật: chữ chiếm bao nhiêu phần tấm màn ở đây thì ngoài hội trường đúng bấy nhiêu. Có nút
+"Chữ mẫu" để canh cỡ khi chưa ai nói.
+
+Đây là màn **xem thử để canh cỡ chữ, không phải tín hiệu đưa vào máy chiếu** — ba khung nhỏ đẩy qua một
+đường HDMI sẽ cho ra ba khung nhỏ trên mọi tấm màn. Đầu ra thật vẫn là một cửa sổ `/wall` cho mỗi màn.
+
+`/wall-mockup` không phải trang của làn (CLAUDE.md luật 2) nên không đọc được kho của bảng điều khiển: hội
+trường đi theo địa chỉ, giống hệt cách `/wall` nhận chiều và cỡ chữ. `hallMockupUrl()` dựng địa chỉ đó;
+`decodeHallWalls()` **bỏ hẳn** mục hỏng thay vì dựng một tấm màn nửa vời. Mở trơn `/wall-mockup` thì rơi về
+`DEFAULT_HALL_WALLS`, nên đường dẫn gõ tay vẫn dùng được.

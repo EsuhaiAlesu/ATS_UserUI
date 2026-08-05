@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import {
   wallWindowGeometry,
+  DEFAULT_WALL_OUTPUTS,
   DOCK_MIN_W,
   DOCK_MAX_W,
   DOCK_FRACTION,
@@ -8,6 +9,7 @@ import {
   type WallScreen,
 } from '../src/lib/lanes/online/audienceWindows'
 import { wallLayout, wallNeedsTouchControls, WALL_SCALE } from '../src/lib/audienceSubtitles'
+import { DEFAULT_HALL_WALLS } from '../src/lib/hallScreens'
 
 // Both modules are pure and take their dimensions as arguments, so no DOM is needed here.
 const output = (o: Partial<WallOutput> = {}): WallOutput => ({
@@ -78,6 +80,53 @@ describe('wallWindowGeometry', () => {
     // On a screen narrower than the floor the strip is clamped to the screen instead of overflowing it.
     const tiny = wallWindowGeometry(output({ dock: 'right' }), [], 0, 1, { width: 280, height: 600 })
     expect(tiny).toEqual({ left: 0, top: 0, width: 280, height: 600 })
+  })
+
+  // ── cỡ màn THẬT (mét): cửa sổ tạm phải mở đúng hình dạng tấm màn ngoài hội trường ──
+  it('biết cỡ màn thật thì lát tạm được nắn đúng tỉ lệ tấm màn', () => {
+    // Màn chính 6 × 3 m nhận lát 640 × 1080 → mở 640 × 320. Không nắn thì người điều khiển tập dượt trên
+    // một cửa sổ DỌC rồi kết luận "chừng này chữ là vừa" cho một tấm màn NGANG.
+    expect(wallWindowGeometry(output({ widthM: 6, heightM: 3 }), [], 0, 3, LAPTOP))
+      .toEqual({ left: 0, top: 0, width: 640, height: 320 })
+    // Màn hông 3,5 × 2,5 m ở lát thứ hai: vẫn đúng chỗ, chỉ đổi hình dạng.
+    const side = wallWindowGeometry(output({ widthM: 3.5, heightM: 2.5 }), [], 1, 3, LAPTOP)
+    expect(side.left).toBe(640)
+    expect(side.top).toBe(0)
+    expect(side.width / side.height).toBeCloseTo(3.5 / 2.5, 1)
+  })
+
+  it('màn hình được gán vẫn thắng cỡ mét — màn hình ĐÃ LÀ tấm màn', () => {
+    // Máy chiếu nhận bao nhiêu điểm ảnh thì lấy trọn bấy nhiêu; chữ tự ra đúng centimet nhờ hallFontPx.
+    expect(wallWindowGeometry(output({ screenIdx: 1, widthM: 6, heightM: 3 }), HALL, 0, 3, LAPTOP))
+      .toEqual({ left: 1920, top: 0, width: 3840, height: 2160 })
+  })
+
+  it('dải dọc vẫn thắng cỡ mét — dải là chuyện của cái bàn đang ngồi', () => {
+    const docked = wallWindowGeometry(output({ dock: 'right', widthM: 6, heightM: 3 }), [], 0, 3, LAPTOP)
+    expect(docked).toEqual(wallWindowGeometry(output({ dock: 'right' }), [], 0, 3, LAPTOP))
+  })
+
+  it('thiếu một cạnh thì coi như chưa khai cỡ màn — giữ nguyên nếp cũ', () => {
+    // Nửa cỡ màn không suy ra được hình dạng; đoán bừa còn tệ hơn là để y như trước.
+    expect(wallWindowGeometry(output({ widthM: 6 }), [], 0, 3, LAPTOP))
+      .toEqual({ left: 0, top: 0, width: 640, height: 1080 })
+    expect(wallWindowGeometry(output({ heightM: 3 }), [], 0, 3, LAPTOP))
+      .toEqual({ left: 0, top: 0, width: 640, height: 1080 })
+  })
+})
+
+describe('DEFAULT_WALL_OUTPUTS mang sẵn cỡ hội trường 20 năm', () => {
+  it('ba màn mặc định đã có cỡ mét, khớp từng con số với DEFAULT_HALL_WALLS', () => {
+    // Dựng từ một danh sách duy nhất (hallScreens.DEFAULT_HALL_WALLS) nên bảng điều khiển và màn tượng
+    // trưng không thể mô tả hai hội trường khác nhau.
+    expect(DEFAULT_WALL_OUTPUTS.map((o) => `${o.id} ${o.widthM}x${o.heightM}`))
+      .toEqual(['center 6x3', 'left 3.5x2.5', 'right 3.5x2.5'])
+    expect(DEFAULT_WALL_OUTPUTS.map((o) => o.enabled)).toEqual([true, true, true])
+    expect(DEFAULT_WALL_OUTPUTS.map((o) => o.dock)).toEqual(['full', 'full', 'full'])
+    for (const o of DEFAULT_WALL_OUTPUTS) {
+      const src = DEFAULT_HALL_WALLS.find((w) => w.id === o.id)!
+      expect([o.label, o.view, o.showSource]).toEqual([src.label, src.view, src.showSource])
+    }
   })
 })
 

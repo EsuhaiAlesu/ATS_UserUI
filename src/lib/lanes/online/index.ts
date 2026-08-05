@@ -18,6 +18,7 @@ import { createAudiencePublisher, type AudienceLine } from '../../audienceChanne
 import type { ScriptMatcherEntry } from './scriptMatcher'
 import { GUIDED_OFF, clampGuidedIndex, stepGuidedIndex, guidedReadout, guidedAllowed, type GuidedState, type SpeakerMode } from './guidedScript'
 import { SUBTITLE_FONT, clampSubtitleFont } from '../../audienceSubtitles'
+import { HALL_CHAR_CM, clampCharCm } from '../../hallScreens'
 // TASK 57 — sàn khớp của chế độ dẫn tay. Đọc từ localStorage ở TỪNG câu, không giữ trong state React:
 // đổi nấc trong Cài đặt phải ăn ngay câu sau, không đợi màn console vẽ lại.
 import { guidedMatchFloor, loadGuidedMatch } from './guidedMatch'
@@ -57,6 +58,10 @@ export { applyMishearings, formatMishearingRules, parseMishearingRules, splitMis
 export type { MishearingRule } from './mishearing'
 export type { WallOutput, WallView, WallDock, ScreenSupport, WallScreen } from './audienceWindows'
 export { SUBTITLE_FONT } from '../../audienceSubtitles'
+// The wall's PHYSICAL model (mét → cm chữ → px). Lives outside the lane because /wall and /wall-mockup use
+// it too and may not import from this directory; re-exported here so lane components keep one import root.
+export { HALL_CHAR_CM, WALL_M, clampCharCm, clampWallM, hasPhysicalSize, hallFontPx, hallMockupUrl, readingDistanceM } from '../../hallScreens'
+export type { HallWall } from '../../hallScreens'
 // TASK 13 + TASK 24 — "nhịp nói của buổi". The Settings page picks the step; the lane reads it live
 // (the client pair that actually cuts) and sends the seconds upstream at each dial (the backstop).
 export type { SpeechRhythm } from './speechRhythm'
@@ -264,6 +269,9 @@ export interface UseOnlineLane {
   directedLines: AudienceLine[]
   subtitleFont: number
   setSubtitleFont: (n: number) => void
+  /** Chiều cao MỘT chữ trên tường, tính bằng cm — cỡ chữ thật của các màn khán giả (hallScreens.ts). */
+  wallCharCm: number
+  setWallCharCm: (n: number) => void
   wallOutputs: WallOutput[]
   setWallOutputs: (o: WallOutput[]) => void
   wallSupport: ScreenSupport
@@ -329,6 +337,7 @@ export function useOnlineLane(): UseOnlineLane {
   // two-way + audience wall + subtitles (TASK 6·7·8)
   const [twoWay, setTwoWayState] = useState<boolean>(() => { try { return localStorage.getItem('proyaku_online_two_way') === '1' } catch { return false } })
   const [subtitleFont, setSubtitleFontState] = useState<number>(() => { try { return clampSubtitleFont(Number(localStorage.getItem('proyaku_online_subtitle_font')) || SUBTITLE_FONT.default) } catch { return SUBTITLE_FONT.default } })
+  const [wallCharCm, setWallCharCmState] = useState<number>(() => { try { return clampCharCm(Number(localStorage.getItem('proyaku_online_wall_char_cm')) || HALL_CHAR_CM.default) } catch { return HALL_CHAR_CM.default } })
   const [wallOutputs, setWallOutputsState] = useState<WallOutput[]>(() => loadWallOutputs())
   const [wallSupport, setWallSupport] = useState<ScreenSupport>('idle')
   const [wallScreens, setWallScreens] = useState<WallScreen[]>([])
@@ -522,6 +531,7 @@ export function useOnlineLane(): UseOnlineLane {
   // ── TASK 6·7·8: two-way direction map + audience publisher + subtitle font + wall placement ──
   const twoWayRef = useRef(twoWay); twoWayRef.current = twoWay
   const subtitleFontRef = useRef(subtitleFont); subtitleFontRef.current = subtitleFont
+  const wallCharCmRef = useRef(wallCharCm); wallCharCmRef.current = wallCharCm
   const wallOutputsRef = useRef(wallOutputs); wallOutputsRef.current = wallOutputs
   const wallScreensRef = useRef(wallScreens); wallScreensRef.current = wallScreens
   const dirByLid = useRef<Map<string, 'vi2ja' | 'ja2vi'>>(new Map())
@@ -529,6 +539,7 @@ export function useOnlineLane(): UseOnlineLane {
 
   const setTwoWay = useCallback((v: boolean) => { setTwoWayState(v); try { localStorage.setItem('proyaku_online_two_way', v ? '1' : '0') } catch { /* private mode */ } }, [])
   const setSubtitleFont = useCallback((n: number) => { const c = clampSubtitleFont(n); setSubtitleFontState(c); try { localStorage.setItem('proyaku_online_subtitle_font', String(c)) } catch { /* private mode */ } }, [])
+  const setWallCharCm = useCallback((n: number) => { const c = clampCharCm(n); setWallCharCmState(c); try { localStorage.setItem('proyaku_online_wall_char_cm', String(c)) } catch { /* private mode */ } }, [])
   const setWallOutputs = useCallback((o: WallOutput[]) => { setWallOutputsState(o); saveWallOutputs(o) }, [])
 
   const scanWall = useCallback(async () => {
@@ -538,7 +549,7 @@ export function useOnlineLane(): UseOnlineLane {
     setWallOutputsState((prev) => { const next = scanWallScreens(prev, screens.length); saveWallOutputs(next); return next })
   }, [])
   const openWall = useCallback(() => {
-    const r = openWallWindows(wallOutputsRef.current, wallScreensRef.current, subtitleFontRef.current)
+    const r = openWallWindows(wallOutputsRef.current, wallScreensRef.current, subtitleFontRef.current, wallCharCmRef.current)
     setWallOpenIds(getOpenWallIds())
     return r
   }, [])
@@ -663,7 +674,7 @@ export function useOnlineLane(): UseOnlineLane {
     eventId, setEventId,
     voices, voicesStatus, refreshVoices, voiceJa, setVoiceJa, voiceVi, setVoiceVi,
     speedMode, setSpeedMode, manualSpeed, setManualSpeed,
-    twoWay, setTwoWay, directedLines, subtitleFont, setSubtitleFont,
+    twoWay, setTwoWay, directedLines, subtitleFont, setSubtitleFont, wallCharCm, setWallCharCm,
     wallOutputs, setWallOutputs, wallSupport, wallScreens, wallOpenIds, scanWall, openWall, closeWall,
     start, stop, saveSession,
   }

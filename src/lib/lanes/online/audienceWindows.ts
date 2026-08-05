@@ -6,12 +6,19 @@
 // when its URL actually changed (no flicker mid-ceremony) and the live open-count can be read back from
 // the windows themselves — a browser never tells the parent that a child window was closed. TASK 7.3.
 
+// The physical model (mét → cm chữ → px) is lane-neutral: /wall and /wall-mockup are not lane pages and
+// cannot import from this directory, so the maths lives in src/lib/hallScreens.ts and BOTH sides use it.
+import { DEFAULT_HALL_WALLS, HALL_CHAR_CM, WALL_M, clampCharCm, fitToAspect, hasPhysicalSize } from '../../hallScreens'
+
 export type WallView = 'vi2ja' | 'ja2vi' | 'both'
 // `dock` (M10) — a narrow PORTRAIT strip pinned to one edge of the current screen, for the operator who
 // keeps the two-way window beside their other apps instead of on a hall monitor. It is a placement, not a
 // view: the /wall page itself reflows to one column when the window is this shape.
 export type WallDock = 'full' | 'right' | 'left'
-export interface WallOutput { id: string; label: string; enabled: boolean; view: WallView; showSource: boolean; screenIdx?: number; dock?: WallDock }
+// `widthM`/`heightM` — the LIT AREA of the real screen, in metres. Optional, and everything degrades to the
+// old pixel behaviour without them; present, they are what makes the letters a fixed physical size and the
+// window a fixed shape, whatever resolution the video processor happens to take (hallScreens.ts).
+export interface WallOutput { id: string; label: string; enabled: boolean; view: WallView; showSource: boolean; screenIdx?: number; dock?: WallDock; widthM?: number; heightM?: number }
 export type ScreenSupport = 'idle' | 'unsupported' | 'single' | 'multi' | 'denied'
 export interface WallScreen { left: number; top: number; width: number; height: number; label: string }
 
@@ -23,11 +30,12 @@ interface WmScreenDetails { screens: WmScreen[]; addEventListener?: (t: string, 
 const STORAGE_KEY = 'proyaku_online_wall_outputs'
 
 // Gala default: Màn giữa = cả hai chiều · Màn trái = VI→JA · Màn phải = JA→VI. Nguồn ẩn mặc định.
-export const DEFAULT_WALL_OUTPUTS: WallOutput[] = [
-  { id: 'center', label: 'Màn giữa', enabled: true, view: 'both', showSource: false, dock: 'full' },
-  { id: 'left', label: 'Màn trái', enabled: true, view: 'vi2ja', showSource: false, dock: 'full' },
-  { id: 'right', label: 'Màn phải', enabled: true, view: 'ja2vi', showSource: false, dock: 'full' },
-]
+// Kích thước mặc định = hội trường 20 năm (08/08/2026): màn chính 6 × 3 m, hai màn hông 3,5 × 2,5 m. Đọc
+// theo RỘNG × CAO — sửa được ngay trong bảng "Xuất màn khán giả" nếu hội trường khác.
+export const DEFAULT_WALL_OUTPUTS: WallOutput[] = DEFAULT_HALL_WALLS.map((w) => ({
+  id: w.id, label: w.label, enabled: true, view: w.view, showSource: w.showSource,
+  dock: 'full' as WallDock, widthM: w.widthM, heightM: w.heightM,
+}))
 
 // A docked strip is sized like a phone held beside the operator's other windows: about a quarter of the
 // screen, never so thin that a Japanese line cannot hold a few characters (min 320) and never so wide that
@@ -43,6 +51,10 @@ function safeStorage(): Storage | null {
 
 const isView = (v: unknown): v is WallView => v === 'vi2ja' || v === 'ja2vi' || v === 'both'
 const isDock = (v: unknown): v is WallDock => v === 'full' || v === 'right' || v === 'left'
+// A stored metre value is taken only when it is a real number inside the physical bounds; anything else
+// (a string, a NaN, 600 typed for 6,00) falls back to the default rather than sizing the wall from junk.
+const storedM = (v: unknown, fallback: number | undefined): number | undefined =>
+  typeof v === 'number' && Number.isFinite(v) && v >= WALL_M.min && v <= WALL_M.max ? v : fallback
 
 // Merge one stored entry (which may be partial or corrupt) over its default, field by field, so a stale
 // value can never break the console: any field that is missing or the wrong type falls back to the default.
@@ -57,6 +69,8 @@ function mergeStored(def: WallOutput, stored: Record<string, unknown> | undefine
     showSource: typeof stored.showSource === 'boolean' ? stored.showSource : def.showSource,
     screenIdx: typeof idx === 'number' && Number.isInteger(idx) && idx >= 0 ? idx : undefined,
     dock: isDock(stored.dock) ? stored.dock : (def.dock ?? 'full'),
+    widthM: storedM(stored.widthM, def.widthM),
+    heightM: storedM(stored.heightM, def.heightM),
   }
 }
 
@@ -156,15 +170,23 @@ export function wallWindowGeometry(
     return { left: dock === 'right' ? availW - width : 0, top: 0, width, height: availH }
   }
   const scr = (output.screenIdx != null && screens[output.screenIdx]) ? screens[output.screenIdx] : null
+  // An assigned monitor IS the wall — take it whole, at whatever resolution the processor is feeding it.
   if (scr) return { left: scr.left, top: scr.top, width: scr.width, height: scr.height }
   const colW = total > 0 ? Math.max(320, Math.round(availW / total)) : availW
+  // No monitor assigned yet: the even slice, but shaped like the real screen when its metres are known. A
+  // 6 × 3 m wall handed a 640 × 1080 slice opens 640 × 320 — otherwise the operator rehearses on a
+  // portrait window, decides the text fits, and the landscape wall in the hall says otherwise.
+  if (hasPhysicalSize(output.widthM, output.heightM)) {
+    const fit = fitToAspect({ width: colW, height: availH }, output.widthM!, output.heightM!)
+    return { left: index * colW, top: 0, width: fit.width, height: fit.height }
+  }
   return { left: index * colW, top: 0, width: colW, height: availH }
 }
 
 // Open (or re-place) one popup per ENABLED output. An already-open window is re-navigated ONLY when its URL
 // changed, then always steered back onto its assigned screen. Returns { opened, total, blocked } so the UI
 // can say something true — `blocked` is the popups the blocker ate (window.open returned null).
-export function openWallWindows(outputs: WallOutput[], screens: WallScreen[], fontSize: number): { opened: number; total: number; blocked: number } {
+export function openWallWindows(outputs: WallOutput[], screens: WallScreen[], fontSize: number, charCm: number = HALL_CHAR_CM.default): { opened: number; total: number; blocked: number } {
   const enabled = outputs.filter((o) => o.enabled)
   const total = enabled.length
   let opened = 0
@@ -177,7 +199,10 @@ export function openWallWindows(outputs: WallOutput[], screens: WallScreen[], fo
 
   enabled.forEach((o, i) => {
     const src = o.showSource ? '&src=1' : ''
-    const url = `/wall?dir=${o.view}&font=${fontSize}${src}`
+    // With metres known the wall sizes its text physically and `font` becomes a dead fallback; it is still
+    // sent so an operator who clears the metres mid-event gets the old behaviour back without a reload.
+    const hall = hasPhysicalSize(o.widthM, o.heightM) ? `&wm=${o.widthM}&hm=${o.heightM}&cm=${clampCharCm(charCm)}` : ''
+    const url = `/wall?dir=${o.view}&font=${fontSize}${src}${hall}`
     const { left, top, width, height } = wallWindowGeometry(o, screens, i, total, { width: availW, height: availH })
 
     const existing = wallWindows.get(o.id)

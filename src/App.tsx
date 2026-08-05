@@ -4,6 +4,7 @@ import AudioRouting from './pages/AudioRouting'
 import RevealMoment from './pages/RevealMoment'
 import BilingualStream from './pages/BilingualStream'
 import AudienceWall from './pages/AudienceWall'
+import WallMockup from './pages/WallMockup'
 import VoiceStudio from './pages/VoiceStudio'
 import GlossaryEditor from './pages/GlossaryEditor'
 import ScriptPrep from './pages/ScriptPrep'
@@ -70,6 +71,8 @@ const App: React.FC = () => {
             <Route path="/stream" element={<BilingualStream />} />
             {/* ONLINE audience wall — detachable subtitle window(s), one per direction (TASK 7). */}
             <Route path="/wall" element={<AudienceWall />} />
+            {/* Màn tượng trưng — cả hội trường thu nhỏ đúng tỉ lệ trên MỘT màn, để canh cỡ chữ trước buổi lễ. */}
+            <Route path="/wall-mockup" element={<WallMockup />} />
 
             {/* ONLINE lane dev bench (docs/ONLINE-LANE-CONTRACT.md) — standalone, NO navbar link. */}
             <Route path="/online-lab" element={<OnlineLab />} />

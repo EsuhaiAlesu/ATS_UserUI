@@ -211,7 +211,11 @@ const ProgramTimeline: React.FC = () => {
     const { event, refresh } = useActiveEvent();
     const fileRef = useRef<HTMLInputElement>(null);
 
-    const segments = event?.segments ?? [];
+    // `useMemo` chứ không phải một dòng gán thẳng: `event?.segments ?? []` dựng một mảng MỚI mỗi lần vẽ khi
+    // buổi chưa có Timeline, nên các `useMemo` phía dưới nhận một tham chiếu khác nhau mỗi lần và tính lại
+    // toàn bộ — kể cả việc giải neo kịch bản cho từng đoạn của cả buổi. Cùng khuôn với `runSegments` bên
+    // `OnlineConsole.tsx`, để hai màn không lệch nhau về cách nhớ danh sách đoạn.
+    const segments = useMemo(() => event?.segments ?? [], [event]);
     const stats = useMemo(() => timelineStats(segments), [segments]);
     const scriptRows = useMemo(() => (event ? getScriptLocal(event.id).map((r) => ({ id: r.id, src: r.src })) : []), [event]);
     // Kịch bản LANE sẽ giữ (chỉ dòng đã duyệt) — con trỏ đếm theo danh sách này, không theo danh sách đầy đủ.

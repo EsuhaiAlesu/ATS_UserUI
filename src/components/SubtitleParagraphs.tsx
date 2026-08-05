@@ -18,10 +18,16 @@ interface Props {
   direction?: 'vi2ja' | 'ja2vi'
   fontSize: number
   scale?: number
+  /**
+   * Absolute size in CSS px, overriding `fontSize × scale` entirely. The hall walls size their text from
+   * PHYSICAL centimetres (hallScreens.ts), which lands far outside the console slider's 12–28 band, so it
+   * cannot arrive through `fontSize` — `clampSubtitleFont` would cut a 47px wall down to 28.
+   */
+  fontPx?: number
   className?: string
 }
 
-const SubtitleParagraphs: React.FC<Props> = ({ lines, direction, fontSize, scale = 1, className }) => {
+const SubtitleParagraphs: React.FC<Props> = ({ lines, direction, fontSize, scale = 1, fontPx, className }) => {
   const scrollRef = useRef<HTMLDivElement>(null)
   const pinnedRef = useRef(true)
   const [showJump, setShowJump] = useState(false)
@@ -31,7 +37,7 @@ const SubtitleParagraphs: React.FC<Props> = ({ lines, direction, fontSize, scale
 
   const paragraphs = buildParagraphs(lines)
   const empty = subtitleEmptyState(lines)
-  const px = Math.round(clampSubtitleFont(fontSize) * scale)
+  const px = fontPx && fontPx > 0 ? Math.round(fontPx) : Math.round(clampSubtitleFont(fontSize) * scale)
   const forcedLang = direction ? (direction === 'vi2ja' ? 'ja' : 'vi') : undefined
 
   // Pin to the bottom BEFORE paint (or new text visibly jumps once before sliding down), unless the
@@ -79,8 +85,17 @@ const SubtitleParagraphs: React.FC<Props> = ({ lines, direction, fontSize, scale
 
   return (
     <div className={`relative h-full ${className ?? ''}`}>
-      <div ref={scrollRef} onScroll={onScroll} className="h-full overflow-y-auto px-[4vw] py-[3vh]">
-        <div className="flex flex-col justify-start gap-[2vh]">
+      {/* Lề và khoảng cách dòng: theo VIEWPORT như cũ ở màn điều khiển, nhưng theo CỠ CHỮ khi tấm màn đã
+          có kích thước thật. Lý do là màn tượng trưng: `4vw` đo theo cửa sổ của người điều khiển, nên một
+          khung thu nhỏ 600px vẫn ăn lề của một cửa sổ 1600px — mất ~21 % bề ngang thay vì ~8 %, chữ xuống
+          dòng sớm hơn ngoài hội trường, và người điều khiển sẽ chỉnh chữ nhỏ đi vì tin vào bản xem thử.
+          Lấy lề theo cỡ chữ thì tỉ lệ lề/bề ngang giống hệt nhau ở mọi cỡ khung. */}
+      <div
+        ref={scrollRef} onScroll={onScroll}
+        className={`h-full overflow-y-auto ${fontPx ? '' : 'px-[4vw] py-[3vh]'}`}
+        style={fontPx ? { paddingInline: Math.round(px * 1.1), paddingBlock: Math.round(px * 0.8) } : undefined}
+      >
+        <div className={`flex flex-col justify-start ${fontPx ? '' : 'gap-[2vh]'}`} style={fontPx ? { gap: Math.round(px * 0.55) } : undefined}>
           {paragraphs.map((p) => {
             const lang = forcedLang ?? p.lang
             const tail = tails.get(p.key) ?? ''
@@ -88,8 +103,8 @@ const SubtitleParagraphs: React.FC<Props> = ({ lines, direction, fontSize, scale
             const sep = p.volatile && (head || tail) ? (lang === 'ja' ? '' : ' ') : ''
             return (
               <p key={p.key} lang={lang}
-                className={`${lang === 'ja' ? 'jp-text' : ''} sub-para border-l-4 pl-[2vw] ${p.live ? 'sub-para--live border-secondary text-secondary' : 'border-outline-variant text-on-surface/85'}`}
-                style={{ fontSize: `${px}px`, lineHeight: 1.32, lineBreak: lang === 'ja' ? 'strict' : undefined }}>
+                className={`${lang === 'ja' ? 'jp-text' : ''} sub-para border-l-4 ${fontPx ? '' : 'pl-[2vw]'} ${p.live ? 'sub-para--live border-secondary text-secondary' : 'border-outline-variant text-on-surface/85'}`}
+                style={{ fontSize: `${px}px`, lineHeight: 1.32, lineBreak: lang === 'ja' ? 'strict' : undefined, ...(fontPx ? { paddingLeft: Math.round(px * 0.5) } : null) }}>
                 {head}
                 {tail && <span className="sub-append">{tail}</span>}
                 {p.volatile && <span className="italic" style={{ opacity: 0.42 }}>{sep}{p.volatile}</span>}
