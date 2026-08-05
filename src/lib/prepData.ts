@@ -110,6 +110,44 @@ export function collectPrepHeader(conf: Conference | undefined): string {
 }
 
 /**
+ * TASK 53 — the brief for ONE segment of the running order: the meeting header plus the documents that
+ * segment's speaker actually brought, on the WHOLE budget instead of a share of it.
+ *
+ * The mechanical brief below spreads `BRIEF_MAX_CHARS` across every document of the event. That works
+ * for one or two documents and silently collapses beyond that: `share = floor(left / n) - DOC_EXTRACT_MIN`,
+ * so a meeting with a ~400-character header and five documents computes a share of about 100 — below
+ * DOC_EXTRACT_MIN, and the whole document loop is skipped. Preparing MORE material makes it certain that
+ * NONE of it reaches the model. Scoping to the person now at the microphone is what fixes that.
+ *
+ * Synchronous and never throws: documents are localStorage, and this is called while a ceremony runs.
+ * Returns '' when the segment has no documents — the caller then keeps the session-wide brief.
+ */
+export function collectSegmentBrief(conf: Conference | undefined, docIds: string[] | undefined, speakerName = ''): string {
+  if (!conf || !docIds?.length) return ''
+  const wanted = new Set(docIds)
+  const docList = safeDocs(conf).filter((d) => wanted.has(d.id))
+  if (!docList.length) return ''
+
+  const parts: string[] = []
+  const header = collectPrepHeader(conf)
+  if (header) parts.push(header)
+  const who = clean(speakerName)
+  if (who) parts.push(`Người đang phát biểu: ${who}`)
+
+  let left = BRIEF_MAX_CHARS - parts.join('\n').length
+  const share = Math.floor(left / docList.length) - DOC_EXTRACT_MIN
+  if (share < DOC_EXTRACT_MIN) return parts.join('\n').slice(0, BRIEF_MAX_CHARS)
+  for (const d of docList) {
+    const body = flat(d.text).slice(0, share)
+    if (body.length < DOC_EXTRACT_MIN) continue
+    const line = `- ${flat(d.name)}: ${body}`
+    if (line.length + 1 > left) break
+    parts.push(line)
+    left -= line.length + 1
+  }
+  return parts.join('\n').slice(0, BRIEF_MAX_CHARS)
+}
+/**
  * Collect a paste-ready pack for the given session direction. The SOURCE side of the session decides
  * the left-hand side of each term line (vi2ja → `tiếng Việt = 日本語`; ja2vi → the reverse), so the
  * recogniser is biased toward words the speaker is actually about to say. Re-collect when the direction

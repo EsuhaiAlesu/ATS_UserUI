@@ -10,6 +10,43 @@ export interface Speaker {
     note?: string;
 }
 
+/**
+ * Một DÒNG của Timeline chương trình (màn Chuẩn bị · Chương trình).
+ *
+ * Sống trong `Conference` chứ không phải một kho riêng: lịch đã là một kho đồng bộ được, nên Timeline
+ * đi theo buổi mà không cần thêm một endpoint nào. Dòng kịch bản KHÔNG được mang `segmentId` — hợp
+ * đồng `ScriptEntry` với Cascade Matcher là byte-đối-byte và `normEntry` sẽ nuốt mọi trường lạ. Đoạn
+ * trỏ TỚI dòng đầu của nó, không phải dòng khai mình thuộc đoạn nào.
+ */
+export type SegmentMode = 'script' | 'partial' | 'none';   // = SpeakerMode của lane, cố ý KHÔNG import
+export type SegmentListen = 'auto' | 'on' | 'off';
+
+export interface Segment {
+    id: string;
+    time?: string;          // "18:29" — giờ dự kiến, chỉ để đọc
+    dur?: string;           // "3'"
+    kind?: string;          // "MC" · "PHÁT BIỂU VIP" · "VIDEO" … — quyết định mặc định của `listen`
+    title: string;
+    detail?: string;
+    owner?: string;         // nguyên văn ô "người phụ trách" của file gốc — giữ làm ghi chú
+    speakerId?: string;     // trỏ vào Conference.speakers[].id
+    lang?: string;          // tiếng người đó SẼ nói: '' | 'vi' | 'ja' — dùng để khởi động ấm
+    mode?: SegmentMode;
+    listen?: SegmentListen; // 'auto' = suy từ `kind`
+    startScriptId?: string; // dòng kịch bản đầu của đoạn
+    /**
+     * Bản sao NỘI DUNG của dòng đó, làm neo dự phòng.
+     *
+     * `id` của dòng kịch bản KHÔNG bền: nhập lại kịch bản là `normEntry` sinh `uid()` mới cho từng
+     * dòng, và mọi `startScriptId` thành mồ côi cùng lúc. Giữa buổi lễ, một con trỏ mồ côi im lặng
+     * nguy hiểm hơn hẳn một con trỏ báo lỗi. Có neo chữ thì máy tìm lại được dòng cũ và tự gắn lại;
+     * không tìm được thì nói thẳng là MẤT DẤU, chứ không lặng lẽ không nhảy.
+     */
+    startScriptText?: string;
+    docIds?: string[];      // tài liệu riêng của đoạn/người này
+    divider?: boolean;      // dòng tiêu đề phần (01 LỄ KHAI MẠC…) — không phải một đoạn chạy được
+}
+
 export interface Conference {
     id: string;
     title: string;       // chủ đề / tên hội nghị
@@ -21,6 +58,7 @@ export interface Conference {
     rehearsalDate?: string;  // YYYY-MM-DD — ngày tổng duyệt (đếm ngược ở Bảng chỉ huy)
     venue?: string;          // địa điểm / hội trường
     speakers: Speaker[];
+    segments?: Segment[];  // Timeline chương trình. Vắng ⇒ buổi chưa dựng Timeline (mặc định).
     seriesId?: string;   // thuộc Chuỗi hội nghị (doc 30). Vắng ⇒ sự kiện MỘT LẦN (mặc định).
     createdAt: string;   // ISO — auto
 }
@@ -39,6 +77,30 @@ function normSpeaker(s: unknown): Speaker {
     return { id: str(o.id) || uid(), name: str(o.name), role: str(o.role), lang: clampLang(o.lang), note: str(o.note) };
 }
 
+const ALLOWED_MODE = new Set(['script', 'partial', 'none']);
+const ALLOWED_LISTEN = new Set(['auto', 'on', 'off']);
+
+function normSegment(s: unknown): Segment {
+    const o = (s && typeof s === 'object' ? s : {}) as Record<string, unknown>;
+    const mode = str(o.mode);
+    const listen = str(o.listen);
+    const seg: Segment = {
+        id: str(o.id) || uid(),
+        time: str(o.time), dur: str(o.dur), kind: str(o.kind),
+        title: str(o.title), detail: str(o.detail), owner: str(o.owner),
+        speakerId: str(o.speakerId) || undefined,
+        // Đoạn chỉ nói được tiếng Việt hoặc tiếng Nhật — lane không đọc được tiếng khác.
+        lang: str(o.lang) === 'vi' || str(o.lang) === 'ja' ? str(o.lang) : '',
+        mode: ALLOWED_MODE.has(mode) ? (mode as Segment['mode']) : 'none',
+        listen: ALLOWED_LISTEN.has(listen) ? (listen as Segment['listen']) : 'auto',
+        startScriptId: str(o.startScriptId) || undefined,
+        startScriptText: str(o.startScriptText) || undefined,
+        docIds: Array.isArray(o.docIds) ? o.docIds.filter((x): x is string => typeof x === 'string') : undefined,
+    };
+    if (o.divider === true) seg.divider = true;
+    return seg;
+}
+
 function normConf(c: unknown): Conference {
     const o = (c && typeof c === 'object' ? c : {}) as Record<string, unknown>;
     return {
@@ -47,6 +109,7 @@ function normConf(c: unknown): Conference {
         booker: str(o.booker), agenda: str(o.agenda),
         rehearsalDate: str(o.rehearsalDate), venue: str(o.venue),
         speakers: Array.isArray(o.speakers) ? o.speakers.map(normSpeaker) : [],
+        segments: Array.isArray(o.segments) ? o.segments.map(normSegment) : undefined,
         seriesId: str(o.seriesId) || undefined,   // vắng ⇒ một lần (lịch cũ nạp nguyên vẹn)
         createdAt: str(o.createdAt) || new Date().toISOString(),
     };

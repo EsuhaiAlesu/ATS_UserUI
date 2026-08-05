@@ -6,7 +6,7 @@ import {
     loadSettings, saveSettings, exportLocalData, clearLocalData,
 } from '../lib/settings';
 import { toast } from '../lib/toast';
-import { OnlineKeysSettings, OnlineMicSettings, OnlineRhythmSettings } from '../lib/lanes/online';
+import { OnlineKeysSettings, OnlineMicSettings, OnlineRhythmSettings, OnlineGuidedMatchSettings } from '../lib/lanes/online';
 import CloudSyncPanel from '../components/CloudSyncPanel';
 
 // Central Settings page (Giai đoạn 1) — consolidates the scattered per-feature config into one
@@ -153,6 +153,11 @@ const Settings: React.FC = () => {
                     {/* CHẾ ĐỘ ONLINE — NHỊP NÓI CỦA BUỔI (theo từng buổi — nút chống vụn câu) */}
                     <Section id="rh" icon="graphic_eq" title="Chế độ ONLINE — Nhịp nói của buổi" desc="Máy chờ im lặng bao lâu mới chốt một câu. Chờ ngắn thì câu bị cắt vụn, chờ lâu thì phụ đề lên chậm.">
                         <OnlineRhythmSettings />
+                    </Section>
+
+                    {/* CHẾ ĐỘ ONLINE — ĐỘ KHỚP KHI DẪN THEO KỊCH BẢN (TASK 57) */}
+                    <Section id="gm" icon="rule" title="Chế độ ONLINE — Độ khớp khi dẫn theo kịch bản" desc="Bấm một dòng kịch bản thì máy phải nghe giống tới đâu mới đọc lên bản dịch đã duyệt. Nấc Thả cửa: bấm là nhả.">
+                        <OnlineGuidedMatchSettings />
                     </Section>
 
                     {/* HIỂN THỊ */}

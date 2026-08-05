@@ -15,10 +15,11 @@ interface Menu { key: string; label: string; gear?: boolean; match: string[]; to
 
 // desc = dòng phụ chú ngắn (tối đa 4–5 chữ); hiển thị dưới nhãn, đổi xanh lá non khi active.
 const MENUS: Menu[] = [
-    { key: 'prep', label: 'Chuẩn bị', match: ['/prep', '/script', '/glossary', '/voices', '/schedule', '/speakers', '/documents'], tools: [
+    { key: 'prep', label: 'Chuẩn bị', match: ['/prep', '/script', '/glossary', '/voices', '/schedule', '/speakers', '/documents', '/program'], tools: [
         { label: 'Tổng quan', icon: 'dashboard', desc: 'Sẵn sàng & đếm ngược', to: '/prep' },
         { label: 'Đặt lịch', icon: 'calendar_month', desc: 'Lịch hội nghị, diễn giả', to: '/schedule' },
         { label: 'Tài liệu', icon: 'folder_open', desc: 'Thư viện tài liệu nguồn', to: '/documents' },
+        { label: 'Chương trình', icon: 'event_note', desc: 'Timeline & người nói', to: '/program' },
         { label: 'Kịch bản', icon: 'description', desc: 'Câu song ngữ đã duyệt', to: '/script' },
         { label: 'Từ điển', icon: 'menu_book', desc: 'Thuật ngữ & tên riêng', to: '/glossary' },
         { label: 'Giọng đọc', icon: 'record_voice_over', desc: 'Luyện giọng & phát âm', to: '/voices' },

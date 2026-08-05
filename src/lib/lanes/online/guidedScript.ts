@@ -25,8 +25,36 @@ import {
 /** How closely the heard sentence must resemble the armed line before it may be released verbatim. */
 export const GUIDED_FLOOR = 0.45;
 
-/** Below this many characters nothing is released verbatim, whatever the score says. */
+/**
+ * The length floor — measured against the ARMED LINE, not as an absolute.
+ *
+ * It used to be an absolute floor on the heard text, and that was wrong: it made a SHORT LINE
+ * unreleasable for ever. "Một… Hai… Ba — Kagami Biraki! Kanpai!" is in the script, the operator presses
+ * it, the MC says exactly that, and the machine refused because "kanpai" is six characters. The point of
+ * the floor was never to filter the room — the microphone is at the mouth and there is a noise gate in
+ * front of it already — it was to stop a stray grunt releasing a LONG line it happens to share bigrams
+ * with. So the requirement is now `min(8, độ dài dòng)`: a six-character line asks for six characters.
+ */
 export const GUIDED_MIN_CHARS = 8;
+
+/**
+ * A line this short has almost no bigrams, so `diceCoefficient` gets coarse — three characters is two
+ * bigrams, and a chance collision is no longer rare. Such a line is held to a higher bar instead of being
+ * refused: "Một" must actually be heard as "Một", not as "Hai".
+ */
+export const GUIDED_SHORT_LINE = 8;
+export const GUIDED_SHORT_FLOOR = 0.8;
+
+/**
+ * The bar this heard sentence really has to clear.
+ *
+ * `base <= 0` is "thả cửa": the operator pressing the line IS the evidence and nothing is measured. Every
+ * other setting keeps the short-line bump, which never blocks a correct press — only a wrong one.
+ */
+export function guidedBarFor(lineLength: number, base: number = GUIDED_FLOOR): number {
+    if (base <= 0) return 0;
+    return lineLength > 0 && lineLength < GUIDED_SHORT_LINE ? Math.max(base, GUIDED_SHORT_FLOOR) : base;
+}
 
 export type GuidedState = {
     /** false = the cursor is parked and the lane behaves exactly as it did before TASK 33. */
@@ -97,8 +125,13 @@ export function judgeGuided(
     if (row.status !== 'approved') return { kind: 'off', reason: `dòng ${index + 1} chưa được duyệt` };
 
     const text = normalizeForMatch(heard);
-    if (text.length < GUIDED_MIN_CHARS) {
-        return { kind: 'mismatch', score: 0, reason: `câu quá ngắn (${text.length} ký tự)` };
+    // Measured against the LINE the operator is pointing at, so a short line stays reachable. The longer
+    // of the two sides is the yardstick: the same row is read in Vietnamese by one MC and in Japanese by
+    // the other, and whichever is being read now, the row is as long as its longer side.
+    const lineLength = Math.max(normalizeForMatch(row.src).length, normalizeForMatch(row.dst).length);
+    const need = Math.min(GUIDED_MIN_CHARS, lineLength);
+    if (floor > 0 && text.length < need) {
+        return { kind: 'mismatch', score: 0, reason: `câu quá ngắn (${text.length}/${need} ký tự)` };
     }
 
     // Either side of the row may be the one being spoken — the same line gets read in Vietnamese by the
@@ -107,8 +140,9 @@ export function judgeGuided(
     const backward = guidedSimilarity(heard, row.dst);
     const useForward = forward >= backward;
     const score = useForward ? forward : backward;
-    if (score < floor) {
-        return { kind: 'mismatch', score, reason: `không giống dòng ${index + 1} (${score})` };
+    const bar = guidedBarFor(lineLength, floor);
+    if (score < bar) {
+        return { kind: 'mismatch', score, reason: `không giống dòng ${index + 1} (${score}/${bar})` };
     }
 
     const source = useForward ? row.src : row.dst;

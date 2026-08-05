@@ -18,6 +18,9 @@ import { createAudiencePublisher, type AudienceLine } from '../../audienceChanne
 import type { ScriptMatcherEntry } from './scriptMatcher'
 import { GUIDED_OFF, clampGuidedIndex, stepGuidedIndex, guidedReadout, guidedAllowed, type GuidedState, type SpeakerMode } from './guidedScript'
 import { SUBTITLE_FONT, clampSubtitleFont } from '../../audienceSubtitles'
+// TASK 57 — sàn khớp của chế độ dẫn tay. Đọc từ localStorage ở TỪNG câu, không giữ trong state React:
+// đổi nấc trong Cài đặt phải ăn ngay câu sau, không đợi màn console vẽ lại.
+import { guidedMatchFloor, loadGuidedMatch } from './guidedMatch'
 import {
   loadWallOutputs, saveWallOutputs, detectWallScreens, scanWallScreens, openWallWindows, getOpenWallIds, closeWallWindows,
   type WallOutput, type ScreenSupport, type WallScreen,
@@ -62,6 +65,13 @@ export {
   RHYTHM_ADAPTIVE_MAX_MS, isSpeechRhythm, loadSpeechRhythm, saveSpeechRhythm, speechRhythmLabel,
   rhythmPauseSecs, rhythmCommitWindows, clampPauseSecs,
 } from './speechRhythm'
+// TASK 57 — "độ khớp khi dẫn theo kịch bản". Cùng hình dạng với nhịp nói: Cài đặt chọn nấc, lane đọc
+// LẠI ở từng câu. Nấc "Thả cửa" mang sàn 0 = bấm dòng nào nhả dòng đó, dùng lúc chạy thử.
+export type { GuidedMatch } from './guidedMatch'
+export {
+  GUIDED_MATCH_KEY, GUIDED_MATCH_DEFAULT, GUIDED_MATCH_OPTIONS,
+  loadGuidedMatch, saveGuidedMatch, guidedMatchFloor, guidedMatchLabel,
+} from './guidedMatch'
 // M14 — the pre-session document summariser. A plain async function, not part of the hook: it belongs to
 // Chuẩn bị, runs at most once per session, and must never be reachable from anything a live session does.
 export { summarizePrepDocs, PREP_DOCS_MAX, PREP_DOC_MAX_CHARS } from './prepBrief'
@@ -532,6 +542,7 @@ export function useOnlineLane(): UseOnlineLane {
         getScript: () => scriptRef.current,
         // TASK 35: LIVE, not latched — see the note on the state above.
         getGuided: () => guidedRef.current,
+        getGuidedFloor: () => guidedMatchFloor(loadGuidedMatch()),
         getEventId: () => eventIdRef.current,
         onDirectedLine: (line) => {
           dirByLid.current.set(line.lid, line.dir)
@@ -616,3 +627,6 @@ export { default as OnlineMicSettings } from './components/OnlineMicSettings'
 //   OnlineRhythmSettings — the Settings "Nhịp nói của buổi" section (per meeting, TASK 24): the
 //   anti-fragment knob — how long a silence must last before a sentence is closed.
 export { default as OnlineRhythmSettings } from './components/OnlineRhythmSettings'
+//   OnlineGuidedMatchSettings — the Settings "Độ khớp khi dẫn theo kịch bản" section (TASK 57): how
+//   closely the machine must recognise the armed line before it releases the approved translation.
+export { default as OnlineGuidedMatchSettings } from './components/OnlineGuidedMatchSettings'

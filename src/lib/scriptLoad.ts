@@ -22,6 +22,15 @@ export type ScriptBlockReason = 'ok' | 'no-rows' | 'all-draft' | 'missing-transl
 export interface ScriptLoad {
     /** Rows the matcher may speak verbatim: approved AND carrying both sides. */
     rows: ScriptEntry[];
+    /**
+     * EVERY row stored for this event, in stored order — drafts and half-filled rows included.
+     *
+     * `rows` alone cannot tell "dòng này chưa được duyệt" apart from "dòng này đã biến mất": both look
+     * like a miss. A Timeline segment pointing at a row needs that distinction to say the right sentence
+     * to the technician, so the full list is published here rather than making each screen re-open the
+     * store — the whole point of this module is that the console reads the script through exactly one door.
+     */
+    allRows: ScriptEntry[];
     /** Every row stored for this event, drafts and half-filled rows included. */
     total: number;
     /** Translated on both sides but NOT approved — one button press away from being usable. */
@@ -63,7 +72,7 @@ export function loadScriptForSession(selectedEventId: string): ScriptLoad {
         else if (missingTranslation > 0) reason = 'missing-translation';
         else reason = 'no-rows';
     }
-    return { rows, total: all.length, draft, missingTranslation, eventId, reason };
+    return { rows, allRows: all, total: all.length, draft, missingTranslation, eventId, reason };
 }
 
 /**

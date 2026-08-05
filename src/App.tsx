@@ -13,6 +13,7 @@ import IncidentReport from './pages/IncidentReport'
 import SchedulePlanner from './pages/SchedulePlanner'
 import SpeakerMemory from './pages/SpeakerMemory'
 import DocumentsLibrary from './pages/DocumentsLibrary'
+import ProgramTimeline from './pages/ProgramTimeline'
 import OnlineLab from './pages/OnlineLab'
 import OperatorLayout from './components/OperatorLayout'
 import SplashScreen from './components/SplashScreen'
@@ -54,6 +55,7 @@ const App: React.FC = () => {
               <Route path="/schedule" element={<SchedulePlanner />} />
               <Route path="/speakers" element={<SpeakerMemory />} />
               <Route path="/documents" element={<DocumentsLibrary />} />
+              <Route path="/program" element={<ProgramTimeline />} />
               {/* Dịch hội nghị — TRONG shell: giữ headbar + pill "Dịch hội nghị" sáng; thanh điều khiển
                   riêng của bàn điều khiển đóng vai side menu (OperatorLayout ẩn sidebar shell cho menu ops).
                   Route = /console (tên "/audio" nói về thiết bị âm thanh, không phải bàn điều khiển). */}

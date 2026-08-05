@@ -21,7 +21,7 @@ import { createSpeechPauseProfile } from './speechPauseProfile';
 import { createSpeechShapeMonitor } from './speechShape';
 import { checkTtsLanguage } from './ttsLanguageGuard';
 import { createScriptMatcher, scriptKeyterms, type ScriptMatch, type ScriptMatcher, type ScriptMatcherEntry } from './scriptMatcher';
-import { judgeGuided, GUIDED_OFF, type GuidedState } from './guidedScript';
+import { judgeGuided, GUIDED_FLOOR, GUIDED_OFF, type GuidedState } from './guidedScript';
 import { applyMishearings, formatMishearingRules, splitMishearingLines, MISHEARING_MAX_CHARS, type MishearingRule } from './mishearing';
 import { nextScribeForceCommitDelay, planStableScribeCommit, planStillnessCommit, type ScribeManualCommitReason } from './scribeManualCommit';
 import { estimateSourceSpeechPace } from './sourceSpeechPace';
@@ -40,6 +40,15 @@ const CORPUS_MAX_CHARS = 2000; // contract: corpus ≤ 2000 chars
 // script can never reach the handshake. They are appended AFTER the operator's own glossary, so the
 // glossary always wins the budget and the script fills what is left.
 const SCRIPT_KEYTERM_LIMIT = 30;
+
+/**
+ * TASK 56 — trần cho giấc ngủ sau khi nhả một dòng kịch bản.
+ *
+ * Cái đánh thức đúng là người điều khiển bấm dòng sau. Trần này chỉ để cái sai duy nhất của cơ chế —
+ * người điều khiển quên bấm — không biến thành một micro điếc vĩnh viễn mà không ai hay. 30 giây đủ dài
+ * cho MC đọc trọn một đoạn dịch dài, và đủ ngắn để không mất cả một bài phát biểu.
+ */
+const GUIDED_DEAF_MAX_MS = 30_000;
 
 // M2 — self-healing WS client (field-measured constants; do NOT tune)
 const RECONNECT_MAX_ATTEMPTS = 5;
@@ -211,6 +220,11 @@ export interface OnlineLaneConfig {
   // TASK 34: where the operator says the ceremony has got to. Read LIVE on every finalised sentence, the
   // opposite of getScript above — the whole point is that a human moves it WHILE the ceremony runs.
   getGuided?: () => GuidedState | undefined;
+  /**
+   * Độ khớp khi dẫn theo kịch bản, đọc LẠI ở từng câu — đổi nấc trong Cài đặt là ăn ngay câu sau, không
+   * phải Dừng rồi Bắt đầu lại. Giữa buổi lễ đó là khác biệt giữa sửa được và không.
+   */
+  getGuidedFloor?: () => number;
   // TASK 14: which meeting the saved transcript belongs to. Read ONCE at start(), like the script.
   getEventId?: () => string | undefined;
   // TASK 5: the misheard-substitution layer, read LIVE on every event — deliberately NOT latched at
@@ -238,6 +252,17 @@ export interface OnlineDiagnostics {
   // to release it is the one failure this feature can cause, so it must be visible at a glance).
   listenPaused: boolean;
   pausedMs: number;
+  /**
+   * TASK 56 — dẫn theo kịch bản: câu vừa nhả xong, micro đang ngủ chờ bấm dòng sau.
+   *
+   * Between releasing line N and the operator pressing line N+1 exactly one thing happens in the room:
+   * the OTHER MC reads the translation aloud. That is a second human, not a quoted phrase, so neither the
+   * half-duplex gate (which only knows our own voice) nor the direction lock covers it — heard and
+   * translated, it puts a garbage line on the audience wall. This flag is that sleep, and it is a separate
+   * field from `listenPaused` because the operator must be able to tell "máy đang chờ tôi bấm" apart from
+   * "tôi đã bấm Ngưng nghe và quên bật lại".
+   */
+  guidedDeaf: boolean;
   // M13 — finished sentences discarded because the sound behind them had the shape of music, applause or a
   // hum rather than of a voice. Zero all evening means the guard never fired; a number that climbs during
   // a musical number means it is doing exactly its job.
@@ -302,6 +327,20 @@ export interface OnlineDiagnostics {
 export type OnlineLaneController = LaneController & {
   getDiagnostics(): OnlineDiagnostics;
   saveSession(): Promise<SaveOutcome>;
+  /**
+   * Pin the translation direction to the language the running order says this speaker speaks — or pass
+   * `null` to go back to auto-detect.
+   *
+   * A person speaks ONE language for the length of their turn. A foreign phrase inside it is a quotation,
+   * not a handover: a Japanese guest opening with "Xin chào" is still ja→vi, and those two words should
+   * ride inside the sentence rather than flipping the rest of the speech and splitting the line in two.
+   * Auto-detection reads the words, and the words are genuinely Vietnamese — only the running order knows
+   * who is holding the microphone, so only the running order can settle this.
+   *
+   * While a lock is on, the vendor's language tag, the script classifier and the M11 turn split all stand
+   * down. Segments that leave the language blank pass `null` and behave exactly as before.
+   */
+  lockLanguage(language: Lang | null): void;
 };
 
 function delay(ms: number): Promise<void> {
@@ -321,6 +360,36 @@ export function createOnlineLane(events: LaneEvents, config: OnlineLaneConfig = 
   let twoWay = false;
   let tracker: DirectionTracker | null = null;
   const settledDir = new Map<string, 'vi2ja' | 'ja2vi'>();
+  /**
+   * TASK 55 — the running order says who is at the microphone, so it also says which language.
+   *
+   * A person speaks ONE language. A foreign phrase inside their turn ("Xin chào" from a Japanese guest)
+   * is a QUOTATION, not a change of speaker: the direction must stay ja→vi and the quoted words simply
+   * ride along inside the sentence. Auto-detection cannot know that — it sees Vietnamese and flips, which
+   * both mistranslates the rest of the turn and (via the M11 turn split below) chops the sentence in two.
+   *
+   * So when a segment names the speaker's language the direction is LOCKED for that segment: the vendor's
+   * own tag, the script evidence and the turn split all stand down. `null` = no lock, auto-detect as
+   * before — a segment that leaves the language blank keeps exactly the old behaviour.
+   *
+   * The recogniser is NOT touched: it stays on 'auto' so a quoted Vietnamese phrase is still transcribed
+   * as Vietnamese. Only the translation direction is pinned, which is pure client state — no reconnect.
+   */
+  let lockedSource: Lang | null = null;
+
+  /**
+   * TASK 56 — dòng kịch bản mà việc NHẢ nó đã đưa micro vào giấc ngủ; -1 = đang thức.
+   *
+   * Nhả xong dòng N thì trong phòng chỉ còn đúng một việc diễn ra: MC bên kia đọc bản dịch. Máy nghe
+   * tiếp là chép lời một người thứ hai và đẩy rác lên tường. Nên nhả xong là ngủ, và thứ đánh thức nó là
+   * chính cái bấm dòng N+1 của người điều khiển — không đoán, không hẹn giờ. Con trỏ nhích là thức.
+   *
+   * Giá của việc thức: đúng MỘT gói tiếng (4096 mẫu @16kHz ≈ 256ms). Và không mất tiếng nào cả — gói tới
+   * ngay sau cái bấm mang theo 256ms tiếng ĐÃ THU TRƯỚC lúc bấm, vì quyết định câm/nghe áp cho cả gói tại
+   * lúc gói về chứ không phải lúc thu. Bấm hơi trễ vẫn còn vớt lại được.
+   */
+  let guidedDeafAtIndex = -1;
+  let guidedDeafSince = 0;
 
   // TASK 11: direct-dial transport. `codec` is set on a direct dial (JSON wire), null on the qwen3 proxy
   // (raw binary). Because the token is single-use, EVERY dial mints a fresh one; the dial counter drops a
@@ -536,7 +605,11 @@ export function createOnlineLane(events: LaneEvents, config: OnlineLaneConfig = 
     }
     const settled = settledDir.get(lid);
     let source: Lang;
+    // A sentence that already finalised keeps its direction even if the operator has since moved the
+    // running order on — an old line must never jump audience windows.
     if (settled) source = settled === 'vi2ja' ? 'vi' : 'ja';
+    // TASK 55: the running order named this speaker's language. Nothing in the text overrules it.
+    else if (lockedSource) { source = lockedSource; if (!interim) settledDir.set(lid, directionOf(source)); }
     // M12: a draft INHERITS the direction the last finalised sentence settled on (tracker.current(), which
     // handleFinal realigns from the vendor's own tag) and only leaves it on unambiguous script evidence.
     else if (interim) source = classifyInterimUtterance(sourceText, tracker.current()).language;
@@ -755,7 +828,18 @@ export function createOnlineLane(events: LaneEvents, config: OnlineLaneConfig = 
           // One decision, one place (livePipelinePolicy.decideCaptureFrame): the half-duplex gate mutes
           // our own voice, "Ngưng nghe" mutes a performance, and a muted frame is equal-length silence —
           // never an absent frame, or the recogniser's 1.5s close would stop counting mid-sentence.
-          const frame = decideCaptureFrame({ listenPaused: config.getListenPaused?.() ?? false, gateActive });
+          // TASK 56: con trỏ kịch bản nhích (hoặc tắt dẫn tay, hoặc quá trần) là thức. Đọc mỗi gói —
+          // 256ms một lần — nên cái bấm của người điều khiển ăn ngay ở gói kế tiếp.
+          if (guidedDeafAtIndex >= 0) {
+            const g = config.getGuided?.() ?? GUIDED_OFF;
+            if (!g.armed || g.index !== guidedDeafAtIndex || Date.now() - guidedDeafSince > GUIDED_DEAF_MAX_MS) {
+              guidedDeafAtIndex = -1;
+            }
+          }
+          const frame = decideCaptureFrame({
+            listenPaused: (config.getListenPaused?.() ?? false) || guidedDeafAtIndex >= 0,
+            gateActive,
+          });
           const frameMs = packet.pcm.byteLength / 2 / 16; // samples / 16 = ms @16kHz
           if (frame.countPaused) pausedMs += frameMs;
           if (frame.countGated) gatedMs += frameMs;
@@ -1239,7 +1323,10 @@ export function createOnlineLane(events: LaneEvents, config: OnlineLaneConfig = 
     // buffer at the turn also removes the wait — the previous speaker's tail no longer sits out the whole
     // continuation window waiting for a continuation that will never come, which is most of the pause the
     // operator sees whenever the two languages alternate.
-    if (twoWay && decided.language && segmentBuffer.trim()) {
+    // TASK 55: while the direction is locked there IS no other language — a Vietnamese phrase inside a
+    // Japanese turn is a quotation and belongs in the same sentence, so the turn split stands down. The
+    // real handover is the operator pressing the next segment, and that flushes the buffer explicitly.
+    if (twoWay && !lockedSource && decided.language && segmentBuffer.trim()) {
       const held = decideFinalLanguage(segmentBuffer).language;
       if (held && held !== decided.language) {
         languageTurns += 1;
@@ -1258,7 +1345,9 @@ export function createOnlineLane(events: LaneEvents, config: OnlineLaneConfig = 
     // from the script at flush time. This is what finally routes toneless Vietnamese correctly — the
     // vendor heard it, we can only read it. The tracker is realigned too, so the next sticky fallback
     // (an "OK", a number) inherits the language actually being spoken.
-    if (twoWay && tracker && decided.language && decided.basis !== 'none') {
+    // TASK 55: a lock outranks the vendor's tag. The recogniser is right about what it HEARD; it is not
+    // right about who is speaking, and a quoted phrase would otherwise settle the whole turn the wrong way.
+    if (twoWay && tracker && !lockedSource && decided.language && decided.basis !== 'none') {
       settledDir.set(segmentLid, directionOf(decided.language));
       tracker.reset(decided.language);
     }
@@ -1446,7 +1535,7 @@ export function createOnlineLane(events: LaneEvents, config: OnlineLaneConfig = 
     // a wrong cursor plus verbatim release puts entirely different words over the ballroom speakers.
     const guided = config.getGuided?.() ?? GUIDED_OFF;
     if (guided.armed) {
-      const verdict = judgeGuided(guided, scriptSeedRows, head);
+      const verdict = judgeGuided(guided, scriptSeedRows, head, config.getGuidedFloor?.() ?? GUIDED_FLOOR);
       if (verdict.kind === 'release') {
         guidedReleases += 1;
         // Deliberately NOT calling `scriptMatcher.accept()`. The two cursors are independent by design:
@@ -1458,6 +1547,9 @@ export function createOnlineLane(events: LaneEvents, config: OnlineLaneConfig = 
         latency.markRefineShown(lid, performance.now());
         recordSessionLine(lid, finalizedAt, head, verdict.target, true);
         if (config.getSpeakEnabled?.()) void speakSnap(verdict.target, verdict.language, lid, order);
+        // TASK 56: dòng đã lên tường, giờ tới lượt MC bên kia đọc bản dịch. Ngủ tới khi được bấm dòng sau.
+        guidedDeafAtIndex = guided.index;
+        guidedDeafSince = Date.now();
         // eslint-disable-next-line no-console
         console.info(`[onlineLane][guided] release lid=${lid} line=${guided.index + 1} score=${verdict.score}`);
         return true;
@@ -1940,6 +2032,9 @@ export function createOnlineLane(events: LaneEvents, config: OnlineLaneConfig = 
     twoWay = config.getTwoWay?.() ?? false;
     tracker = createDirectionTracker(startOpts.sourceLanguage);
     settledDir.clear();
+    lockedSource = null; // a new session starts on auto-detect; the running order re-arms it per segment
+    guidedDeafAtIndex = -1;
+    guidedDeafSince = 0;
     running = true;
     sessionGen += 1; // new session generation — stale fetches from any prior session are now ignored
     sessionReady = false;
@@ -2131,6 +2226,7 @@ export function createOnlineLane(events: LaneEvents, config: OnlineLaneConfig = 
       gateActive,
       gatedMs: Math.round(gatedMs),
       listenPaused: config.getListenPaused?.() ?? false,
+      guidedDeaf: guidedDeafAtIndex >= 0,
       pausedMs: Math.round(pausedMs),
       nonSpeechDrops,
       lastNonSpeechReason,
@@ -2168,5 +2264,20 @@ export function createOnlineLane(events: LaneEvents, config: OnlineLaneConfig = 
     };
   }
 
-  return { id: 'online', start, stop, getDiagnostics, saveSession };
+  /**
+   * TASK 55 — pin (or release) the translation direction for the segment now running.
+   *
+   * `'vi' | 'ja'` locks; `null` returns to auto-detect. Changing it closes the buffer first: the words
+   * still waiting belong to the PREVIOUS speaker and must not be finished in the next speaker's language.
+   * The operator's press is better evidence of a handover than any guess made from the text.
+   */
+  function lockLanguage(language: Lang | null): void {
+    if (!twoWay || !tracker) return;
+    if (lockedSource === language) return;
+    if (segmentBuffer.trim()) flushSegment('turn-end');
+    lockedSource = language;
+    if (language) tracker.reset(language);
+  }
+
+  return { id: 'online', start, stop, getDiagnostics, saveSession, lockLanguage };
 }
