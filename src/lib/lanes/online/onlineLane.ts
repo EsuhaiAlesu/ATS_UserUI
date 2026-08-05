@@ -204,6 +204,17 @@ export interface OnlineLaneConfig {
   // mid-ceremony: the technician holds it down for a performance, a video or a musical number, and the
   // microphone goes silent on the wire until they release it. Never latched at start().
   getListenPaused?: () => boolean;
+  /**
+   * TASK 58 — bối cảnh SỐNG, đọc lại ở mỗi câu thay vì chốt một lần lúc Bắt đầu.
+   *
+   * `opts.brief` là bối cảnh chung của cả buổi. Nhưng một buổi lễ có nhiều người nói, mỗi người mang
+   * tài liệu riêng, và ngân sách 1500 ký tự chia đều cho cả kho thì mỗi tài liệu chỉ còn vài trăm ký
+   * tự — dưới sàn 120 ký tự của `prepData` là rơi SẠCH, không một chữ nào tới được mô hình. Trả về
+   * bối cảnh của ĐOẠN đang chạy thì đúng người đó được trọn ngân sách.
+   *
+   * Rỗng ⇒ quay về `opts.brief`. Không có getter ⇒ hành xử y như trước.
+   */
+  getBrief?: () => string;
   // TASK 6.2: one mic, two directions — read ONCE at start() and latched for the whole session.
   getTwoWay?: () => boolean;
   onDirectedLine?: (line: DirectedLaneLine) => void;
@@ -1675,7 +1686,7 @@ export function createOnlineLane(events: LaneEvents, config: OnlineLaneConfig = 
       targetLanguage: dl.target,
       refineStage: 'refine',
       recentFinals: priorFinals,
-      sessionBrief: o.brief,
+      sessionBrief: (config.getBrief?.() || '').trim() || o.brief,
       // TASK 5: `~` lines never travel as terms — a misheard surface sitting in the term list reads to
       // the model as vocabulary the speaker is expected to use, which is the opposite of what it is. They
       // travel as their own field, where they become a correction instruction. `head` has already been

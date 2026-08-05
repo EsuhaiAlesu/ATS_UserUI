@@ -214,6 +214,23 @@ export interface UseOnlineLane {
   setGuidedIndex: (index: number) => void
   stepGuided: (delta: number) => void
   guidedText: string
+  /**
+   * TASK 58 — bấm sang một đoạn của Timeline. MỘT lời gọi đặt cả bốn thứ mà hôm nay người điều khiển
+   * phải bấm riêng lẻ giữa buổi lễ: ai đang nói · kiểu nói · máy nghe hay câm · con trỏ dòng kịch bản;
+   * cộng một cú mách tiếng cho bộ theo dõi trước câu đầu tiên.
+   *
+   * Facade nhận DỮ LIỆU THUẦN chứ không nhận `Segment`: lane không được import `src/lib/schedule.ts`
+   * (luật 2 của CLAUDE.md), và một đoạn Timeline là chuyện của màn Chuẩn bị, không phải của lane.
+   */
+  applySegment: (seg: {
+    speakerName?: string
+    mode?: SpeakerMode
+    listen?: boolean
+    scriptIndex?: number
+    language?: 'vi' | 'ja' | ''
+  }) => void
+  /** TASK 58 — bối cảnh riêng của đoạn đang chạy. Rỗng ⇒ dùng ô Bối cảnh chung của buổi. */
+  setSegmentBrief: (v: string) => void
   // TASK 14 — which meeting the saved transcript belongs to. Set by the console from the same resolved
   // pointer the script is loaded from, so the file and the script can never disagree about the meeting.
   eventId: string
@@ -338,6 +355,10 @@ export function useOnlineLane(): UseOnlineLane {
   const setMishearing = useCallback((v: string) => { setMishearingState(v); try { localStorage.setItem('proyaku_online_mishearing', v) } catch { /* private mode */ } }, [])
   const briefRef = useRef('')
   briefRef.current = brief
+  // TASK 58 — bối cảnh của ĐOẠN đang chạy. Cố ý KHÔNG ghi đè ô Bối cảnh: ô đó là bối cảnh chung của cả
+  // buổi và người điều khiển đã soạn nó; đây là một kênh riêng, rỗng thì tự quay về ô chung.
+  const segmentBriefRef = useRef('')
+  const setSegmentBrief = useCallback((v: string) => { segmentBriefRef.current = v }, [])
   const gateModeRef = useRef<TtsGateMode>('auto')
   gateModeRef.current = gateMode
   const scriptRef = useRef<ScriptMatcherEntry[]>([])
@@ -364,6 +385,31 @@ export function useOnlineLane(): UseOnlineLane {
   }, [])
   // Re-importing the script mid-preparation must not leave the cursor pointing into the old one.
   useEffect(() => { setGuided(GUIDED_OFF) }, [script])
+  const applySegment = useCallback((seg: {
+    speakerName?: string; mode?: SpeakerMode; listen?: boolean; scriptIndex?: number; language?: 'vi' | 'ja' | ''
+  }) => {
+    if (seg.speakerName !== undefined) setSpeakerName(seg.speakerName)
+    if (seg.mode) {
+      setSpeakerModeState(seg.mode)
+      speakerModeRef.current = seg.mode
+      // Same ONE-WAY rule as setSpeakerMode: a segment may disarm guided release, never arm it. Arming
+      // stays a deliberate human act — picking the next item off a running order is not that.
+      if (!guidedAllowed(seg.mode)) setGuided((prev) => ({ ...prev, armed: false }))
+    }
+    if (seg.listen !== undefined) {
+      setListenPaused(!seg.listen)
+      listenPausedRef.current = !seg.listen
+    }
+    if (typeof seg.scriptIndex === 'number' && seg.scriptIndex >= 0) {
+      setGuided((prev) => ({ ...prev, index: clampGuidedIndex(seg.scriptIndex as number, scriptRef.current.length) }))
+    }
+    // Last: pin the direction to this speaker's language. A segment that declares NO language releases
+    // the pin rather than leaving the previous speaker's language latched on — "để trống" means
+    // auto-detect, and it has to actually mean that or a blank segment would inherit a stale lock.
+    if (seg.language !== undefined) {
+      laneRef.current?.lockLanguage(seg.language === 'vi' || seg.language === 'ja' ? seg.language : null)
+    }
+  }, [])
   const guidedText = guidedReadout(guided, script)
   const eventIdRef = useRef('')
   eventIdRef.current = eventId
@@ -532,6 +578,7 @@ export function useOnlineLane(): UseOnlineLane {
         getLoudGate: () => loudGateRef.current,
         getSpeakEnabled: () => speakEnabledRef.current,
         getListenPaused: () => listenPausedRef.current,
+        getBrief: () => segmentBriefRef.current,
         getTwoWay: () => twoWayRef.current,
         // TASK 5: LIVE, not latched. The lane calls this on every event, so a rule typed in the middle of
         // a ceremony takes effect on the very next sentence.
@@ -604,7 +651,7 @@ export function useOnlineLane(): UseOnlineLane {
     nearMicGate, setNearMicGate, micSensitivity, setMicSensitivity, loudGate, setLoudGate, speakEnabled, setSpeakEnabled, gateMode, setGateMode,
     listenPaused, setListenPaused,
     direction, setDirection, terms, setTerms, mishearing, setMishearing, brief, setBrief, script, setScript,
-    guided, setGuidedArmed, setGuidedIndex, stepGuided, guidedText,
+    guided, setGuidedArmed, setGuidedIndex, stepGuided, guidedText, applySegment, setSegmentBrief,
     speakerName, setSpeakerName, speakerMode, setSpeakerMode,
     eventId, setEventId,
     voices, voicesStatus, refreshVoices, voiceJa, setVoiceJa, voiceVi, setVoiceVi,

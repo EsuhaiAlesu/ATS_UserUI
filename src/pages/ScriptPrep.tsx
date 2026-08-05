@@ -338,7 +338,10 @@ const ScriptEditor: React.FC<{ eventId: string; onActivated: () => void }> = ({ 
             return;
         }
         mutate((prev) => [...prev, ...entries]);
-        toast.success(`Đã thêm ${entries.length} dòng`);
+        // TASK 61: importing onto a script that is not empty ADDS. Report the running total in that
+        // case, so a replacement done the wrong way (import without clearing) is visible in the same
+        // second rather than at the rehearsal, when the duplicate rows have already gone quiet.
+        toast.success(`Đã thêm ${entries.length} dòng${rows.length ? ` — buổi này nay có ${rows.length + entries.length} dòng. Muốn THAY chứ không cộng thêm thì bấm "Xoá hết" rồi nhập lại.` : ''}`);
         closeImport();
     };
 
@@ -354,6 +357,41 @@ const ScriptEditor: React.FC<{ eventId: string; onActivated: () => void }> = ({ 
         } catch {
             toast.error('Không tải được tệp về máy');
         }
+    };
+
+    // TASK 61 — replace a script, don't stack one on top of another. `commitImport` APPENDS, and two
+    // rows carrying the same sentence are not harmless: the matcher's runner-up margin (0.06) sees a
+    // duplicate as an equally-good rival, the gap is 0, and the pair is demoted out of `snap` — so an
+    // import laid over the old script silently disarms exactly the lines that were working. Deleting
+    // 40 rows by hand before a rehearsal is not a plan, so this is one button.
+    //
+    // It writes the empty list through `writeScriptLocal` FIRST and synchronously: the debounced
+    // autosave would otherwise land after the backend push and stamp `updatedAt` newer than
+    // `syncedAt`, showing "Chưa đồng bộ" over a script that is in fact synced. Going through
+    // `writeScriptLocal` is also what feeds the shared store — the clear has to reach the Volume, not
+    // just this browser.
+    const clearAll = async () => {
+        const n = rows.length;
+        if (!n) return;
+        if (!window.confirm(`Xoá hết ${n} dòng kịch bản của buổi này? KHÔNG thể hoàn tác — nếu chưa bấm "Xuất .json" thì huỷ và xuất trước đã.`)) return;
+        writeScriptLocal(eventId, []);
+        setRows([]);
+        if (!session.backendOnline) {
+            // Local is empty, the matcher's copy is not. Saying "đã xoá" here is how a rehearsal runs
+            // against the old script and nobody understands why.
+            setBeDirty(true);
+            toast.error(`Đã xoá ${n} dòng tại máy — backend VẪN giữ bản cũ cho matcher. Bấm "Đồng bộ BE" khi có mạng.`);
+            return;
+        }
+        setSyncing(true);
+        try {
+            await pushToBackend(eventId, []);
+            setBeDirty(false);
+            toast.success(`Đã xoá ${n} dòng — cả tại máy lẫn bản matcher đang đọc`);
+        } catch (e) {
+            setBeDirty(true);
+            toast.error('Đã xoá tại máy, nhưng backend chưa xoá được: ' + (e instanceof Error ? e.message : String(e)));
+        } finally { setSyncing(false); }
     };
 
     const openImport = () => {
@@ -445,6 +483,13 @@ const ScriptEditor: React.FC<{ eventId: string; onActivated: () => void }> = ({ 
                     title="Tải kịch bản (kèm trạng thái duyệt) về máy, để mở trên máy khác"
                     className="flex items-center gap-1.5 border border-outline-variant text-on-surface-variant px-3 py-2 rounded-full font-label-caps text-label-caps hover:border-secondary hover:text-secondary transition-colors disabled:opacity-40 disabled:cursor-not-allowed">
                     <span className="material-symbols-outlined text-[18px]" aria-hidden="true">download</span>Xuất .json
+                </button>
+                {/* TASK 61: sits immediately AFTER "Xuất .json" on purpose — the only safe order is
+                    export, then clear, then import, and the row of buttons should read that way. */}
+                <button onClick={clearAll} disabled={rows.length === 0 || syncing}
+                    title="Xoá hết kịch bản của buổi này (tại máy + bản matcher đọc) để nhập bản mới"
+                    className="flex items-center gap-1.5 border border-outline-variant text-on-surface-variant px-3 py-2 rounded-full font-label-caps text-label-caps hover:border-error hover:text-error transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:border-outline-variant disabled:hover:text-on-surface-variant">
+                    <span className="material-symbols-outlined text-[18px]" aria-hidden="true">delete_sweep</span>Xoá hết
                 </button>
                 <button onClick={openImport} className="btn-lux flex items-center gap-1.5 bg-secondary text-on-secondary px-4 py-2 rounded-full font-label-caps text-label-caps hover:opacity-80"><span className="material-symbols-outlined text-[18px]" aria-hidden="true">upload_file</span>Nhập tệp</button>
             </PageHeader>

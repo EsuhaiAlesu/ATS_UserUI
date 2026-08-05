@@ -14,10 +14,48 @@ import {
   fetchOnlineConfigStatus, saveOnlineConfigKeys, ONLINE_KEY_FIELDS,
   ONLINE_ACTIVE_STATUSES, ONLINE_STATUS_COLOR,
   summarizePrepDocs, PREP_DOCS_MAX, PREP_DOC_MAX_CHARS,   // documented below; was missing from this list
+  OnlineGuidedMatchSettings,                              // Settings: "Độ khớp khi dẫn theo kịch bản"
+  GUIDED_MATCH_OPTIONS, GUIDED_MATCH_DEFAULT, GUIDED_MATCH_KEY,
+  loadGuidedMatch, saveGuidedMatch, guidedMatchFloor, guidedMatchLabel, type GuidedMatch,
   type OnlineConfigStatus, type OnlineDirection,
   type LaneLine, type LaneStatus, type OnlineDiagnostics, type TtsGateMode, type SaveOutcome,
 } from '../lib/lanes/online'
 ```
+
+### `applySegment(seg)` · `setSegmentBrief(text)` — bấm sang một đoạn của Chương trình (TASK 58)
+
+`applySegment({ speakerName?, mode?, listen?, scriptIndex?, language? })` là MỘT lời gọi đặt cả bốn thứ
+mà người điều khiển vốn phải bấm riêng lẻ giữa buổi lễ, cộng một cú khoá chiều dịch. Nó nhận **dữ liệu
+thuần**, không nhận `Segment`: lane không được import `src/lib/schedule.ts`, và một dòng Timeline là
+chuyện của màn Chuẩn bị.
+
+Hai quy tắc một chiều nằm sẵn trong đó, đừng gỡ:
+
+- `mode` chỉ **tắt** được chế độ dẫn, không bao giờ **bật**. Bật dẫn luôn phải là một hành động cố ý của
+  con người; chọn tên người kế tiếp trong một danh sách không phải là hành động đó.
+- `language: ''` **nhả khoá**, không phải "giữ nguyên khoá cũ". Một đoạn để trống tiếng nghĩa là máy tự
+  nhận, và nó phải thật sự có nghĩa như vậy — nếu không, đoạn trống sẽ thừa hưởng khoá của người trước.
+
+`setSegmentBrief(text)` là bối cảnh riêng của đoạn đang chạy, đọc lại ở **mỗi câu** (`getBrief`). Rỗng ⇒
+lane tự quay về ô Bối cảnh chung. Nó **không** ghi đè ô Bối cảnh: ô đó là bối cảnh cả buổi, do người điều
+khiển soạn tay.
+
+`lockLanguage(lang | null)` của lane là chỗ khoá thật sự nằm. Nó **không** đụng tham số `language` gửi cho
+máy nghe — máy nghe vẫn `'auto'`, để một câu ngoại ngữ trích dẫn vẫn được chép đúng và để không phải mở
+lại kết nối giữa buổi. Đổi khoá thì **xả bộ đệm trước**: chữ đang chờ thuộc về người nói TRƯỚC.
+
+### `GUIDED_MATCH_*` — độ khớp khi dẫn theo kịch bản (TASK 57)
+
+Bốn nấc: `strict` 0,6 · `normal` 0,45 (mặc định) · `loose` 0,3 · `open` **0 = không đo**. Lane đọc lại ở
+từng câu qua `getGuidedFloor`, nên đổi nấc trong Cài đặt ăn ngay câu sau, không phải Dừng rồi Bắt đầu lại.
+
+`open` là một **loại** nấc khác chứ không phải một con số nhỏ hơn: người điều khiển bấm dòng CHÍNH LÀ bằng
+chứng, và không có phép đo nào cả. Đúng cho lúc chạy thử; sai cho buổi lễ thật, vì một con trỏ đặt lùi một
+dòng sẽ đẩy hẳn một câu đã duyệt khác ra loa hội trường bằng giọng người.
+
+Sàn độ dài đo theo **dòng đang bấm** (`min(8, độ dài dòng)`), không phải một con số tuyệt đối — nếu không,
+`Một...` · `Hai...` · `Kanpai!` là những dòng có thật trong kịch bản mà máy không bao giờ nhả nổi. Dòng
+ngắn dưới 8 ký tự bị đòi giống 80% (`guidedBarFor`) vì câu ngắn dễ trùng ngẫu nhiên.
 
 ### `summarizePrepDocs(input): Promise<PrepBriefResult>` (M14)
 

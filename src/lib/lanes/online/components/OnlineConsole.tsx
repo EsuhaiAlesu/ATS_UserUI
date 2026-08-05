@@ -16,11 +16,15 @@ import { useNavigate } from 'react-router-dom'
 import { useOnlineLane, fetchOnlineConfigStatus, summarizePrepDocs, ONLINE_SPEED_RANGE, SUBTITLE_FONT, type LaneStatus, type OnlineVoice, type AudienceLine, type WallOutput, type WallDock, MIC_SENSITIVITY_OPTIONS, micSensitivityLabel, LOUD_GATE_OPTIONS, resolveLoudThreshold, type MicSensitivity, type LoudGateMode, splitMishearingLines, previewKeyterms, KEYTERM_MAX, KEYTERM_MAX_LEN, fetchOnlineGlossary, saveOnlineGlossary, parseGlossaryLines, formatGlossaryLines, fetchSessionBoxes, saveSessionBoxes, EMPTY_SESSION_BOXES, fetchMishearings, saveMishearings } from '../index'
 import { useConferenceMode } from '../../../ConferenceModeContext'
 import { useActiveEvent } from '../../../ActiveEventContext'
-import { collectPrepPack, collectPrepDocuments, collectPrepHeader, type PrepPack } from '../../../prepData'
+import { collectPrepPack, collectPrepDocuments, collectPrepHeader, collectSegmentBrief, type PrepPack } from '../../../prepData'
 import { savePrepSummary, clearPrepSummary, getPrepSummary, type PrepSummary } from '../../../prepSummary'
 import { kbScopeId } from '../../../kbscope'
 import { loadScriptForSession, approveTranslatedRows, scriptLoadMessage, type ScriptLoad } from '../../../scriptLoad'
-import { GUIDED_FLOOR, SPEAKER_MODES, guidedAllowed, guidedBlockedReason } from '../guidedScript'
+import { SPEAKER_MODES, guidedAllowed, guidedBlockedReason } from '../guidedScript'
+// TASK 57 — sàn khớp THẬT đang dùng, do màn Cài đặt quyết định. Màn này từng in hằng số mặc định 45%; khi
+// có nấc chọn thì con số in ra phải là con số đang chạy, nếu không thì nấc "Thả cửa" vẫn khoe "ít nhất 45%".
+import { guidedMatchFloor, guidedMatchLabel, loadGuidedMatch } from '../guidedMatch'
+import { segmentListens, segmentLanguage, segmentSpeakerName, segmentLabel, resolveScriptAnchor, anchorMessage } from '../../../segments'
 import SubtitleParagraphs from '../../../../components/SubtitleParagraphs'
 
 type CfgStatus = Awaited<ReturnType<typeof fetchOnlineConfigStatus>>
@@ -92,7 +96,11 @@ const MissingKeysModal: React.FC<{ onClose: () => void; onGoSettings: () => void
   </div>
 )
 
-type Panel = 'gate' | 'voice' | 'terms' | 'brief' | 'glossary' | 'wall' | null
+type Panel = 'gate' | 'voice' | 'terms' | 'brief' | 'glossary' | 'wall' | 'script' | null
+
+// Sentinel for the "Khác…" row of the speaker dropdown. Deliberately not a name-shaped string: a real
+// person on the roster must never be able to collide with it.
+const OTHER_SPEAKER = '::khac::'
 
 function wallSupportLine(support: string, count: number): string {
   if (support === 'multi') return `Thấy ${count} màn hình — chọn màn cho từng cửa sổ rồi bấm Xuất.`
@@ -127,6 +135,19 @@ const OnlineConsole: React.FC = () => {
   // the script status has to be true from that second rather than after some promise settles.
   const [scriptLoad, setScriptLoad] = useState<ScriptLoad>(() => loadScriptForSession(eventId))
   const prepLoadedRef = useRef('')
+  // "Đang tới lượt" is normally picked off the meeting's own speaker list. `otherSpeaker` is the escape
+  // hatch for the person who was never on it (a guest called up from the floor) — free text, as before.
+  const [otherSpeaker, setOtherSpeaker] = useState(false)
+  // Đoạn Timeline đang tới lượt. -1 = chưa bấm sang đoạn nào (buổi chưa bắt đầu, hoặc buổi không dựng
+  // Timeline) — khi đó màn này hành xử đúng như trước: bấm tay từng ô.
+  const [segIndex, setSegIndex] = useState(-1)
+  // Nấc khớp đang chọn, CHỈ để in ra cho người điều khiển đọc. Quyết định nhả câu vẫn nằm ở lane, và lane
+  // đọc lại nấc này ở TỪNG câu. Đọc lại mỗi lần mở bảng kịch bản là đủ: nấc chỉ đổi được ở màn Cài đặt,
+  // tức người dùng đã rời màn này rồi quay lại.
+  const [matchStep, setMatchStep] = useState(() => loadGuidedMatch())
+  // The armed line, scrolled into view inside the wide script popup. During a ceremony the operator must
+  // never have to hunt for the highlighted row after pressing TỚI twenty times.
+  const guidedLineRef = useRef<HTMLLIElement | null>(null)
 
   // Report running state + register the stop function to the neutral context, so the head-bar DỪNG can
   // relay to this lane and the lane switch locks while a capture is live. (ConferenceModeContext is
@@ -404,96 +425,6 @@ const OnlineConsole: React.FC = () => {
       {/* M9 — an empty or unapproved script behaves exactly like a script that never matches, so it must
           be said out loud here; nothing else on this screen would tell the operator before going live. */}
       <div>{scriptLoadMessage(scriptLoad)}</div>
-      {/* TASK 35 — dẫn theo kịch bản. Only offered once the script actually loaded: arming a cursor over
-          zero rows is a button that can only disappoint. Kept right under the script status line so the
-          two are read together — "kịch bản nào" and "đang ở dòng nào" are one question in practice. */}
-      {lane.script.length > 0 && (
-        <div className="guided-panel">
-          {/* TASK 36 — the speaker list already exists on the meeting (`Conference.speakers[]`); nothing
-              is added to the script format for this. An empty list is normal for a meeting nobody filled
-              in, so the box stays usable as free text. */}
-          <div className="guided-speaker">
-            <label>
-              Đang tới lượt{' '}
-              <input
-                type="text"
-                list="guided-speaker-names"
-                value={lane.speakerName}
-                onChange={(e) => lane.setSpeakerName(e.target.value)}
-                placeholder="tên người đang nói"
-              />
-            </label>
-            <datalist id="guided-speaker-names">
-              {(event?.speakers ?? []).map((s) => (
-                <option key={s.id} value={s.name} />
-              ))}
-            </datalist>
-            <label>
-              Kiểu nói{' '}
-              <select
-                value={lane.speakerMode}
-                onChange={(e) => lane.setSpeakerMode(e.target.value as typeof lane.speakerMode)}
-              >
-                {SPEAKER_MODES.map((m) => (
-                  <option key={m.value} value={m.value}>{m.label}</option>
-                ))}
-              </select>
-            </label>
-            <div className="guided-hint">
-              {SPEAKER_MODES.find((m) => m.value === lane.speakerMode)?.hint}
-            </div>
-          </div>
-          <label>
-            <input
-              type="checkbox"
-              checked={lane.guided.armed}
-              disabled={!guidedAllowed(lane.speakerMode)}
-              onChange={(e) => lane.setGuidedArmed(e.target.checked)}
-            />{' '}
-            Dẫn theo kịch bản
-          </label>
-          {!guidedAllowed(lane.speakerMode) && (
-            <div className="guided-blocked">{guidedBlockedReason(lane.speakerMode)}</div>
-          )}
-          <div className="guided-readout">{lane.guidedText}</div>
-          {lane.guided.armed && (
-            <>
-              <div className="guided-buttons">
-                <button type="button" onClick={() => lane.stepGuided(-1)} disabled={lane.guided.index <= 0}>
-                  ← Lùi
-                </button>
-                <button
-                  type="button"
-                  onClick={() => lane.stepGuided(1)}
-                  disabled={lane.guided.index >= lane.script.length - 1}
-                >
-                  Tới →
-                </button>
-              </div>
-              {/* The list is the operator's paper script on screen. Clicking a line IS the cursor move —
-                  during a ceremony nobody counts button presses to get from line 3 to line 17. */}
-              <ol className="guided-list">
-                {lane.script.map((row, i) => (
-                  <li
-                    key={row.id}
-                    className={i === lane.guided.index ? 'guided-line guided-line-now' : 'guided-line'}
-                    onClick={() => lane.setGuidedIndex(i)}
-                  >
-                    <span className="guided-num">{i + 1}</span>
-                    <span className="guided-src">{row.src}</span>
-                    {row.status !== 'approved' ? <span className="guided-draft"> · chưa duyệt</span> : null}
-                  </li>
-                ))}
-              </ol>
-              <div className="guided-note">
-                Máy chỉ đọc nguyên văn dòng đang chọn khi câu vừa nghe giống dòng đó ít nhất{' '}
-                {Math.round(GUIDED_FLOOR * 100)}%. Nếu không giống, máy tự dịch như bình thường — bấm sai
-                dòng không làm buổi lễ tệ hơn khi tắt chế độ này.
-              </div>
-            </>
-          )}
-        </div>
-      )}
       {/* TASK 20 — the operator has to be able to tell "this will be here tomorrow" from "this is in this
           tab only". One short line; it appears under both boxes because both are saved together. */}
       <div>{boxesSaved ? 'Đã nhớ Thuật ngữ và Bối cảnh cho buổi này' : 'Chưa lưu — gõ xong vài giây là tự nhớ cho buổi này'}</div>
@@ -515,6 +446,10 @@ const OnlineConsole: React.FC = () => {
   }
   // Scan the screens the first time the flyout opens — the permission prompt must be tied to the action.
   useEffect(() => { if (panel === 'wall' && lane.wallSupport === 'idle') void lane.scanWall() }, [panel, lane.wallSupport, lane])
+  useEffect(() => {
+    if (panel !== 'script') return
+    guidedLineRef.current?.scrollIntoView({ block: 'center', behavior: 'smooth' })
+  }, [panel, lane.guided.index])
   const enabledWallCount = lane.wallOutputs.filter((o) => o.enabled).length
   const wallNoteMsg = wallNote && wallNote.atCount === lane.wallOpenIds.length ? wallNote.msg : ''
 
@@ -555,12 +490,55 @@ const OnlineConsole: React.FC = () => {
   // signature of the 2026-08-01 failure.
   const scriptReady = scriptLoad.reason === 'ok'
   const danglingEvent = eventId !== '' && !event
+  // The meeting's own roster, names only — the dropdown behind "Đang tới lượt".
+  const speakerNames = (event?.speakers ?? []).map((s) => s.name).filter((n) => n.trim())
+  // The armed line, or undefined when the cursor is parked. Read once here so the rail card and the wide
+  // popup can never disagree about which line is "now".
+  const guidedRow = lane.guided.index >= 0 ? lane.script[lane.guided.index] : undefined
+
+  // ── TASK 58 · Timeline chương trình ──────────────────────────────────────────────────────────────
+  // Chỉ những dòng CHẠY ĐƯỢC (bỏ dòng tiêu đề phần) mới vào ô chọn — người điều khiển bấm sang "phần",
+  // không bấm sang một cái nhan đề.
+  const runSegments = useMemo(() => (event?.segments ?? []).filter((s) => !s.divider), [event])
+  const curSegment = segIndex >= 0 ? runSegments[segIndex] : undefined
+  // Mọi dòng lưu cho buổi (kể cả bản nháp) — CHỈ để phân biệt "dòng chưa duyệt" với "dòng mất hẳn".
+  // Lấy từ CÙNG một lần đọc `loadScriptForSession` đã nạp `scriptLoad`: màn hình này không tự mở kho
+  // kịch bản, chỉ đi qua đúng một cửa.
+  const allScriptRows = useMemo(
+    () => scriptLoad.allRows.map((r) => ({ id: r.id, src: r.src })),
+    [scriptLoad],
+  )
+  const curAnchor = useMemo(
+    () => resolveScriptAnchor(curSegment, lane.script, allScriptRows),
+    [curSegment, lane.script, allScriptRows],
+  )
+  const gotoSegment = useCallback((i: number) => {
+    const seg = runSegments[i]
+    if (!seg) return
+    setSegIndex(i)
+    // Con trỏ chỉ nhảy khi neo giải được về một dòng ĐÃ DUYỆT mà lane đang giữ. Neo giải bằng mã trước,
+    // bằng nội dung sau — nhập lại kịch bản đổi hết mã, và một con trỏ đứng im không lời giải thích
+    // giữa buổi lễ nguy hiểm hơn hẳn một dòng chữ đỏ.
+    const a = resolveScriptAnchor(seg, lane.script, allScriptRows)
+    // Bối cảnh riêng của người này. Rỗng (đoạn không gắn tài liệu) ⇒ lane tự quay về ô Bối cảnh chung.
+    lane.setSegmentBrief(collectSegmentBrief(event, seg.docIds, segmentSpeakerName(seg, event)))
+    lane.applySegment({
+      speakerName: segmentSpeakerName(seg, event) || '',
+      mode: seg.mode ?? 'none',
+      listen: segmentListens(seg),
+      scriptIndex: a.kind === 'ok' ? a.index : -1,
+      language: segmentLanguage(seg, event),
+    })
+  }, [runSegments, event, lane, allScriptRows])
 
   // TASK 14: the transcript records which meeting it belongs to, taken from the SAME resolved pointer the
   // script is loaded from — so a saved file and the script it was read against can never name two
   // different meetings.
   const setLaneEventId = lane.setEventId
   useEffect(() => { setLaneEventId(eventId) }, [eventId, setLaneEventId])
+
+  // TASK 57 — mở bảng kịch bản là đọc lại nấc khớp. Rẻ, và giữ cho con số in trên bảng luôn là con số thật.
+  useEffect(() => { if (panel === 'script') setMatchStep(loadGuidedMatch()) }, [panel])
 
   const diag = lane.diagnostics
   const lat = diag?.latency
@@ -588,6 +566,193 @@ const OnlineConsole: React.FC = () => {
               <span className="text-[12px] font-medium text-on-surface truncate" title={event?.title?.trim() || undefined}>{event?.title?.trim() || 'Chưa chọn buổi nào'}</span>
             </div>
             <div className={`text-[11px] leading-snug ${scriptReady ? 'text-on-surface-variant' : 'text-error'}`}>{scriptLoadMessage(scriptLoad)}</div>
+            {/* TASK 35 — dẫn theo kịch bản. Only offered once the script actually loaded: arming a cursor over
+                zero rows is a button that can only disappoint. Kept right under the script status line so the
+                two are read together — "kịch bản nào" and "đang ở dòng nào" are one question in practice. */}
+            {/* Timeline có giá trị NGAY CẢ khi buổi không có kịch bản: giá trị lớn nhất của nó là tự
+                câm ở các đoạn video / bài hát / Yosakoi, chuyện không liên quan gì tới kịch bản. */}
+            {(lane.script.length > 0 || runSegments.length > 0) && (
+              <div className="pt-2 mt-0.5 border-t border-outline-variant/60 space-y-2.5">
+                {/* TASK 58 — ĐANG TỚI PHẦN. Một ô chọn thay cho bốn thao tác tay: người nói · kiểu nói ·
+                    nghe/câm · con trỏ dòng. Gala 08/08 có ~17 đoạn máy bắt buộc phải câm (video, bài hát,
+                    Yosakoi, chụp ảnh) rải trong bốn tiếng; bấm sang đoạn là máy tự câm, không phải nhớ. */}
+                {runSegments.length > 0 && (
+                  <div className="space-y-1.5 pb-1">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="font-label-caps text-[10px] tracking-[0.14em] text-on-surface-variant/60">ĐANG TỚI PHẦN</span>
+                      <span className="font-label-caps text-[10px] text-on-surface-variant/50 tabular-nums">{segIndex >= 0 ? segIndex + 1 : '–'}/{runSegments.length}</span>
+                    </div>
+                    <select
+                      aria-label="Phần chương trình đang tới lượt"
+                      value={segIndex >= 0 ? String(segIndex) : ''}
+                      onChange={(e) => { const v = e.target.value; if (v === '') setSegIndex(-1); else gotoSegment(Number(v)) }}
+                      className={`${SELECT_CLS} py-1.5 text-[13px]`}
+                    >
+                      <option value="">— chưa vào phần nào —</option>
+                      {runSegments.map((s, i) => <option key={s.id} value={i}>{segmentLabel(s, i)}</option>)}
+                    </select>
+                    <div className="grid grid-cols-2 gap-1.5">
+                      <button type="button" onClick={() => gotoSegment(segIndex - 1)} disabled={segIndex <= 0}
+                        className="flex items-center justify-center gap-1 py-1.5 rounded-lg border border-outline-variant text-on-surface-variant hover:border-primary hover:text-primary transition-colors disabled:opacity-35 disabled:cursor-not-allowed text-[12px] font-semibold">
+                        <span className="material-symbols-outlined text-[16px]" aria-hidden="true">arrow_upward</span>Phần trước
+                      </button>
+                      <button type="button" onClick={() => gotoSegment(segIndex + 1)} disabled={segIndex >= runSegments.length - 1}
+                        className="flex items-center justify-center gap-1 py-1.5 rounded-lg border border-secondary/60 text-secondary hover:bg-secondary/10 transition-colors disabled:opacity-35 disabled:cursor-not-allowed text-[12px] font-bold">
+                        Phần sau<span className="material-symbols-outlined text-[16px]" aria-hidden="true">arrow_downward</span>
+                      </button>
+                    </div>
+                    {curSegment && (
+                      <div className={`rounded-lg border px-2.5 py-2 space-y-0.5 ${segmentListens(curSegment) ? 'border-outline-variant bg-surface-container' : 'border-error/50 bg-error/[0.08]'}`}>
+                        <div className="flex items-center gap-1.5">
+                          <span className={`material-symbols-outlined text-[15px] ${segmentListens(curSegment) ? 'text-secondary' : 'text-error'}`} aria-hidden="true">{segmentListens(curSegment) ? 'hearing' : 'hearing_disabled'}</span>
+                          <span className={`font-label-caps text-[10px] ${segmentListens(curSegment) ? 'text-secondary' : 'text-error'}`}>{segmentListens(curSegment) ? 'MÁY ĐANG NGHE' : 'MÁY ĐANG CÂM'}</span>
+                        </div>
+                        <p className="text-[11.5px] leading-snug text-on-surface-variant">
+                          {segmentSpeakerName(curSegment, event) || 'chưa gán người'}
+                          {segmentLanguage(curSegment, event)
+                            ? ` · khoá chiều ${segmentLanguage(curSegment, event) === 'vi' ? 'Việt → Nhật' : 'Nhật → Việt'}`
+                            : ' · chiều dịch: máy tự nhận'}
+                        </p>
+                        {/* Khoá chiều chỉ sống trong phiên HAI CHIỀU — một chiều thì chiều dịch đã chốt từ
+                            lúc Bắt đầu, và ô "tiếng" của đoạn trở thành nút bấm giả. Nói thẳng ra. */}
+                        {segmentLanguage(curSegment, event) && !lane.twoWay && (
+                          <p className="text-[11px] text-error/90">Phiên này đang MỘT CHIỀU nên tiếng gắn cho đoạn không có tác dụng. Dừng → bật “Một mic hai chiều” → Bắt đầu lại.</p>
+                        )}
+                        {anchorMessage(curAnchor) && <p className="text-[11px] text-error/90">{anchorMessage(curAnchor)}</p>}
+                        {curAnchor.kind === 'ok' && curAnchor.healed && (
+                          <p className="text-[11px] text-on-surface-variant/75">Kịch bản đã nhập lại — con trỏ bám theo nội dung dòng. Mở Chương trình bấm “Gắn lại tự động” cho chắc.</p>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* TASK 36 — the speaker list already exists on the meeting (`Conference.speakers[]`); nothing
+                    is added to the script format for this. An empty list is normal for a meeting nobody filled
+                    in, so free text stays reachable — behind "Khác…" rather than as the default, because a
+                    name typed under stage lights is a name spelled differently from the roster. */}
+                <div className="space-y-1.5">
+                  <span className="font-label-caps text-[10px] tracking-[0.14em] text-on-surface-variant/60 block">ĐANG TỚI LƯỢT</span>
+                  {speakerNames.length > 0 && !otherSpeaker ? (
+                    <select
+                      aria-label="Người đang nói"
+                      value={speakerNames.includes(lane.speakerName) ? lane.speakerName : ''}
+                      onChange={(e) => {
+                        if (e.target.value === OTHER_SPEAKER) { setOtherSpeaker(true); lane.setSpeakerName('') }
+                        else lane.setSpeakerName(e.target.value)
+                      }}
+                      className={`${SELECT_CLS} py-1.5 text-[13px]`}
+                    >
+                      <option value="">— chưa chọn —</option>
+                      {(event?.speakers ?? []).filter((s) => s.name.trim()).map((s) => (
+                        <option key={s.id} value={s.name}>{s.name}{s.role?.trim() ? ` · ${s.role.trim()}` : ''}</option>
+                      ))}
+                      <option value={OTHER_SPEAKER}>Khác… (gõ tên)</option>
+                    </select>
+                  ) : (
+                    <div className="flex items-center gap-1">
+                      <input
+                        type="text"
+                        aria-label="Người đang nói"
+                        value={lane.speakerName}
+                        onChange={(e) => lane.setSpeakerName(e.target.value)}
+                        placeholder="tên người đang nói"
+                        className="flex-1 min-w-0 bg-surface text-on-surface border border-outline-variant rounded-DEFAULT py-1.5 px-2.5 text-[13px] focus:ring-0 focus:border-secondary field-lux"
+                      />
+                      {speakerNames.length > 0 && (
+                        <button type="button" onClick={() => { setOtherSpeaker(false); lane.setSpeakerName('') }}
+                          title="Quay lại danh sách người phát biểu của buổi"
+                          className="shrink-0 h-[34px] w-8 grid place-items-center rounded-DEFAULT border border-outline-variant text-on-surface-variant hover:text-primary hover:border-primary transition-colors">
+                          <span className="material-symbols-outlined text-[16px]" aria-hidden="true">list</span>
+                        </button>
+                      )}
+                    </div>
+                  )}
+                </div>
+
+                {/* Kiểu nói — three taps wide, not a dropdown: mid-ceremony the operator changes this while
+                    looking at the stage, and a dropdown costs two interactions and a moment of blind aim. */}
+                <div className="space-y-1.5">
+                  <span className="font-label-caps text-[10px] tracking-[0.14em] text-on-surface-variant/60 block">KIỂU NÓI</span>
+                  <div className="grid grid-cols-3 gap-0.5 bg-surface rounded-lg p-0.5">
+                    {SPEAKER_MODES.map((m) => (
+                      <button key={m.value} type="button" title={m.hint} onClick={() => lane.setSpeakerMode(m.value)}
+                        className={`px-1 py-1.5 rounded-md text-[11px] font-semibold leading-tight transition-colors ${lane.speakerMode === m.value ? 'bg-secondary text-on-secondary shadow' : 'text-on-surface-variant hover:text-on-surface'}`}>
+                        {m.label}
+                      </button>
+                    ))}
+                  </div>
+                  <p className="text-[11px] leading-snug text-on-surface-variant/85">{SPEAKER_MODES.find((m) => m.value === lane.speakerMode)?.hint}</p>
+                </div>
+
+                {/* Mọi thứ dưới đây cần có kịch bản. Buổi chỉ có Timeline mà không có kịch bản vẫn dùng
+                    được phần trên (chọn phần · người nói · kiểu nói · nghe/câm). */}
+                {lane.script.length > 0 && (<>
+                {/* Bật dẫn — the one switch in this rail that changes what the ballroom HEARS, so it is the
+                    one thing here that looks like a switch and turns green. */}
+                <button type="button" disabled={!guidedAllowed(lane.speakerMode)}
+                  onClick={() => lane.setGuidedArmed(!lane.guided.armed)}
+                  title={guidedAllowed(lane.speakerMode) ? 'Đọc thẳng dòng kịch bản đã duyệt' : guidedBlockedReason(lane.speakerMode)}
+                  className={`w-full flex items-center gap-2 px-2.5 py-2 rounded-lg border transition-colors disabled:opacity-45 disabled:cursor-not-allowed ${lane.guided.armed ? 'border-secondary bg-secondary/15 text-on-surface' : 'border-outline-variant text-on-surface-variant hover:border-primary hover:text-on-surface'}`}>
+                  <span className={`shrink-0 w-8 h-[18px] rounded-full relative transition-colors ${lane.guided.armed ? 'bg-secondary' : 'bg-outline-variant'}`}>
+                    <span className={`absolute top-[2px] w-[14px] h-[14px] rounded-full bg-surface-container-lowest transition-all ${lane.guided.armed ? 'left-[16px]' : 'left-[2px]'}`}></span>
+                  </span>
+                  <span className="text-[12.5px] font-semibold">Dẫn theo kịch bản</span>
+                </button>
+                {!guidedAllowed(lane.speakerMode) && (
+                  <p className="text-[11px] leading-snug text-on-surface-variant/75">{guidedBlockedReason(lane.speakerMode)}</p>
+                )}
+
+                <div className={`text-[11px] leading-snug ${lane.guided.armed ? 'text-secondary' : 'text-on-surface-variant'}`}>{lane.guidedText}</div>
+
+                {lane.guided.armed && (
+                  <>
+                    {/* What is about to be SPOKEN, in the rail. Until now the only way to see it was to open a
+                        list — and the one number an operator checks before pressing TỚI is whether the line
+                        they are pointing at is the line the MC is reading. */}
+                    {guidedRow ? (
+                      <div className="rounded-lg border border-secondary/40 bg-secondary/[0.07] px-2.5 py-2 space-y-1">
+                        <div className="flex items-center gap-1.5">
+                          <span className="font-label-caps text-[10px] text-secondary tabular-nums">DÒNG {lane.guided.index + 1}/{lane.script.length}</span>
+                          {guidedRow.status !== 'approved' && <span className="text-[10px] text-error font-semibold">CHƯA DUYỆT</span>}
+                        </div>
+                        <p className="text-[12px] leading-snug text-on-surface line-clamp-3">{guidedRow.src}</p>
+                        <p className="text-[12px] leading-snug text-secondary/90 line-clamp-3">{guidedRow.dst}</p>
+                      </div>
+                    ) : (
+                      <p className="text-[11px] text-on-surface-variant">Chưa chọn dòng — bấm “Mở kịch bản” rồi chọn dòng MC đang đọc.</p>
+                    )}
+                    {/* TASK 56 — micro đang ngủ sau khi nhả câu. Không được để nó vô hình: cái sai duy
+                        nhất của cơ chế này là người điều khiển quên bấm dòng sau. */}
+                    {diag?.guidedDeaf && (
+                      <div className="flex items-center gap-1.5 rounded-lg border border-tertiary/50 bg-tertiary/[0.10] px-2.5 py-2">
+                        <span className="material-symbols-outlined text-[16px] text-tertiary" aria-hidden="true">hearing_disabled</span>
+                        <p className="text-[11.5px] leading-snug text-on-surface-variant">
+                          <span className="font-label-caps text-[10px] text-tertiary">ĐANG IM</span> — MC bên kia đọc bản dịch. Bấm “Tới” khi người nói sắp vào câu sau.
+                        </p>
+                      </div>
+                    )}
+                    <div className="grid grid-cols-2 gap-1.5">
+                      <button type="button" onClick={() => lane.stepGuided(-1)} disabled={lane.guided.index <= 0}
+                        className="flex items-center justify-center gap-1 py-2.5 rounded-lg border border-outline-variant text-on-surface hover:border-primary hover:text-primary transition-colors disabled:opacity-35 disabled:cursor-not-allowed text-[13px] font-semibold">
+                        <span className="material-symbols-outlined text-[18px]" aria-hidden="true">arrow_back</span>Lùi
+                      </button>
+                      <button type="button" onClick={() => lane.stepGuided(1)} disabled={lane.guided.index >= lane.script.length - 1}
+                        className="flex items-center justify-center gap-1 py-2.5 rounded-lg btn-lux bg-secondary text-on-secondary hover:opacity-90 transition-opacity disabled:opacity-35 disabled:cursor-not-allowed text-[13px] font-bold">
+                        Tới<span className="material-symbols-outlined text-[18px]" aria-hidden="true">arrow_forward</span>
+                      </button>
+                    </div>
+                  </>
+                )}
+
+                <button type="button" onClick={() => setPanel((p) => (p === 'script' ? null : 'script'))}
+                  className={`w-full flex items-center justify-center gap-1.5 px-2.5 py-1.5 rounded-full font-label-caps text-label-caps border transition-colors ${panel === 'script' ? 'border-secondary text-secondary bg-secondary/10' : 'border-outline-variant text-on-surface-variant hover:text-primary hover:border-primary'}`}>
+                  <span className="material-symbols-outlined text-[16px]" aria-hidden="true">format_list_numbered</span>
+                  {panel === 'script' ? 'Đóng kịch bản' : 'Mở kịch bản'}
+                </button>
+                </>)}
+              </div>
+            )}
             {danglingEvent && (
               <div className="text-[11px] leading-snug text-error">Buổi đang chọn không còn trong Đặt lịch — mở Chuẩn bị chọn lại buổi rồi quay lại đây.</div>
             )}
@@ -767,7 +932,53 @@ const OnlineConsole: React.FC = () => {
       {panel && (
         <>
           <div className="absolute inset-0 z-30" onClick={() => setPanel(null)}></div>
-          <div className="absolute top-1/2 -translate-y-1/2 left-[256px] z-40 w-[min(80vw,400px)] rounded-2xl border border-outline-variant bg-surface-container-high p-4 shadow-2xl">
+          <div className={`absolute top-1/2 -translate-y-1/2 left-[256px] z-40 rounded-2xl border border-outline-variant bg-surface-container-high p-4 shadow-2xl ${panel === 'script' ? 'w-[min(72vw,660px)] max-h-[86vh] flex flex-col' : 'w-[min(80vw,400px)]'}`}>
+            {/* KỊCH BẢN CHƯƠNG TRÌNH — the operator's paper script, on screen and readable. It does not fit
+                in a 248px rail, and a script the operator cannot read is a cursor they cannot trust. Both
+                sides are shown: `src` is what they will HEAR, `dst` is what the ballroom will hear back. */}
+            {panel === 'script' && (
+              <div className="flex flex-col min-h-0 gap-3">
+                <div className="flex items-center justify-between gap-3 shrink-0">
+                  <h3 className="font-label-caps text-label-caps text-on-surface">Kịch bản chương trình · {lane.script.length} dòng</h3>
+                  <div className="flex items-center gap-1.5">
+                    <button type="button" onClick={() => lane.stepGuided(-1)} disabled={!lane.guided.armed || lane.guided.index <= 0}
+                      className="flex items-center gap-1 px-3 py-1.5 rounded-lg border border-outline-variant text-on-surface hover:border-primary hover:text-primary transition-colors disabled:opacity-35 disabled:cursor-not-allowed text-[13px] font-semibold">
+                      <span className="material-symbols-outlined text-[17px]" aria-hidden="true">arrow_back</span>Lùi
+                    </button>
+                    <button type="button" onClick={() => lane.stepGuided(1)} disabled={!lane.guided.armed || lane.guided.index >= lane.script.length - 1}
+                      className="flex items-center gap-1 px-3 py-1.5 rounded-lg btn-lux bg-secondary text-on-secondary hover:opacity-90 transition-opacity disabled:opacity-35 disabled:cursor-not-allowed text-[13px] font-bold">
+                      Tới<span className="material-symbols-outlined text-[17px]" aria-hidden="true">arrow_forward</span>
+                    </button>
+                  </div>
+                </div>
+                <p className="shrink-0 text-[11.5px] leading-snug text-on-surface-variant">
+                  {lane.guided.armed
+                    ? guidedMatchFloor(matchStep) > 0
+                      ? <>Bấm vào dòng MC đang đọc để chuyển con trỏ. Máy chỉ đọc nguyên văn khi câu vừa nghe giống dòng đang chọn ít nhất {Math.round(guidedMatchFloor(matchStep) * 100)}% (nấc “{guidedMatchLabel(matchStep)}” trong Cài đặt) — không giống thì máy tự dịch như thường, nên bấm nhầm dòng không làm buổi lễ tệ đi.</>
+                      : <>Cài đặt đang để nấc “{guidedMatchLabel(matchStep)}”: bấm dòng nào là máy đọc thẳng dòng đó, <b className="text-error">không kiểm tra câu vừa nghe có giống hay không</b>. Bấm nhầm dòng là phòng tiệc nghe nhầm câu. Nấc này để chạy thử, buổi thật nên về “Thường”.</>
+                    : <>Đang xem kịch bản. Bật “Dẫn theo kịch bản” bên trái nếu muốn máy đọc thẳng dòng đã duyệt.</>}
+                </p>
+                <ol className="flex-1 min-h-0 overflow-y-auto -mx-1 px-1 space-y-1">
+                  {lane.script.map((row, i) => {
+                    const now = i === lane.guided.index
+                    return (
+                      <li key={row.id} ref={now ? guidedLineRef : undefined}
+                        onClick={() => lane.setGuidedIndex(i)}
+                        className={`flex gap-2.5 px-2.5 py-2 rounded-lg cursor-pointer border transition-colors ${now ? 'border-secondary bg-secondary/[0.14]' : 'border-transparent hover:border-outline-variant hover:bg-surface-container'}`}>
+                        <span className={`shrink-0 w-7 pt-[1px] text-right tabular-nums font-label-caps text-[11px] ${now ? 'text-secondary' : 'text-on-surface-variant/60'}`}>{i + 1}</span>
+                        <div className="min-w-0 flex-1 space-y-0.5">
+                          <p className="text-[13px] leading-snug text-on-surface">{row.src}</p>
+                          <p className="text-[13px] leading-snug text-on-surface-variant">{row.dst}</p>
+                        </div>
+                        {row.status !== 'approved' && (
+                          <span className="shrink-0 self-start px-1.5 py-0.5 rounded font-label-caps text-[10px] border border-error/50 text-error">chưa duyệt</span>
+                        )}
+                      </li>
+                    )
+                  })}
+                </ol>
+              </div>
+            )}
             {panel === 'gate' && (
               <div className="space-y-3">
                 <h3 className="font-label-caps text-label-caps text-on-surface">Chống dội (gate)</h3>

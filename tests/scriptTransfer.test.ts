@@ -150,3 +150,48 @@ describe('the page uses it', () => {
     expect(branch).toBeLessThan(reader);
   });
 });
+
+// TASK 61 — replacing a script. Import APPENDS, and a duplicated row is not free: the matcher reads a
+// second copy of the same sentence as an equally-good rival, the runner-up gap collapses to 0, and the
+// pair drops out of `snap`. So the only correct way to swap in a new script is clear-then-import, and
+// the page has to make that possible in one click and truthful about the backend copy.
+describe('xoá hết kịch bản (TASK 61)', () => {
+  it('1 · có nút, và nút tắt khi không còn gì để xoá', () => {
+    expect(PAGE).toContain('onClick={clearAll} disabled={rows.length === 0 || syncing}');
+    expect(PAGE).toContain('>Xoá hết');
+  });
+
+  it('2 · hỏi lại trước khi xoá, và câu hỏi nói rõ số dòng lẫn đường lui', () => {
+    const ask = PAGE.indexOf('Xoá hết ${n} dòng kịch bản của buổi này?');
+    expect(ask).toBeGreaterThan(-1);
+    expect(PAGE).toContain('KHÔNG thể hoàn tác');
+    expect(PAGE).toContain('Xuất .json" thì huỷ và xuất trước đã');
+    // và phải là window.confirm — cùng lối với mọi việc xoá khác trong app
+    expect(PAGE.slice(ask - 200, ask)).toContain('window.confirm');
+  });
+
+  it('3 · ghi bản rỗng xuống máy TRƯỚC khi đẩy lên backend', () => {
+    // Ngược lại thì lần tự lưu trễ 400ms đóng dấu updatedAt mới hơn syncedAt và bảng báo "Chưa đồng bộ"
+    // trên một kịch bản thật ra đã đồng bộ. Đây cũng là đường mà kho chung (Volume) nhận lệnh xoá.
+    const write = PAGE.indexOf('writeScriptLocal(eventId, []);');
+    const push = PAGE.indexOf('await pushToBackend(eventId, []);');
+    expect(write).toBeGreaterThan(-1);
+    expect(push).toBeGreaterThan(-1);
+    expect(write).toBeLessThan(push);
+  });
+
+  it('4 · mất mạng thì KHÔNG được báo xanh — backend vẫn giữ bản cũ', () => {
+    const off = PAGE.indexOf('if (!session.backendOnline) {\n            // Local is empty');
+    expect(off).toBeGreaterThan(-1);
+    expect(PAGE).toContain('backend VẪN giữ bản cũ cho matcher');
+    // chỉ soi trong đúng nhánh mất mạng: từ chỗ rẽ tới lệnh đầu tiên của nhánh còn mạng
+    const branch = PAGE.slice(off, PAGE.indexOf('setSyncing(true);', off));
+    expect(branch).toContain('toast.error(');
+    expect(branch).not.toContain('toast.success(');
+  });
+
+  it('5 · nhập đè lên kịch bản đang có thì nói ra tổng số dòng', () => {
+    expect(PAGE).toContain('buổi này nay có ${rows.length + entries.length} dòng');
+    expect(PAGE).toContain('Muốn THAY chứ không cộng thêm thì bấm "Xoá hết" rồi nhập lại');
+  });
+});
