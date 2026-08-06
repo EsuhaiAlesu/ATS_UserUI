@@ -13,6 +13,7 @@ import {
 import {
   judgeGuided,
   guidedBarFor,
+  guidedSimilarity,
   GUIDED_FLOOR,
   GUIDED_MIN_CHARS,
   GUIDED_SHORT_LINE,
@@ -145,13 +146,27 @@ describe('judgeGuided — ba dòng ngắn của kịch bản 08/08 phải nhả 
     expect(v.kind).toBe('release')
   })
 
+  // Ca này trước đây dùng một TIỀN TỐ ("Kính thưa quý vị đại biểu" của dòng dài gấp đôi) rồi khẳng định
+  // nấc lỏng phải NHẢ. Đó chính là lỗi "kịch bản nhảy trước MC": bốn nấc sinh ra để cân xem câu nghe được
+  // GIỐNG dòng tới đâu, không phải để cân xem MC đã đọc XONG dòng chưa. Nay câu thử là một lượt đọc TRỌN
+  // dòng nhưng nghe sai vài chữ — đúng thứ bốn nấc phải cân — và ca 12b dưới khoá lại phần còn lại.
   it('12 · nấc "Chặt" vẫn chặn được câu na ná mà nấc "Thường" cho qua', () => {
     const rows = [row({ src: 'Kính thưa quý vị đại biểu và toàn thể quý khách', dst: 'ご来賓の皆様' })]
-    const heard = 'Kính thưa quý vị đại biểu'
-    const loose = judgeGuided(armed, rows, heard, 0.3)
-    const strict = judgeGuided(armed, rows, heard, 0.9)
-    expect(loose.kind).toBe('release')
-    expect(strict.kind).toBe('mismatch')
+    const heard = 'Kính thưa quý bà quý ông và toàn thể quý khách'
+    const score = guidedSimilarity(heard, rows[0].src)
+    expect(score).toBeGreaterThan(0.3)   // fixture phải nằm GIỮA hai nấc, nếu không ca này không đo gì cả
+    expect(score).toBeLessThan(0.82)
+    expect(judgeGuided(armed, rows, heard, 0.3).kind).toBe('release')
+    expect(judgeGuided(armed, rows, heard, 0.82).kind).toBe('mismatch')
+  })
+
+  it('12b · KHÔNG nấc nào nhả một dòng MC mới đọc được một nửa — kể cả nấc lỏng nhất', () => {
+    const rows = [row({ src: 'Kính thưa quý vị đại biểu và toàn thể quý khách', dst: 'ご来賓の皆様' })]
+    const half = 'Kính thưa quý vị đại biểu'
+    for (const floor of [0.3, 0.45, 0.6, 0.82]) {
+      const v = judgeGuided(armed, rows, half, floor)
+      expect(v.kind, `sàn ${floor}`).toBe('mismatch')
+    }
   })
 
   it('13 · dòng chưa duyệt thì không nấc nào nhả được — kể cả "thả cửa"', () => {

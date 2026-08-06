@@ -18,6 +18,7 @@ import {
     DEFAULT_SCRIPT_MATCH_CONFIG,
     normalizeForMatch,
     diceCoefficient,
+    coverageOf,
     type ScriptMatcherEntry,
     type ScriptLanguage,
 } from './scriptMatcher';
@@ -44,6 +45,22 @@ export const GUIDED_MIN_CHARS = 8;
  */
 export const GUIDED_SHORT_LINE = 8;
 export const GUIDED_SHORT_FLOOR = 0.8;
+
+/**
+ * HAS THE LINE BEEN FINISHED — the question the similarity score cannot ask.
+ *
+ * `GUIDED_FLOOR` is 0.45 deliberately: a human is pointing at the line, so the machine only has to agree
+ * that the sentence is roughly that one, and the low bar is what forgives a bad microphone. But Dice is
+ * symmetric, and a PREFIX is rewarded for being short — 2p/(p+L) puts one third of a line at 0.50. So the
+ * low bar was also forgiving something it was never meant to forgive: **a line the MC is only a third of
+ * the way through was released in full, out loud, ahead of the person speaking it.**
+ *
+ * The tail is what separates the two cases and the similarity score never could. Measured on a real
+ * ceremonial line: three quarters read → tail 0.47; the whole line read through a bad microphone → tail
+ * 1.0. The bar goes in that gap. `recall` is the second net, low enough that mishearing still passes.
+ */
+export const GUIDED_COVERAGE_FLOOR = 0.55;
+export const GUIDED_TAIL_FLOOR = 0.6;
 
 /**
  * The bar this heard sentence really has to clear.
@@ -145,7 +162,23 @@ export function judgeGuided(
         return { kind: 'mismatch', score, reason: `không giống dòng ${index + 1} (${score}/${bar})` };
     }
 
-    const source = useForward ? row.src : row.dst;
+    // It looks like the line. That is not the same as the line being FINISHED, and until this gate existed
+    // nothing here asked the difference: a third of a line scores 0.50 on a 0.45 bar, so the machine read
+    // the whole approved sentence out over the hall while the MC was still in the middle of saying it.
+    // Skipped entirely at floor 0 ("thả cửa") — there the operator's press is the only evidence wanted.
+    const spoken = useForward ? row.src : row.dst;
+    if (floor > 0) {
+        const cover = coverageOf(heard, spoken);
+        if (cover.recall < GUIDED_COVERAGE_FLOOR || cover.tailRecall < GUIDED_TAIL_FLOOR) {
+            return {
+                kind: 'mismatch',
+                score,
+                reason: `mới nghe được ${Math.round(cover.recall * 100)}% dòng ${index + 1} — chưa hết câu`,
+            };
+        }
+    }
+
+    const source = spoken;
     const target = useForward ? row.dst : row.src;
     const language = (useForward ? row.dst_lang : row.src_lang) as ScriptLanguage;
     // The lane only speaks Vietnamese and Japanese. A row translating into anything else is a row this

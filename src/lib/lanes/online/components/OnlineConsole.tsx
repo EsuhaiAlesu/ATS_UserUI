@@ -56,6 +56,21 @@ const ANN: Record<LaneStatus, { label: string; text: string; dot: string; anim: 
   error: { label: 'FAULT · LỖI', text: 'text-error', dot: 'bg-error', anim: '' },
 }
 
+// Tên tiếng Việt của từng loại bằng chứng mà bộ định tuyến chiều dịch dùng (`RouterBasis`). Người ngồi
+// bàn điều khiển không đọc `pause-reset`; họ đọc "nhịp nghỉ".
+const BASIS_VN: Record<string, string> = {
+  source: 'nguồn tiếng', kana: 'chữ kana', script: 'dấu thanh', vendor: 'nhãn máy nghe',
+  'vendor-near': 'nhãn kề bên', projected: 'chiếu tiếng lạ', 'pause-reset': 'nhịp nghỉ',
+  sticky: 'quán tính', locked: 'khoá chương trình',
+}
+/** Xếp theo số lớn trước và bỏ hẳn ô bằng 0 — một dòng chẩn đoán dài mười mục thì không ai đọc. */
+const basisReadout = (b: Record<string, number>): string =>
+  Object.entries(b)
+    .filter(([, n]) => n > 0)
+    .sort((a, c) => c[1] - a[1])
+    .map(([k, n]) => `${BASIS_VN[k] ?? k} ${n}`)
+    .join(' · ')
+
 // A control row for the LEFT rail — this lane's OWN copy (the OFFLINE RailBtn lives in the offline page
 // and must not be shared across lanes). icon + label (+ optional status dot).
 const RailBtn: React.FC<{
@@ -788,6 +803,15 @@ const OnlineConsole: React.FC = () => {
             <div className="px-2 pb-1 font-label-caps text-[10px] text-on-surface-variant/55 tracking-[0.16em]">MÀN KHÁN GIẢ</div>
             <RailBtn icon={lane.twoWay ? 'sync_alt' : 'east'} label="Một mic hai chiều" title="Một micro cho cả VI và JA — máy tự nhận mỗi câu"
               tone={lane.twoWay ? 'active' : 'default'} disabled={lane.running} onClick={() => lane.setTwoWay(!lane.twoWay)} />
+            {/* Đường tiếng thứ hai — chỉ có nghĩa khi đang HAI CHIỀU, nên chỉ hiện ở đó. Ở phiên một
+                chiều thì chiều dịch đã chốt từ lúc Bắt đầu và nút này là nút giả. */}
+            {lane.twoWay && (
+              <RailBtn icon={lane.systemSourceOn ? 'cable' : 'settings_input_hdmi'} label="Đường tiếng thứ hai"
+                title="Nhận thêm tiếng đang phát ra từ chính máy này (Teams/Zoom). Câu vào bằng đường đó là câu của đầu cầu bên kia — chiều dịch lấy theo đường tiếng chứ không đoán theo mặt chữ."
+                tone={lane.systemSourceOn ? 'active' : 'default'} disabled={lane.running}
+                dot={lane.systemSourceOn ? 'bg-secondary' : undefined}
+                onClick={() => { if (lane.systemSourceOn) lane.detachSystemSource(); else void lane.attachSystemSource() }} />
+            )}
             <RailBtn icon="cast" label="Xuất màn khán giả" title="Định tuyến phụ đề ra các màn khán giả"
               tone={panel === 'wall' ? 'active' : 'default'} dot={lane.wallOpenIds.length > 0 ? 'bg-secondary' : undefined}
               onClick={() => setPanel((p) => (p === 'wall' ? null : 'wall'))} />
@@ -1378,6 +1402,35 @@ const OnlineConsole: React.FC = () => {
                   <input type="checkbox" checked={lane.twoWay} onChange={(e) => lane.setTwoWay(e.target.checked)} disabled={lane.running} className="accent-secondary mt-0.5" />
                   <span>Một mic hai chiều<br /><span className="font-normal normal-case text-[11px] leading-relaxed">Máy tự nhận ra câu vừa nói là tiếng Việt hay tiếng Nhật rồi dịch sang tiếng còn lại. Chiều đã chọn ở trên chỉ dùng cho câu đầu tiên.</span></span>
                 </label>
+                {/* CHIỀU THEO NGUỒN TIẾNG. Cách trên là ĐOÁN — máy đọc lại chính cái chữ nó vừa viết ra và
+                    suy ngược lại thứ tiếng. Cách này thì không đoán gì cả: nó hỏi câu vừa rồi vào máy bằng
+                    SỢI DÂY nào. Chỉ dùng được ở cảnh có đầu cầu từ xa (họp Teams/Zoom chiếu lên phòng);
+                    một hội trường chỉ có micro thì cả hai bên đi chung một dây và không có gì để phân biệt. */}
+                {lane.twoWay && (
+                  <div className="rounded-DEFAULT border border-outline-variant bg-surface p-3 space-y-2">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="font-label-caps text-label-caps text-on-surface">Chiều theo nguồn tiếng</span>
+                      <span className={`text-[11px] font-semibold ${lane.systemSourceOn ? 'text-secondary' : 'text-on-surface-variant'}`}>
+                        {lane.systemSourceOn ? 'ĐÃ ĐẤU' : 'chưa đấu'}
+                      </span>
+                    </div>
+                    <p className="text-[11px] leading-relaxed text-on-surface-variant font-normal normal-case">
+                      Nhận thêm tiếng đang phát ra từ chính máy này (Teams/Zoom). Câu nào có tiếng ở đường đó là câu của
+                      đầu cầu bên kia; câu chỉ có ở micro là câu của người trong phòng. Chiều dịch lấy theo đường tiếng,
+                      không phải đoán theo mặt chữ. Lúc trình duyệt hỏi chọn cửa sổ, <b>phải tích ô chia sẻ âm thanh</b> —
+                      không tích thì luồng chỉ có hình và không câu nào được gán.
+                    </p>
+                    <button type="button" disabled={lane.running}
+                      onClick={() => { if (lane.systemSourceOn) lane.detachSystemSource(); else void lane.attachSystemSource() }}
+                      className={`px-3.5 py-1.5 rounded-full text-sm font-bold transition-colors ${lane.systemSourceOn ? 'bg-error text-on-error' : 'bg-secondary text-on-secondary'} ${lane.running ? 'opacity-50 cursor-not-allowed' : 'hover:opacity-90'}`}>
+                      {lane.systemSourceOn ? 'Gỡ đường tiếng thứ hai' : 'Đấu đường tiếng thứ hai'}
+                    </button>
+                    {lane.systemSourceNote && <p className="text-[11px] text-error/90 font-normal normal-case">{lane.systemSourceNote}</p>}
+                    {/* Đồ thị âm thanh dựng một lần lúc mở micro và không sửa lại được sau đó. Nói ra, chứ
+                        không để người vận hành bấm giữa buổi rồi tưởng nó đã ăn. */}
+                    {lane.running && <p className="text-[11px] text-on-surface-variant/80 font-normal normal-case">Phiên đang chạy — đấu hoặc gỡ đường này chỉ có tác dụng từ lần Bắt đầu sau.</p>}
+                  </div>
+                )}
               </section>
 
               <div className="h-px bg-outline-variant"></div>
@@ -1450,7 +1503,40 @@ const OnlineConsole: React.FC = () => {
                     {/* M11 — turn handling. `cắt` near zero during a busy hall means the client-side
                         commit is not firing and the long stalls are back; `bỏ lạ` and `đổi tiếng` are
                         the two-way guards, and both being zero in a bilingual session is also a signal. */}
-                    <div>cắt {diag.manualCommits} · nhả sớm {diag.promotions} câu · bỏ tiếng lạ {diag.foreignDrops} · đổi tiếng {diag.languageTurns}</div>
+                    <div>cắt {diag.manualCommits} · nhả sớm {diag.promotions} câu · cứu tiếng lạ {diag.languageProjections} · đổi tiếng {diag.languageTurns}</div>
+                    {/* Máy nghe đọc lại đoạn đã nhả. Chốt lượt KHÔNG xoá ngữ cảnh của nó, nên lượt sau có
+                        thể mở ra bằng chính những chữ vừa đóng lại rồi mới nói tiếp — bản ghi 06/08 có
+                        7/60 dòng như thế. `bỏ` = không còn gì mới; `cắt đầu` = trừ phần trùng, nhả phần
+                        đuôi. Cả hai bằng 0 là máy nghe không đọc lại, không phải chốt chặn hỏng. */}
+                    {(diag.echoDrops > 0 || diag.echoTrims > 0) && (
+                      <div>máy nghe đọc lại: bỏ {diag.echoDrops} · cắt đầu {diag.echoTrims}</div>
+                    )}
+                    {/* Nhãn tiếng chỉ cưỡi trên bản chốt CÓ MỐC THỜI GIAN, nên câu nhả sớm không bao giờ
+                        có nhãn riêng và phải mượn nhãn của câu kề bên. `mượn` cao cùng lúc `nhả sớm` cao
+                        là bình thường; `mượn` cao mà `nhãn` bằng 0 nghĩa là không có gì để mượn. */}
+                    {diag.carriedTags > 0 && <div>mượn nhãn kề bên {diag.carriedTags} câu</div>}
+                    {/* Trần 25s tới hạn mà KHÔNG chốt được gì — đường cấp cứu không vào được. Số này leo
+                        trong khi hội trường đang có tiếng là dấu hiệu duy nhất nhìn thấy TRƯỚC khi phiên
+                        phải nối lại và mất nguyên đoạn đã nói. Đỏ vì nó không được phép khác 0. */}
+                    {diag.ceilingNoops > 0 && (
+                      <div className="text-error">trần 25s không chốt được {diag.ceilingNoops} lần — sắp phải nối lại</div>
+                    )}
+                    {diag.lastRouterReason ? <div>chiều dịch: {diag.lastRouterReason}</div> : null}
+                    {/* CÁI GÌ đã quyết chiều, đếm theo từng loại. Đây là con số duy nhất trả lời được câu
+                        hỏi "bớt quán tính đi thì tốt hơn hay tệ hơn" bằng số thay vì bằng cảm giác:
+                        `quán tính` cao nghĩa là router đang đi bằng trớn, tức là đang đoán; `nguồn tiếng`
+                        hoặc `nhãn máy nghe` cao nghĩa là mỗi câu đang tự làm chứng cho chính nó. */}
+                    {basisReadout(diag.routerBasis) && <div>chiều dịch nhờ: {basisReadout(diag.routerBasis)}</div>}
+                    {/* Đường tiếng thứ hai. `KHÔNG có tiếng` = luồng chia sẻ màn hình chỉ có hình (quên
+                        tích ô chia sẻ âm thanh) — lúc đó mọi câu đều rơi về cách đoán cũ mà không có gì
+                        báo, nên phải đỏ lên ở đây. `chưa gán được` = có đấu dây nhưng cửa sổ thời gian của
+                        câu đó không đủ tiếng ở đường nào, cũng rơi về cách cũ, và đó là chuyện bình thường. */}
+                    {lane.systemSourceOn && (
+                      diag.systemSourceLive
+                        ? <div>nguồn tiếng: {diag.sourceVerdicts} câu gán được{diag.lastSourceReason ? ` · ${diag.lastSourceReason}` : ''}</div>
+                        : <div className="text-error">đường tiếng thứ hai KHÔNG có tiếng — gỡ ra, đấu lại và tích ô chia sẻ âm thanh</div>
+                    )}
+                    {diag.voiceDirectionHolds > 0 ? <div>giữ giọng đọc {diag.voiceDirectionHolds} câu — sai chiều, tường vẫn hiện</div> : null}
                     {/* Trần 25s KHÔNG còn cắt mù: nó chờ một khe im lặng (~0,22s) rồi mới cắt, vì cắt là
                         cắt TIẾNG, và cắt giữa một từ thì không bản dịch nào chữa lại được. Số ở đây lớn
                         nghĩa là hội trường gần như không bao giờ im — lúc đó số ms mới là thứ đáng nhìn. */}

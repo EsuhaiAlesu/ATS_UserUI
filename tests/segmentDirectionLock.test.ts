@@ -67,12 +67,16 @@ describe('khi khoá bật, ba chỗ từng lật chiều phải đứng im', () 
         expect(fn).toContain('if (!interim) settledDir.set(lid, directionOf(source))')
     })
 
+    // 06/08 — hai khẳng định dưới đây đổi CHỮ chứ không đổi Ý. Việc chốt tiếng của một câu đã xong nay do
+    // `directionRouter` làm (`routedLang`) chứ không do `decideFinalLanguage` (`decided.language`) nữa;
+    // điều phải giữ nguyên — và đó mới là thứ bộ test này canh — là `!lockedSource` vẫn đứng trong cả hai
+    // điều kiện. Mất nó ở một trong hai chỗ là bảng chương trình hết quyền, và câu trích dẫn lại lật chiều.
     it('6 · nhãn tiếng của nhà cung cấp KHÔNG được ghi đè khoá', () => {
-        expect(LANE).toContain("if (twoWay && tracker && !lockedSource && decided.language && decided.basis !== 'none')")
+        expect(LANE).toContain('if (twoWay && tracker && router && !lockedSource && routedLang)')
     })
 
     it('7 · turn split của M11 đứng im — câu trích dẫn không được cắt câu làm đôi', () => {
-        expect(LANE).toContain('if (twoWay && !lockedSource && decided.language && segmentBuffer.trim())')
+        expect(LANE).toContain('if (twoWay && !lockedSource && routedLang && segmentBuffer.trim())')
     })
 })
 

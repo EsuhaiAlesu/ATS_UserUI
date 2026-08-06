@@ -266,6 +266,22 @@ export interface UseOnlineLane {
   // to start at all, silently. Evidence and the way back in: docs/ONLINE-LANE-UI-API.md.
   twoWay: boolean
   setTwoWay: (v: boolean) => void
+  /**
+   * CHIỀU THEO NGUỒN TIẾNG — đường tiếng thứ hai đang đấu hay chưa.
+   *
+   * Đây là cơ chế hai chiều thật của các sản phẩm thương mại, và nó tầm thường tới mức khó tin: chúng
+   * ngồi trên máy của MỘT người, nên "mic của tôi" và "tiếng ra loa máy" là hai sợi dây khác nhau, và
+   * chiều dịch là thuộc tính của sợi dây chứ không phải một phép đoán. Bật lên thì mọi câu vào bằng
+   * đường tiếng máy được gán thẳng cho đầu cầu bên kia — không mô hình, không ngưỡng, không quán tính.
+   *
+   * Chỉ có nghĩa ở phiên HAI CHIỀU, và chỉ ăn từ lần Bắt đầu sau: đồ thị âm thanh không dựng lại được
+   * sau khi micro đã mở.
+   */
+  systemSourceOn: boolean
+  /** Vì sao chưa đấu được (người vận hành quên tích ô chia sẻ tiếng, hoặc trình duyệt từ chối). */
+  systemSourceNote: string
+  attachSystemSource: () => Promise<void>
+  detachSystemSource: () => void
   directedLines: AudienceLine[]
   subtitleFont: number
   setSubtitleFont: (n: number) => void
@@ -338,6 +354,12 @@ export function useOnlineLane(): UseOnlineLane {
   const [twoWay, setTwoWayState] = useState<boolean>(() => { try { return localStorage.getItem('proyaku_online_two_way') === '1' } catch { return false } })
   const [subtitleFont, setSubtitleFontState] = useState<number>(() => { try { return clampSubtitleFont(Number(localStorage.getItem('proyaku_online_subtitle_font')) || SUBTITLE_FONT.default) } catch { return SUBTITLE_FONT.default } })
   const [wallCharCm, setWallCharCmState] = useState<number>(() => { try { return clampCharCm(Number(localStorage.getItem('proyaku_online_wall_char_cm')) || HALL_CHAR_CM.default) } catch { return HALL_CHAR_CM.default } })
+  // Đường tiếng thứ hai. CỐ Ý không nhớ qua lần mở sau: `getDisplayMedia` bắt buộc phải có một cú bấm
+  // của con người mỗi lần, nên một cái cờ nhớ trong localStorage chỉ tạo ra màn hình nói "ĐÃ ĐẤU" trong
+  // khi thật ra không có luồng nào — đúng kiểu dối trá tệ nhất ở đây, vì nó dối về BẰNG CHỨNG MẠNH NHẤT.
+  const systemStreamRef = useRef<MediaStream | null>(null)
+  const [systemSourceOn, setSystemSourceOn] = useState(false)
+  const [systemSourceNote, setSystemSourceNote] = useState('')
   const [wallOutputs, setWallOutputsState] = useState<WallOutput[]>(() => loadWallOutputs())
   const [wallSupport, setWallSupport] = useState<ScreenSupport>('idle')
   const [wallScreens, setWallScreens] = useState<WallScreen[]>([])
@@ -542,6 +564,46 @@ export function useOnlineLane(): UseOnlineLane {
   const setWallCharCm = useCallback((n: number) => { const c = clampCharCm(n); setWallCharCmState(c); try { localStorage.setItem('proyaku_online_wall_char_cm', String(c)) } catch { /* private mode */ } }, [])
   const setWallOutputs = useCallback((o: WallOutput[]) => { setWallOutputsState(o); saveWallOutputs(o) }, [])
 
+  // ── Đường tiếng thứ hai: đấu vào / gỡ ra ──────────────────────────────────────────────────────────
+  const detachSystemSource = useCallback(() => {
+    systemStreamRef.current?.getTracks().forEach((t) => t.stop())
+    systemStreamRef.current = null
+    setSystemSourceOn(false)
+  }, [])
+
+  const attachSystemSource = useCallback(async () => {
+    setSystemSourceNote('')
+    try {
+      // Phải xin KÈM HÌNH. Trình duyệt không cho xin riêng tiếng của máy: `{ audio: true, video: false }`
+      // bị từ chối thẳng. Nên ta xin cả hai rồi chỉ dùng đường tiếng — và CỐ Ý KHÔNG tắt đường hình, vì
+      // tắt nó là cách nhanh nhất để trình duyệt coi như buổi chia sẻ đã kết thúc và giết luôn cả tiếng.
+      // Đổi lại, thanh "Bạn đang chia sẻ màn hình" của trình duyệt vẫn nằm đó suốt buổi — cái đó tốt:
+      // người vận hành nhìn thấy đường thứ hai còn sống, và có sẵn một nút tắt không cần vào phần mềm.
+      const stream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: true })
+      const audio = stream.getAudioTracks()
+      if (!audio.length) {
+        // Cửa sổ chọn màn hình VẪN trả về một luồng hợp lệ khi người ta quên tích ô chia sẻ tiếng. Luồng
+        // đó chỉ có hình. Nhận bừa nó là để cả buổi chạy với một bằng chứng rỗng mà màn hình vẫn báo xanh.
+        stream.getTracks().forEach((t) => t.stop())
+        setSystemSourceNote('Luồng vừa chọn KHÔNG có tiếng. Chọn lại, và nhớ tích ô “Cũng chia sẻ âm thanh hệ thống” (chia sẻ một thẻ trình duyệt thì ô đó tên là “Chia sẻ âm thanh của thẻ”).')
+        return
+      }
+      detachSystemSource() // một đường thôi — đấu cái mới thì cái cũ phải tắt hẳn, không để hai luồng chồng
+      systemStreamRef.current = stream
+      setSystemSourceOn(true)
+      // Người vận hành bấm "Dừng chia sẻ" của chính trình duyệt thì phần mềm phải biết. Không nghe tin
+      // này thì màn hình còn báo "ĐÃ ĐẤU" trong khi đường tiếng đã chết, và mọi câu lặng lẽ bị gán cho mic.
+      audio[0].addEventListener('ended', () => {
+        if (systemStreamRef.current !== stream) return
+        detachSystemSource()
+        setSystemSourceNote('Đường tiếng thứ hai đã ngắt (bấm “Dừng chia sẻ” trên thanh của trình duyệt).')
+      })
+    } catch (err) {
+      // Bấm Huỷ ở cửa sổ chọn màn hình cũng rơi vào đây, và đó không phải lỗi — nên câu chữ phải trung tính.
+      setSystemSourceNote(`Chưa đấu được đường tiếng thứ hai: ${err instanceof Error ? err.message : String(err)}`)
+    }
+  }, [detachSystemSource])
+
   const scanWall = useCallback(async () => {
     const { support, screens } = await detectWallScreens()
     setWallSupport(support)
@@ -598,6 +660,13 @@ export function useOnlineLane(): UseOnlineLane {
         getListenPaused: () => listenPausedRef.current,
         getBrief: () => segmentBriefRef.current,
         getTwoWay: () => twoWayRef.current,
+        // Đường tiếng thứ hai. Đọc MỘT LẦN lúc mở micro (đồ thị âm thanh không dựng lại được), nên đấu
+        // hay gỡ giữa buổi đều chỉ ăn từ lần Bắt đầu sau — màn điều khiển nói thẳng điều đó ra.
+        getSystemStream: () => systemStreamRef.current,
+        // Tiếng nào ở đầu bên kia. Chiều đã chọn nói phòng này nói tiếng gì, nên đầu cầu là tiếng còn
+        // lại: chọn "VI → JA" tức là phòng nói tiếng Việt và bên kia nói tiếng Nhật. Viết ra ở đây chứ
+        // không để lane tự suy, để chỗ nào quyết thì đọc thấy ngay ở chỗ đó.
+        getSystemLanguage: () => (directionRef.current === 'vi2ja' ? 'ja' : 'vi'),
         // TASK 5: LIVE, not latched. The lane calls this on every event, so a rule typed in the middle of
         // a ceremony takes effect on the very next sentence.
         getMishearing: () => mishearingRef.current,
@@ -658,6 +727,11 @@ export function useOnlineLane(): UseOnlineLane {
     return () => {
       mountedRef.current = false
       void laneRef.current?.stop()
+      // Luồng chia sẻ màn hình KHÔNG do lane sở hữu (lane chỉ mượn để đọc), nên `stop()` của lane không
+      // đụng tới nó. Không tắt ở đây là để lại một thanh "đang chia sẻ màn hình" chạy mãi sau khi người
+      // ta đã chuyển sang đường OFFLINE.
+      systemStreamRef.current?.getTracks().forEach((t) => t.stop())
+      systemStreamRef.current = null
       moduleActiveSession = false
     }
   }, [])
@@ -674,7 +748,8 @@ export function useOnlineLane(): UseOnlineLane {
     eventId, setEventId,
     voices, voicesStatus, refreshVoices, voiceJa, setVoiceJa, voiceVi, setVoiceVi,
     speedMode, setSpeedMode, manualSpeed, setManualSpeed,
-    twoWay, setTwoWay, directedLines, subtitleFont, setSubtitleFont, wallCharCm, setWallCharCm,
+    twoWay, setTwoWay, systemSourceOn, systemSourceNote, attachSystemSource, detachSystemSource,
+    directedLines, subtitleFont, setSubtitleFont, wallCharCm, setWallCharCm,
     wallOutputs, setWallOutputs, wallSupport, wallScreens, wallOpenIds, scanWall, openWall, closeWall,
     start, stop, saveSession,
   }

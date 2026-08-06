@@ -47,7 +47,9 @@ describe('ngủ khi nào, thức khi nào', () => {
     it('4 · nhả một dòng kịch bản là ngủ, và nhớ mình ngủ ở dòng nào', () => {
         const at = LANE.indexOf("if (verdict.kind === 'release')")
         expect(at).toBeGreaterThan(-1)
-        const block = LANE.slice(at, at + 1400)
+        // Cửa sổ nới 1400 → 2200 sau khi R5 chèn cổng "hiện tách khỏi đọc" vào giữa khối này. Con số chỉ
+        // là bề rộng đủ để bọc trọn nhánh `release`, không mang ý nghĩa gì khác.
+        const block = LANE.slice(at, at + 2200)
         expect(block).toContain('guidedDeafAtIndex = guided.index')
         expect(block).toContain('guidedDeafSince = Date.now()')
         // Ngủ SAU khi câu đã lên tường và đã vào bản ghi buổi — không được nuốt mất chính câu vừa nhả.

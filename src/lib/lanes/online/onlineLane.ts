@@ -17,6 +17,8 @@ import { planParagraphCut } from './paragraphStream';
 import { ASR_FINAL_MIN_VOICED_MS, ASR_PARTIAL_MIN_VOICED_MS, hasClearSpeechEvidence, isInventedNumber, isNonSpeechAnnotation } from './asrSpeechEvidence';
 import { isStableDraftPrefix, joinLiveDraftSource, stripPromotedPrefix } from './liveDraftTranslation';
 import { decidePromotion, livePromoteStableMs, loadLivePromote, LIVE_PROMOTE_MIN_CHARS } from './livePromote';
+import { ECHO_MEMORY, judgeEcho, rememberEcho } from './echoGuard';
+import { hasNoLetters, isSyllableSoup } from './notLanguage';
 import { DRAFT_RATE_WINDOW_MS, decideCaptureFrame, decideDraftAdmission, getContinuationWaitMs } from './livePipelinePolicy';
 import { createSpeechPauseProfile } from './speechPauseProfile';
 import { createSpeechShapeMonitor } from './speechShape';
@@ -30,6 +32,9 @@ import { enqueueTtsSentence, getTtsQueueLength, resetTtsPlayback, setTtsPlayback
 import { buildSessionExport, saveSessionExport, type SaveOutcome, type SessionLine } from './sessionExport';
 import { createLatencyTracker, type LatencyReport } from './latencyTracker';
 import { classifyInterimUtterance, createDirectionTracker, decideFinalLanguage, directionOf, type DirectionTracker, type Lang } from './utteranceDirection';
+import { createDirectionRouter, type DirectionRouter } from './directionRouter';
+import { createSpeakGate } from './speakGate';
+import { createSourceAttributor } from './sourceAttribution';
 import { fetchAsrSession, createAsrCodec, type AsrCodec } from './asrTransport';
 import { SPEECH_RHYTHM_DEFAULT, loadSpeechRhythm, rhythmCommitWindows, rhythmPauseSecs, rhythmUsesManualCommit, speechRhythmLabel } from './speechRhythm';
 import { refineReasonText } from './refineFailure';
@@ -159,6 +164,21 @@ const STOP_REFINE_WAIT_MS = 2_000;
 const SNAP_TTS_ORDER_WAIT_MS = 1_500;
 const SNAP_TTS_ORDER_POLL_MS = 60;
 
+/**
+ * R5 — how long the VOICE may wait for the router to settle the direction. The subtitle never waits.
+ *
+ * Same shape as SNAP_TTS_ORDER_WAIT_MS above and for the same reason: holding the hall in silence is
+ * itself a failure, so every wait in this file has a ceiling. 1200ms is the top of the budget stated for
+ * the router layer (500-1000ms) plus a little air; past it the voice goes out on the direction the wall
+ * is already showing, because reading aloud what the room is reading is the least surprising thing left.
+ *
+ * Today the router answers synchronously inside `acceptFinalText`, well before any sentence reaches the
+ * speaking stage, so this timer never actually starts. It exists so that making the router slow — the
+ * model-based router, or two pinned sockets that must both finish an utterance before they can be
+ * compared — costs the loudspeaker latency and costs the wall none.
+ */
+const DIRECTION_SETTLE_WAIT_MS = 1_200;
+
 type StartOpts = {
   sourceLanguage: 'vi' | 'ja';
   targetLanguage: 'vi' | 'ja';
@@ -192,6 +212,25 @@ export interface OnlineLaneConfig {
   // The shared LaneController.start() signature (the treaty) carries no device/gate options,
   // so the host page supplies them here; all are read live at the relevant moment.
   getDeviceId?: () => string | undefined;
+  /**
+   * CHIỀU THEO NGUỒN TIẾNG — đường tiếng thứ hai, là tiếng đang phát ra từ chính máy này (Teams/Zoom).
+   *
+   * Đây là cơ chế hai chiều thật của các sản phẩm thương mại, và bóc ra thì rất tầm thường: chúng ngồi
+   * trên máy của MỘT người, nên "mic của tôi" và "tiếng ra loa máy" là hai sợi dây khác nhau, và chiều
+   * dịch là thuộc tính của sợi dây chứ không phải một phép đoán. Không mô hình, không ngưỡng, không quán
+   * tính — xem `sourceAttribution.ts`.
+   *
+   * Phía gọi phải tự xin luồng này bằng `getDisplayMedia({ audio: true })` từ một cú bấm của người dùng,
+   * và tự giữ vòng đời của nó. `null` (mặc định) = không có đường thứ hai, mọi thứ chạy y như trước.
+   *
+   * Đọc MỘT LẦN lúc mở micro, vì đồ thị âm thanh không dựng lại được sau khi đã chạy.
+   */
+  getSystemStream?: () => MediaStream | null | undefined;
+  /**
+   * Tiếng nào nằm ở đường tiếng máy. `null`/không đặt = phía bên kia nói thứ tiếng CÒN LẠI so với chiều
+   * nguồn của phiên — đúng cảnh thường gặp: phòng nói tiếng Việt, đầu cầu Nhật Bản nói tiếng Nhật.
+   */
+  getSystemLanguage?: () => Lang | null | undefined;
   getNearMicGate?: () => boolean;
   // "Độ nhạy micro" — which voice floor the capture worklet treats as speech. Read ONCE at Bắt đầu
   // (it is baked into the worklet's configure message), so the console disables it while running.
@@ -287,6 +326,21 @@ export interface OnlineDiagnostics {
   // a musical number means it is doing exactly its job.
   nonSpeechDrops: number;
   lastNonSpeechReason: string;
+  /**
+   * Máy nghe đọc lại đoạn đã nhả (`echoGuard.ts`). `echoDrops` = câu bỏ hẳn vì không còn gì mới;
+   * `echoTrims` = câu bị cắt mất phần đầu trùng rồi vẫn nhả phần đuôi.
+   *
+   * Hai số này ĐỀU BẰNG 0 nghĩa là máy nghe không đọc lại — không phải là chốt chặn hỏng. Trên bản ghi
+   * 06/08 chúng ra 4 và 3 trên 60 dòng.
+   */
+  echoDrops: number;
+  echoTrims: number;
+  /**
+   * Số câu phải MƯỢN nhãn ÂM của câu kề bên vì tự nó không có (gần như luôn là câu nhả sớm — nhãn chỉ
+   * cưỡi trên bản chốt có mốc thời gian). `carriedTags` cao cùng lúc với `nhả sớm` cao là bình thường;
+   * `carriedTags` cao mà `vendorTags` bằng 0 nghĩa là cả buổi không có nhãn nào để mà mượn.
+   */
+  carriedTags: number;
   latency: LatencyReport;
   lastUsageReportAt: number | null;
   lastSaveAt: number | null;
@@ -317,7 +371,38 @@ export interface OnlineDiagnostics {
   /** Lần trần 25s phải CHỜ một khe im lặng thay vì cắt ngay, và lần chờ lâu nhất. */
   forceGapWaits: number;
   forceGapWaitMaxMs: number;
-  foreignDrops: number; // finals discarded because neither signal called them Vietnamese or Japanese
+  /**
+   * Số lần trần 25s tới hạn mà không chốt được gì. Bằng 0 là đúng. Leo lên trong khi hội trường có tiếng
+   * nghĩa là đường cấp cứu cũng không vào được và phiên sắp phải nối lại — số duy nhất nhìn thấy trước
+   * được cái treo 131 giây của phiên 06/08.
+   */
+  ceilingNoops: number;
+  /**
+   * Sentences the vendor tagged as a THIRD language and the router borrowed onto ours rather than dropped.
+   *
+   * This replaces `foreignDrops`, and the rename is the point: the same event used to DELETE the sentence,
+   * so the number was a count of what the hall never saw. Now the sentence arrives — possibly pointed the
+   * wrong way, which is recoverable and visible — and the counter measures how hard the recogniser is
+   * struggling rather than how much it threw away.
+   */
+  languageProjections: number;
+  /** R5 — sentences shown but held back from the loudspeaker because the router settled the other way. */
+  voiceDirectionHolds: number;
+  /** The router's own words for the most recent direction verdict — the diagnostics readout. */
+  lastRouterReason: string;
+  /** Đường tiếng thứ hai có track tiếng thật và đang được trộn vào. */
+  systemSourceLive: boolean;
+  /** Số câu mà chiều được quyết bởi CỔNG chứ không phải bởi phỏng đoán. */
+  sourceVerdicts: number;
+  /** Câu gần nhất vào bằng cổng nào, kèm số mili-giây đo được từng đường. */
+  lastSourceReason: string;
+  /**
+   * Cái gì đã quyết chiều, đếm theo loại, cả phiên.
+   *
+   * Đây là bảng để trả lời "bớt quán tính đi thì tốt hơn hay tệ hơn" bằng SỐ. `source` cao = đang đi bằng
+   * sợi dây; `vendor` cao = đang đi bằng nhãn âm; `sticky` cao = đang đi bằng quán tính, tức là đang đoán.
+   */
+  routerBasis: Record<string, number>;
   languageTurns: number; // buffers closed because the other language started speaking
   vendorTags: number; // finals that arrived carrying the recogniser's own language verdict
   asrLanguages: string | null; // what the recogniser AGREED to listen for; null = free auto-detect
@@ -383,6 +468,50 @@ export function createOnlineLane(events: LaneEvents, config: OnlineLaneConfig = 
   // direction keep an utterance from ever changing direction after it finalises.
   let twoWay = false;
   let tracker: DirectionTracker | null = null;
+  /**
+   * 06/08 — the router that now settles the direction of every FINALISED sentence (directionRouter.ts).
+   *
+   * It replaces two things that used to sit inline here. The first was `decideFinalLanguage`'s precedence,
+   * where kana beat everything instantly and with no inertia, so getting INTO Japanese took one stray
+   * character while getting OUT needed evidence that a recogniser sitting in Japanese context does not
+   * produce — a one-way ratchet the hall experienced as "it is stuck in Japanese". The second was the
+   * `foreign` gate below it, which DISCARDED a sentence when the vendor named a third language and the
+   * text carried no tone marks; the ceremony logs are full of Vietnamese speech tagged Chinese, Russian and
+   * Italian, and every one of those sentences never reached the wall at all.
+   *
+   * `tracker` is kept, but demoted: it now only guesses at the direction of DRAFTS (dirLangs, interim), and
+   * every final realigns it to whatever the router settled. Two objects, one authority.
+   */
+  let router: DirectionRouter | null = null;
+  /**
+   * When the previous accepted final landed — the only input the router cannot measure for itself.
+   *
+   * A pause is a handover, so this number is what lets "somebody stopped, somebody else started" be
+   * detected at all. 0 means no sentence yet this session: the first one is given gap 0 (nothing to hand
+   * over FROM), not an infinite gap, which would fire a handover on the very first sentence.
+   */
+  let lastAcceptedFinalAt = 0;
+  /**
+   * CHIỀU THEO NGUỒN TIẾNG — câu vừa chốt vào máy bằng cổng nào. Xem `sourceAttribution.ts`.
+   *
+   * Chỉ sống khi người vận hành có đấu đường tiếng thứ hai. Không đấu thì mọi câu đều không gán được và
+   * router chạy y hệt như trước, không rẽ nhánh nào.
+   */
+  const sourceAttributor = createSourceAttributor();
+  /** Đường tiếng máy có thật sự được nối không — để màn điều khiển nói thật, không nói theo ý định. */
+  let systemSourceLive = false;
+  let sourceVerdicts = 0;
+  let lastSourceReason = '';
+  /**
+   * R5 — the seam between SHOWING a sentence and SPEAKING it. See speakGate.ts.
+   *
+   * The subtitle goes out on the direction available at flush time and never waits for anybody. The voice
+   * asks this gate first, and if the router has settled on a different direction than the one the sentence
+   * was TRANSLATED in, the voice stays shut: that translation was made backwards, so speaking it is not a
+   * wrong accent on a right sentence, it is a wrong sentence. The wall keeps it, because a wrong subtitle
+   * is something the room can see and the operator can fix.
+   */
+  const speakGate = createSpeakGate();
   const settledDir = new Map<string, 'vi2ja' | 'ja2vi'>();
   /**
    * TASK 55 — the running order says who is at the microphone, so it also says which language.
@@ -449,7 +578,35 @@ export function createOnlineLane(events: LaneEvents, config: OnlineLaneConfig = 
 
   // M4 ghost-guard state
   const voicedWindow: { at: number; voicedMs: number }[] = [];
-  let previousFinalTranscript = '';
+  /**
+   * Mấy câu VỪA NHẢ, để bắt máy nghe đọc lại đoạn cũ (`echoGuard.ts`).
+   *
+   * KHÁC `recentFinals` bên dưới, và cố ý không dùng chung: `recentFinals` giữ đầu ĐOẠN lúc gom xong, làm
+   * ngữ cảnh cho bản dịch tinh; cái này giữ từng CÂU lúc vừa nhận, đúng thứ máy nghe có thể đọc lại. Gộp
+   * hai thứ lại là để chốt chặn nhìn nhầm hạt.
+   */
+  let echoMemory: string[] = [];
+  let echoDrops = 0;  // câu bị bỏ hẳn vì đã nhả rồi
+  let echoTrims = 0;  // câu bị cắt mất phần đầu vì phần đầu đã nhả rồi
+  /**
+   * Nhãn ÂM gần nhất máy nghe gắn được, và lúc nó về.
+   *
+   * Nhãn chỉ cưỡi trên bản chốt CÓ MỐC THỜI GIAN. Câu "nhả sớm" cắt ra từ dòng partial nên không bao giờ
+   * có nhãn của riêng nó — đo trên phiên 06/08: 39/52 câu là nhả sớm và cả 39 đi tới bộ định tuyến với
+   * tay không. Giữ lại nhãn gần nhất để chuyền sang cho chúng, như một bằng chứng YẾU.
+   */
+  let lastVendorTag = '';
+  let lastVendorTagAt = 0;
+  let carriedTags = 0;
+  /** Nhãn cũ hơn chừng này thì thôi: nó nói về người cầm micro, và người cầm micro thì đổi. */
+  const VENDOR_TAG_CARRY_MS = 8_000;
+  const noteVendorTag = (tag: string | undefined, at: number): void => {
+    if (!tag) return;
+    lastVendorTag = tag;
+    lastVendorTagAt = at;
+  };
+  const carriedVendorTag = (at: number): string | undefined =>
+    (lastVendorTag && at - lastVendorTagAt <= VENDOR_TAG_CARRY_MS ? lastVendorTag : undefined);
   let droppedGhosts = 0;
   const droppedByReason: Record<string, number> = {};
   // NHẢ CÂU SỚM. `promotedPrefix` là đoạn ĐẦU của lượt đang mở mà ta đã nhả đi rồi — nó vẫn nằm nguyên
@@ -463,6 +620,8 @@ export function createOnlineLane(events: LaneEvents, config: OnlineLaneConfig = 
   // chờ thật hay không — chờ lâu bất thường nghĩa là hội trường không bao giờ im, và ta muốn thấy điều đó.
   let forceGapWaits = 0;
   let forceGapWaitMaxMs = 0;
+  /** Số lần trần 25s tới hạn mà KHÔNG chốt được gì cả. Xem `sendManualCommit`. */
+  let ceilingNoops = 0;
 
   const recentFinals: string[] = [];
 
@@ -503,7 +662,14 @@ export function createOnlineLane(events: LaneEvents, config: OnlineLaneConfig = 
   let scribeCommitTimer: ReturnType<typeof setTimeout> | null = null;
   let scribeForceCommitTimer: ReturnType<typeof setTimeout> | null = null;
   let manualCommits = 0;
-  let foreignDrops = 0;
+  let languageProjections = 0;
+  /**
+   * R5 — sentences shown on the wall but NEVER SPOKEN, because by the time the voice was ready the router
+   * had settled on the other direction. A number worth watching: it climbing means the pipeline is
+   * translating sentences backwards and only the gate is stopping the hall from hearing them.
+   */
+  let voiceDirectionHolds = 0;
+  let lastRouterReason = '';
   let languageTurns = 0;
   let vendorTags = 0;
   let asrLanguages: string | null = null;
@@ -888,9 +1054,14 @@ export function createOnlineLane(events: LaneEvents, config: OnlineLaneConfig = 
             pcm = new ArrayBuffer(packet.pcm.byteLength);
             voicedMs = 0;
           }
-          voicedWindow.push({ at: Date.now(), voicedMs });
+          const packetAt = Date.now();
+          voicedWindow.push({ at: packetAt, voicedMs });
           pruneVoiced();
           notePausePace(voicedMs);
+          // Ghi năng lượng RIÊNG từng đường, ngay tại đây. Gói bị câm (cổng nửa song công / Ngưng nghe)
+          // đã có `voicedMs = 0` ở trên, nhưng hai con số dưới đây lấy từ CHÍNH gói gốc — chủ ý: một câu
+          // bị câm nửa chừng vẫn phải gán đúng cho người đã nói nó.
+          sourceAttributor.observe(packetAt, packet.micVoicedMs, packet.sysVoicedMs);
           // Only send audio while the WS is OPEN and the upstream session is ready. Audio produced while
           // not OPEN is discarded here — no unbounded buffering. Direct transport → JSON frame via codec;
           // proxy → raw binary as before (11.2).
@@ -936,7 +1107,11 @@ export function createOnlineLane(events: LaneEvents, config: OnlineLaneConfig = 
           recentLevels.push({ at: now, v });
           if (v >= loudThreshold) lastLoudAt = now;
         },
-        { nearMicGate: config.getNearMicGate?.() ?? true, micSensitivity: config.getMicSensitivity?.() ?? 'auto' },
+        {
+          nearMicGate: config.getNearMicGate?.() ?? true,
+          micSensitivity: config.getMicSensitivity?.() ?? 'auto',
+          systemStream: config.getSystemStream?.() ?? null,
+        },
       );
       // stop()/restart may have fired, or a duplicate capture may have won, while the mic-permission
       // prompt was open — never leave a hot mic, a stale-session mic, or a second mic.
@@ -945,6 +1120,11 @@ export function createOnlineLane(events: LaneEvents, config: OnlineLaneConfig = 
         return;
       }
       capture = handle;
+      // Nói THẬT về việc đường thứ hai có sống không. `getDisplayMedia` vẫn trả về luồng hợp lệ khi người
+      // vận hành quên tích "chia sẻ âm thanh hệ thống" — luồng đó chỉ có hình, và nếu màn điều khiển báo
+      // "đang chạy theo nguồn" trong khi thật ra không có tiếng nào vào, thì mọi câu lặng lẽ bị gán cho
+      // mic và không ai biết vì sao chiều vẫn sai.
+      systemSourceLive = (config.getSystemStream?.()?.getAudioTracks().length ?? 0) > 0;
     } catch (err) {
       const m = `microphone error: ${err instanceof Error ? err.message : String(err)}`;
       teardown();
@@ -1133,11 +1313,30 @@ export function createOnlineLane(events: LaneEvents, config: OnlineLaneConfig = 
     }
   }
 
-  /** Ask upstream to close the current turn now. Returns false when there is nothing to close. */
-  function sendManualCommit(reason: ScribeManualCommitReason): boolean {
-    if (scribeCommitPending) return false;
+  /**
+   * Ask upstream to close the current turn now. Returns false when there is nothing to close.
+   *
+   * `atCeiling` là đường CẤP CỨU, và nó cố ý bỏ qua hai điều kiện mà đường thường phải có:
+   *
+   *   · `scribeCommitPending` — một lệnh chốt đã gửi mà mãi không thấy trả lời KHÔNG phải lý do để im
+   *     lặng thêm, nó chính là dấu hiệu nghẽn.
+   *   · `scribeLastPartial` — và đây mới là chỗ hỏng thật. Biến này chỉ được ghi trong `scheduleStableCommit`
+   *     (tức là phải CÓ partial về mới có), và bị xoá trắng ở mỗi lần chốt lượt. Nên đúng lúc máy nghe câm
+   *     — không partial nào về, tức là đúng lúc cần cấp cứu nhất — thì `sendManualCommit` bỏ cuộc ngay ở
+   *     dòng này, `armForceCommit` hẹn lại trọn 25 giây nữa, và vòng đó lặp vô hạn. Lưới còn lại duy nhất
+   *     là watchdog 35s, mà nó chữa bằng cách nối lại socket và tiếng đang bay thì mất.
+   *
+   *     Đo được trên phiên 06/08: ba lần đổi tiếng cho ra ba khoảng câm 6,2s → 24,3s → 131s, lần cuối là
+   *     treo hẳn rồi nối lại và mất nguyên đoạn đã nói.
+   *
+   * Đổi lại, cấp cứu vẫn phải có bằng chứng là CÓ TIẾNG để mà chốt — nếu không thì một căn phòng im lặng
+   * sẽ bị bắn lệnh chốt 25 giây một lần suốt buổi. Bằng chứng đó là micro, không phải dòng chữ trả về.
+   */
+  function sendManualCommit(reason: ScribeManualCommitReason, atCeiling = false): boolean {
+    if (scribeCommitPending && !atCeiling) return false;
     if (!codec || !ws || ws.readyState !== WebSocket.OPEN || !sessionReady) return false;
-    if (!scribeLastPartial.trim()) return false;
+    const soundSinceCommit = lastLoudAt > 0 && lastLoudAt >= scribeLastCommitAt;
+    if (!scribeLastPartial.trim() && !(atCeiling && soundSinceCommit)) return false;
     try {
       ws.send(codec.encodeCommit());
     } catch {
@@ -1175,7 +1374,13 @@ export function createOnlineLane(events: LaneEvents, config: OnlineLaneConfig = 
         if (plan.waitedMs > forceGapWaitMaxMs) forceGapWaitMaxMs = plan.waitedMs;
       }
       // `sendManualCommit` re-arms on success; only the "nothing to commit" path has to restart the clock.
-      if (!sendManualCommit('max-duration')) {
+      //
+      // `atCeiling` = true: đây là đường cấp cứu. Trước đây chỗ này gọi đường thường, và đường thường bỏ
+      // cuộc ngay khi không có partial — tức là vô hiệu đúng lúc máy nghe câm, đúng lúc cần nó nhất.
+      if (!sendManualCommit('max-duration', true)) {
+        // Thật sự không có gì để chốt (phòng im, chưa ai nói từ lần chốt trước). Đếm riêng: số này leo
+        // trong khi người ta ĐANG NÓI nghĩa là cấp cứu cũng không vào được, và lúc đó chỉ còn nối lại.
+        ceilingNoops += 1;
         scribeLastCommitAt = Date.now();
         armForceCommit();
       }
@@ -1351,6 +1556,15 @@ export function createOnlineLane(events: LaneEvents, config: OnlineLaneConfig = 
     // Vẫn là TOÀN BỘ đoạn máy nghe đang giữ, kể cả phần ta đã nhả sớm: bộ đếm nhịp chốt lượt đang đo việc
     // của MÁY NGHE, không phải việc của màn hình.
     const base = (text + stash).trim();
+    // Máy nghe thỉnh thoảng gắn nhãn ngay trên dòng partial. Nhặt lấy: đây là nhãn TƯƠI NHẤT có thể có,
+    // và câu nhả sớm ngay sau đó sẽ cần nó (xem `carriedVendorTag`).
+    //
+    // Trừ khi đang là cháo âm tiết. Lúc máy nghe phiên âm một thứ tiếng nó không nhận ra, nhãn nó gắn kèm
+    // là nhãn của cái ngôn ngữ nó ĐANG KẸT chứ không phải của người đang nói — mà đó đúng là lúc câu kế
+    // tiếp cần mượn nhãn nhất. Rác không được bỏ phiếu, ở mọi đường vào (`notLanguage.ts`).
+    if (!isSyllableSoup(base)) {
+      noteVendorTag(typeof msg.detectedLanguage === 'string' ? msg.detectedLanguage : undefined, Date.now());
+    }
     scheduleStableCommit(base);
     if (!segmentLid) segmentLid = `online-${++counter}`;
     latency.markFirstPartial(segmentLid, performance.now());
@@ -1361,6 +1575,14 @@ export function createOnlineLane(events: LaneEvents, config: OnlineLaneConfig = 
     const shown = stripPromotedPrefix(base, promotedPrefix);
     const live = shown.coveredByPromoted ? '' : shown.text;
     if (!live) return; // cả đoạn đang nghe đã nhả đi rồi — không còn gì mờ để vẽ
+    // Cháo âm tiết cũng không được lên tường ở dạng chữ MỜ. Dòng mờ là thứ dễ thấy nhất trong phòng — nó
+    // to, nó động, và mắt người bám vào cái đang chuyển động. Chốt chặn ở `acceptFinalText` chặn được câu
+    // CHỐT, nhưng dòng mờ đi thẳng ra `emitLine` nên phải chặn riêng ở đây.
+    //
+    // Dừng vẽ, chứ không xoá: tường giữ nguyên dòng mờ cuối cùng còn đọc được. Và không gọi `scheduleDraft`
+    // nữa — không tiêu một lượt dịch cho rác. Bắt nhầm là chuyện không xảy ra được: dòng thật nhiều gạch
+    // nhất trong cả kho log là 5 nhóm, ngưỡng là 8.
+    if (isSyllableSoup(live)) return;
     currentInterimSource = joinSeg(stripProvisionalSentenceEnd(segmentBuffer, live, SEGMENT_MIN_CHARS), live);
     emitLine({ lid: segmentLid, sourceText: currentInterimSource, targetText: lastInterimTarget, interim: true, corrected: false });
     scheduleDraft();
@@ -1399,15 +1621,15 @@ export function createOnlineLane(events: LaneEvents, config: OnlineLaneConfig = 
    * một câu chốt bình thường đi qua, nếu không thì bật cơ chế nhả sớm lên là lặng lẽ tắt hết các lớp bảo
    * vệ đã dựng suốt sáu tháng.
    */
-  function acceptFinalText(transcript: string, detectedLanguage: string | undefined): void {
+  function acceptFinalText(incoming: string, detectedLanguage: string | undefined): void {
     const msg: Record<string, unknown> = detectedLanguage ? { detectedLanguage } : {};
     // M4 ghost guards (drop finals, count them).
     if (!hasClearSpeechEvidence(pruneVoiced(), ASR_FINAL_MIN_VOICED_MS)) {
-      dropGhost('low-voiced', transcript);
+      dropGhost('low-voiced', incoming);
       return;
     }
     if (Date.now() - lastLoudAt >= ghostWindowMs()) {
-      dropGhost('long-silence', transcript);
+      dropGhost('long-silence', incoming);
       return;
     }
     // M13: the guards above ask "was there sound?", and during a musical number the answer is yes, which
@@ -1418,13 +1640,26 @@ export function createOnlineLane(events: LaneEvents, config: OnlineLaneConfig = 
     if (!shape.speechLike) {
       nonSpeechDrops += 1;
       lastNonSpeechReason = shape.reason;
-      dropGhost(`non-speech sound · ${shape.reason}`, transcript);
+      dropGhost(`non-speech sound · ${shape.reason}`, incoming);
       return;
     }
-    if (transcript.length >= REPEAT_GUARD_MIN_CHARS && transcript === previousFinalTranscript) {
-      dropGhost('repeat', transcript);
+    // MÁY NGHE ĐỌC LẠI ĐOẠN VỪA RỒI. Chốt lượt không xoá ngữ cảnh của nó, nên lượt sau có thể mở ra bằng
+    // chính những chữ vừa đóng lại rồi mới nói tiếp — bản ghi 06/08 có 7/60 dòng như thế (12%).
+    //
+    // Chốt chặn cũ ở đúng chỗ này chỉ nhớ MỘT câu ngay trước, và chỉ so BẰNG NHAU tuyệt đối. Sáu trong
+    // bảy ca nằm cách 2–3 dòng nên ngoài tầm với, còn ca cách 1 dòng cũng lọt vì bản mới DÀI HƠN bản cũ.
+    // Nay nhớ nhiều câu và so theo BAO HÀM — xem `echoGuard.ts` cho luật an toàn.
+    const echo = judgeEcho(incoming, echoMemory, REPEAT_GUARD_MIN_CHARS);
+    if (echo.kind === 'repeat') {
+      echoDrops += 1;
+      dropGhost('repeat', incoming);
       return;
     }
+    if (echo.kind === 'trimmed') echoTrims += 1;
+    // Từ đây trở xuống là chữ THẬT SỰ MỚI của câu này. Mọi chốt chặn còn lại, bộ khớp kịch bản, bản dịch
+    // và dòng lưu lại đều phải nhìn cùng một chuỗi — trừ ở đây rồi mới đi tiếp là cách duy nhất bảo đảm.
+    const transcript = echo.text;
+    if (!transcript) return;
     // M11: the transcriber's own "I could not hear that" marker is not something anybody said.
     if (isNonSpeechAnnotation(transcript)) {
       dropGhost('non-speech annotation', transcript);
@@ -1440,25 +1675,84 @@ export function createOnlineLane(events: LaneEvents, config: OnlineLaneConfig = 
       dropGhost('invented number', transcript);
       return;
     }
-    previousFinalTranscript = transcript;
+    // 06/08 — hai chốt chặn cuối cùng của loạt này, cả hai đo từ phiên 14:47. Xem `notLanguage.ts`.
+    //
+    // Đứng ĐÚNG CHỖ NÀY chứ không sớm hơn, vì hai lý do: chúng đọc `transcript` (đã trừ phần nhả sớm và
+    // phần máy nghe đọc lại) nên thấy đúng cái sẽ lên tường — mảnh `"` cô độc chỉ LỘ RA sau khi trừ; và
+    // chúng nằm TRƯỚC `rememberEcho`/`noteVendorTag` bên dưới, nên rác không vào bộ nhớ chống-đọc-lại và
+    // không được bỏ phiếu cho chiều dịch.
+    if (hasNoLetters(transcript)) {
+      nonSpeechDrops += 1;
+      lastNonSpeechReason = 'không có chữ nào';
+      dropGhost('no letters', transcript);
+      return;
+    }
+    if (isSyllableSoup(transcript)) {
+      nonSpeechDrops += 1;
+      lastNonSpeechReason = 'cháo âm tiết';
+      dropGhost('syllable soup', transcript);
+      return;
+    }
+    echoMemory = rememberEcho(echoMemory, transcript, ECHO_MEMORY);
 
     // M11: what language was this, really? The vendor tags every completed transcript (the session is
     // opened with include_language_detection) and until now nothing read it.
     const vendorLanguage = typeof msg.detectedLanguage === 'string' ? msg.detectedLanguage : undefined;
     if (vendorLanguage) vendorTags += 1;
-    const decided = decideFinalLanguage(transcript, vendorLanguage);
-    if (decided.foreign) {
-      // Neither our two languages by EITHER signal. In the ceremony logs this was Chinese and Italian
-      // transcripts of Vietnamese speech, and the vendor's own "（聞き取り不能）" marker — all of which were
-      // faithfully translated and read aloud to the hall. Better a missing sentence than a fictional one.
-      foreignDrops += 1;
-      dropGhost('foreign-language', transcript);
-      return;
+    noteVendorTag(vendorLanguage, Date.now());
+    // 06/08 — THE ROUTER decides, and the `foreign` gate that used to stand here is GONE.
+    //
+    // That gate discarded a sentence whenever the vendor named a third language and the text carried no
+    // Vietnamese tone marks. The intent was sound (better a missing sentence than a fictional one), but
+    // the ceremony logs show what it actually did: Vietnamese speech tagged Chinese, Russian and Italian,
+    // deleted, silently, mid-ceremony. From the hall that is not "it hasn't recognised me" — it is a
+    // silence with no end in sight, and the operator has nothing to react to because `dropGhost` only
+    // writes console.debug. The router BORROWS instead: a third language is read as the non-base direction
+    // for that one sentence and never latched (directionRouter.ts, rule 1).
+    //
+    // Nothing is reopened by removing it. The vendor's own "（聞き取り不能）", "(inaudible)", "[音楽]" and "♪"
+    // markers — the other half of what this gate used to catch — are caught above by isNonSpeechAnnotation.
+    const finalAt = Date.now();
+    // First sentence of the session hands over from nobody, so gap 0 rather than "the whole session".
+    const gapMs = lastAcceptedFinalAt ? finalAt - lastAcceptedFinalAt : 0;
+    // CHIỀU THEO NGUỒN TIẾNG. Hỏi cửa sổ thời gian của ĐÚNG câu này — từ câu chốt trước tới bây giờ —
+    // xem tiếng vào máy bằng cổng nào. Đây là bằng chứng duy nhất trong cả đường ống không phải một phép
+    // đo: không thứ gì trong phòng làm cho máy tính tự phát ra tiếng.
+    //
+    // Chỉ chạy khi đường thứ hai SỐNG THẬT. Không đấu thì `verdictFor` luôn thấy `sysVoicedMs = 0`, mọi
+    // câu gán về mic, và gán tất cả về một phía thì chẳng khác gì không có tín hiệu — tệ hơn thế, nó sẽ
+    // ghim cứng chiều của cả buổi. Nên cửa `systemSourceLive` phải đứng ngoài cùng.
+    const sourceVerdict = systemSourceLive && twoWay
+        ? sourceAttributor.verdictFor(lastAcceptedFinalAt, finalAt)
+        : null;
+    const systemLang: Lang = config.getSystemLanguage?.()
+        ?? (opts?.sourceLanguage === 'ja' ? 'vi' : 'ja');
+    const sourceLang: Lang | undefined = sourceVerdict
+        ? (sourceVerdict.source === 'system' ? systemLang : (systemLang === 'ja' ? 'vi' : 'ja'))
+        : undefined;
+    if (sourceLang) {
+        sourceVerdicts += 1;
+        lastSourceReason = `${sourceVerdict!.source === 'system' ? 'tiếng máy' : 'micro'}`
+            + ` (mic ${Math.round(sourceVerdict!.micVoicedMs)}ms · máy ${Math.round(sourceVerdict!.sysVoicedMs)}ms`
+            + `${sourceVerdict!.overlapped ? ' · chồng tiếng' : ''})`;
     }
+    lastAcceptedFinalAt = finalAt;
+    // One-way listening does not route: the socket itself is opened pinned to the operator's language
+    // (`language: twoWay ? 'auto' : opts.sourceLanguage`), so there is no direction to decide and no third
+    // language the recogniser could return.
+    // Câu KHÔNG có nhãn của riêng nó thì mượn nhãn ÂM gần nhất — gần như luôn là câu nhả sớm, vì nhãn chỉ
+    // cưỡi trên bản chốt có mốc thời gian. Chỉ mượn khi nhãn còn tươi; hết tươi thì thà không có gì còn
+    // hơn có một cái nhãn nói về người đã rời micro từ lâu.
+    const vendorCarriedRaw = vendorLanguage ? undefined : carriedVendorTag(finalAt);
+    if (vendorCarriedRaw) carriedTags += 1;
+    const routed = twoWay && router ? router.next({ text: transcript, vendorRaw: vendorLanguage, vendorCarriedRaw, gapMs, sourceLang }) : null;
+    if (routed?.projected) languageProjections += 1;
+    lastRouterReason = routed?.reason ?? '';
+    const routedLang: Lang | null = routed ? routed.language : (opts?.sourceLanguage ?? null);
 
     // M13: the recogniser has just named the language that was at the microphone. Point the pause profile
     // at that speaker's bucket, so the next turn is measured against pauses taken in the same language.
-    if (decided.language) pauseKey = decided.language;
+    if (routedLang) pauseKey = routedLang;
 
     // M11: one microphone, two languages. A final in the OTHER language must not be glued onto the
     // buffer: the whole buffer settles its direction ONCE, so "Xin chào quý vị" + "皆様こんにちは" becomes a
@@ -1469,9 +1763,9 @@ export function createOnlineLane(events: LaneEvents, config: OnlineLaneConfig = 
     // TASK 55: while the direction is locked there IS no other language — a Vietnamese phrase inside a
     // Japanese turn is a quotation and belongs in the same sentence, so the turn split stands down. The
     // real handover is the operator pressing the next segment, and that flushes the buffer explicitly.
-    if (twoWay && !lockedSource && decided.language && segmentBuffer.trim()) {
+    if (twoWay && !lockedSource && routedLang && segmentBuffer.trim()) {
       const held = decideFinalLanguage(segmentBuffer).language;
-      if (held && held !== decided.language) {
+      if (held && held !== routedLang) {
         languageTurns += 1;
         flushSegment('turn-end');
       }
@@ -1490,10 +1784,21 @@ export function createOnlineLane(events: LaneEvents, config: OnlineLaneConfig = 
     // (an "OK", a number) inherits the language actually being spoken.
     // TASK 55: a lock outranks the vendor's tag. The recogniser is right about what it HEARD; it is not
     // right about who is speaking, and a quoted phrase would otherwise settle the whole turn the wrong way.
-    if (twoWay && tracker && !lockedSource && decided.language && decided.basis !== 'none') {
-      settledDir.set(segmentLid, directionOf(decided.language));
-      tracker.reset(decided.language);
+    // 06/08: the `basis !== 'none'` condition that used to guard this is gone with the router. The old
+    // decision could genuinely have nothing to say ("OK", a number, toneless Latin) and then dirLangs had
+    // to guess from the script at flush time; the router always answers, and its answer — inertia, the
+    // handover pause, the running order's lock — is strictly better informed than that guess ever was.
+    if (twoWay && tracker && router && !lockedSource && routedLang) {
+      settledDir.set(segmentLid, directionOf(routedLang));
+      // The tracker mirrors the router's RUNNING direction, not this sentence's. The two differ on a
+      // projected sentence: a third-language tag is borrowed for one line only and must not be allowed to
+      // become the direction of the turn — that would build a second ratchet beside the one just removed.
+      tracker.reset(router.current());
     }
+    // R5: the arbiter has spoken for this sentence — release anything holding the loudspeaker for it.
+    // Placed here rather than at flush time on purpose: this is the moment the DECISION exists, and the
+    // whole point of the gate is that the decision and the display no longer have to happen together.
+    if (routedLang) speakGate.settle(segmentLid, routedLang);
     currentInterimSource = segmentBuffer;
     emitLine({ lid: segmentLid, sourceText: segmentBuffer, targetText: lastInterimTarget, interim: true, corrected: false });
 
@@ -1689,7 +1994,13 @@ export function createOnlineLane(events: LaneEvents, config: OnlineLaneConfig = 
         emitLine({ lid, sourceText: head, targetText: verdict.target, interim: false, corrected: true });
         latency.markRefineShown(lid, performance.now());
         recordSessionLine(lid, finalizedAt, head, verdict.target, true);
-        if (config.getSpeakEnabled?.()) void speakSnap(verdict.target, verdict.language, lid, order);
+        // R5: a HUMAN pointed at this line. That outranks the router, which is reading text off a machine
+        // that was listening to a ballroom — so the gate is settled here rather than waited on, and the
+        // voice goes out without asking. `verdict.language` is what to speak, so the source is the other.
+        const guidedSource: Lang = verdict.language === 'vi' ? 'ja' : 'vi';
+        speakGate.show(lid, guidedSource);
+        speakGate.settle(lid, guidedSource);
+        if (config.getSpeakEnabled?.()) void speakSnap(verdict.target, verdict.language, guidedSource, lid, order);
         // TASK 56: dòng đã lên tường, giờ tới lượt MC bên kia đọc bản dịch. Ngủ tới khi được bấm dòng sau.
         guidedDeafAtIndex = guided.index;
         guidedDeafSince = Date.now();
@@ -1737,6 +2048,13 @@ export function createOnlineLane(events: LaneEvents, config: OnlineLaneConfig = 
     const target = result.scriptTarget.trim();
     if (!target) return false;
     if (flipped) scriptFlips += 1;
+    // R5: the direction this line was actually BUILT in — `heardLanguage`, not `dl.source`, because when
+    // the script overruled the recogniser those two differ and the script is the one that won.
+    speakGate.show(lid, heardLanguage);
+    // And when it overruled, it also ANSWERS the router's question: a human approved that pair hours ago
+    // (TASK 32). Settling here stops the gate from reading a deliberate, better-evidenced flip as the
+    // router disagreeing and silencing a line that is correct.
+    if (flipped) speakGate.settle(lid, heardLanguage);
 
     scriptMatcher.accept(result); // the script cursor advances only on a line actually used
     scriptSnaps += 1;
@@ -1745,7 +2063,7 @@ export function createOnlineLane(events: LaneEvents, config: OnlineLaneConfig = 
     recordSessionLine(lid, finalizedAt, head, target, true); // answered by the approved script, word for word
     // `speakLanguage`, not `dl.target`: when the script overruled the recogniser, `dl.target` names the
     // language this line is NOT in, and the voice would read approved Japanese with a Vietnamese voice.
-    if (config.getSpeakEnabled?.()) void speakSnap(target, speakLanguage, lid, order);
+    if (config.getSpeakEnabled?.()) void speakSnap(target, speakLanguage, heardLanguage, lid, order);
     // eslint-disable-next-line no-console
     console.info(`[onlineLane][script] snap lid=${lid} score=${result.score} line=${result.index + 1}/${scriptRows}`);
     return true;
@@ -1753,8 +2071,15 @@ export function createOnlineLane(events: LaneEvents, config: OnlineLaneConfig = 
 
   // Hold a snap's VOICE — never its subtitle — until every sentence spoken before it has left refine,
   // so the hall hears the sentences in the order they were said. Bounded: see SNAP_TTS_ORDER_WAIT_MS.
-  async function speakSnap(text: string, language: Lang, lid: string, order: number): Promise<void> {
+  async function speakSnap(text: string, language: Lang, source: Lang, lid: string, order: number): Promise<void> {
     const gen = sessionGen;
+    // R5 — the direction gate comes FIRST, before the ordering wait. Two waits, two different questions:
+    // this one asks "is this sentence pointed the right way", the one below asks "is it this sentence's
+    // turn to be heard". Asking them in this order means a sentence that is never going to be spoken does
+    // not spend a second and a half holding up the queue behind it.
+    const settled = await speakGate.wait(lid, DIRECTION_SETTLE_WAIT_MS, source);
+    if (gen !== sessionGen) return;
+    if (settled.changed) { voiceDirectionHolds += 1; speakGate.forget(lid); return; }
     const deadline = Date.now() + SNAP_TTS_ORDER_WAIT_MS;
     while (Date.now() < deadline) {
       let earlier = false;
@@ -1768,6 +2093,7 @@ export function createOnlineLane(events: LaneEvents, config: OnlineLaneConfig = 
     if (gen !== sessionGen) return;
     enqueueTtsSentence(text, language, undefined, undefined, lid);
     ttsSentences += 1;
+    speakGate.forget(lid);
   }
 
   // ---- M6: refine tier ----
@@ -1812,6 +2138,10 @@ export function createOnlineLane(events: LaneEvents, config: OnlineLaneConfig = 
     const o = opts!;
     const dl = dirLangs(lid, head, false); // settled at finalisation — never changes again
     const gen = sessionGen;
+    // R5: the direction this sentence is being TRANSLATED in, recorded before the round trip — so that
+    // when the voice asks the gate 1-2 seconds later there is something concrete for the router's verdict
+    // to be compared against: "the wall already says this; is it still true?"
+    speakGate.show(lid, dl.source);
     const body = JSON.stringify({
       sourceText: head,
       sourceLanguage: dl.source,
@@ -1859,6 +2189,18 @@ export function createOnlineLane(events: LaneEvents, config: OnlineLaneConfig = 
       if (config.getSpeakEnabled?.()) {
         const speakText = data.ttsText || data.translatedText || '';
         if (speakText) {
+          // R5 — the subtitle above went out already. Only now does the voice ask the router whether this
+          // sentence was pointed the right way, and a disagreement SILENCES it: the translation was made
+          // in the other direction, so it is not a right sentence with a wrong accent, it is a backwards
+          // sentence. The hall reads it instead of hearing it, which is the recoverable half of the two.
+          const settled = await speakGate.wait(lid, DIRECTION_SETTLE_WAIT_MS, dl.source);
+          if (gen !== sessionGen) return;
+          if (settled.changed) {
+            voiceDirectionHolds += 1;
+            speakGate.forget(lid);
+            return;
+          }
+          speakGate.forget(lid);
           // M13: never hand the voice a language it cannot pronounce. The subtitle above has ALREADY been
           // shown and saved — only the loudspeaker is held back, so a wrong skip costs one sentence the
           // hall reads instead of hears, while a wrong speak is a burst of noise over the next sentence.
@@ -2174,6 +2516,13 @@ export function createOnlineLane(events: LaneEvents, config: OnlineLaneConfig = 
     // tracker with the technician's chosen source language for the first utterance.
     twoWay = config.getTwoWay?.() ?? false;
     tracker = createDirectionTracker(startOpts.sourceLanguage);
+    // The router is seeded from the same chosen language and, like the tracker, does not survive the
+    // session — a new Start is a new room. `baseMode` is decided a few lines down, once we know whether
+    // there is a running order in this session at all.
+    router = createDirectionRouter(startOpts.sourceLanguage);
+    lastAcceptedFinalAt = 0;
+    speakGate.reset(); // R5 — wakes anything a previous session left waiting, then forgets every sentence
+
     settledDir.clear();
     lockedSource = null; // a new session starts on auto-detect; the running order re-arms it per segment
     guidedDeafAtIndex = -1;
@@ -2187,7 +2536,13 @@ export function createOnlineLane(events: LaneEvents, config: OnlineLaneConfig = 
     segmentLid = null;
     voicedWindow.length = 0;
     recentLevels = []; // a new session never shows the previous room's VU peak
-    previousFinalTranscript = '';
+    echoMemory = [];
+    echoDrops = 0;
+    echoTrims = 0;
+    // Phiên mới là căn phòng mới: nhãn của buổi trước không được quyết chiều của câu đầu tiên buổi này.
+    lastVendorTag = '';
+    lastVendorTagAt = 0;
+    carriedTags = 0;
     droppedGhosts = 0;
     recentFinals.length = 0;
     // reset Phase-2 state + counters
@@ -2214,6 +2569,14 @@ export function createOnlineLane(events: LaneEvents, config: OnlineLaneConfig = 
     const scriptSeed = config.getScript?.() ?? [];
     scriptMatcher = scriptSeed.length ? createScriptMatcher(scriptSeed) : null;
     scriptRows = scriptSeed.length;
+    // 06/08 — a script IS a running order, and a running order is the whole reason `base` means anything.
+    //
+    // With one (a ceremony), a pause returns the direction to the base: the programme says this part is in
+    // Vietnamese, and that outranks whoever was talking a moment ago. Without one (an internal meeting),
+    // `base` is only the direction somebody picked when they switched the machine on, and returning to it
+    // on every breath would drag a Japanese guest's five-minute explanation back to Vietnamese at each
+    // pause. So there a pause REOPENS the question instead of answering it. See BaseMode in directionRouter.
+    router.setBaseMode(scriptRows ? 'anchor' : 'free');
     scriptSeedRows = scriptSeed; // TASK 34 — guided mode addresses rows by number, not by candidate
     // TASK 6: the names on the approved rows are known hours before the ceremony — prime the recogniser
     // with them instead of letting it guess at them live. Latched here with the rows themselves, so the
@@ -2266,7 +2629,20 @@ export function createOnlineLane(events: LaneEvents, config: OnlineLaneConfig = 
     resetScribeCommitState(false);
     manualCommits = 0;
     promotions = 0;
-    foreignDrops = 0;
+    // Ba số của cái trần 25s cũng phải về 0 ở phiên mới, y như `manualCommits` ngay trên: đọc "trần chờ
+    // khe im 14 lần" mà 14 đó là của buổi tổng duyệt sáng nay thì con số nói dối.
+    forceGapWaits = 0;
+    forceGapWaitMaxMs = 0;
+    ceilingNoops = 0;
+    languageProjections = 0;
+    voiceDirectionHolds = 0;
+    lastRouterReason = '';
+    // Phiên mới là căn phòng mới. `systemSourceLive` được đặt lại thành true/false ở `ensureCapture`, khi
+    // biết chắc luồng chia sẻ có track tiếng hay không — ở đây chỉ tắt, không được đoán là còn sống.
+    sourceAttributor.reset();
+    systemSourceLive = false;
+    sourceVerdicts = 0;
+    lastSourceReason = '';
     languageTurns = 0;
     vendorTags = 0;
     asrLanguages = null;
@@ -2385,6 +2761,9 @@ export function createOnlineLane(events: LaneEvents, config: OnlineLaneConfig = 
       pausedMs: Math.round(pausedMs),
       nonSpeechDrops,
       lastNonSpeechReason,
+      echoDrops,
+      echoTrims,
+      carriedTags,
       latency: latency.getReport(),
       lastUsageReportAt,
       lastSaveAt,
@@ -2405,7 +2784,14 @@ export function createOnlineLane(events: LaneEvents, config: OnlineLaneConfig = 
       promotions,
       forceGapWaits,
       forceGapWaitMaxMs,
-      foreignDrops,
+      ceilingNoops,
+      languageProjections,
+      voiceDirectionHolds,
+      lastRouterReason,
+      systemSourceLive,
+      sourceVerdicts,
+      lastSourceReason,
+      routerBasis: router?.stats().byBasis ?? {},
       languageTurns,
       vendorTags,
       asrLanguages,
@@ -2435,6 +2821,10 @@ export function createOnlineLane(events: LaneEvents, config: OnlineLaneConfig = 
     if (segmentBuffer.trim()) flushSegment('turn-end');
     lockedSource = language;
     if (language) tracker.reset(language);
+    // The router keeps its own lock so that `router.current()` stays truthful while one is on, and so the
+    // direction the operator pinned is the one the router CARRIES ON WITH when the lock is released — a
+    // release must not hand the room back to whatever was running before the segment started.
+    router?.lock(language);
   }
 
   return { id: 'online', start, stop, getDiagnostics, saveSession, lockLanguage };

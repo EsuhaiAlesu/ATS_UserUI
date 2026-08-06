@@ -50,11 +50,20 @@ class Pcm16Tap extends AudioWorkletProcessor {
     this.outBuffer = new Int16Array(4096);
     this.outCount = 0;
     this.voicedCount = 0;
+    this.micVoicedCount = 0;
+    this.sysVoicedCount = 0;
 
     // --- near-mic noise gate state ---
     this.noiseRms = 0.002;
     this.hangoverSamples = 0;
     this.hangoverSamplesMax = Math.round(0.360 * this.inputSampleRate); // 360ms hangover
+
+    // --- second source (tiếng ra loa máy: Teams/Zoom), nếu người vận hành có đấu vào ---
+    // Đường này là tín hiệu SỐ lấy thẳng từ máy, không đi qua không khí: không có ồn phòng, không có
+    // tiếng vọng, không cần cổng thích nghi. Nên nó dùng sàn cố định và hangover riêng, chứ không dùng
+    // chung bộ học ồn nền của mic — học ồn trên một đường vốn im như tờ chỉ tạo ra một con số vô nghĩa.
+    this.sysHangoverSamples = 0;
+    this.sysFloorRms = 0.004;
 
     // --- VU throttle (~10 ticks/second), peak-based, measured BEFORE gating ---
     this.levelWindowPeak = 0;
@@ -78,17 +87,42 @@ class Pcm16Tap extends AudioWorkletProcessor {
   flushPacket() {
     const buf = this.outBuffer.buffer;
     const voicedMs = this.voicedCount / 16; // 16 samples per ms @16kHz
-    this.port.postMessage({ type: 'packet', pcm: buf, voicedMs: voicedMs }, [buf]);
+    this.port.postMessage({
+      type: 'packet',
+      pcm: buf,
+      voicedMs: voicedMs,
+      micVoicedMs: this.micVoicedCount / 16,
+      sysVoicedMs: this.sysVoicedCount / 16,
+    }, [buf]);
     this.outBuffer = new Int16Array(4096); // previous buffer was transferred away
     this.outCount = 0;
     this.voicedCount = 0;
+    this.micVoicedCount = 0;
+    this.sysVoicedCount = 0;
   }
 
   process(inputs) {
     const input = inputs[0];
     const ch = input && input[0];
+    // Đường thứ hai có thể vắng mặt hoàn toàn (không đấu, hoặc chưa có gói nào) — mọi chỗ dưới đây phải
+    // chạy đúng y như cũ khi nó vắng.
+    const sysInput = inputs[1];
+    const sysCh = sysInput && sysInput[0];
     if (!ch || ch.length === 0) return true;
     const n = ch.length;
+
+    // --- đo riêng đường tiếng máy, trước khi trộn ---
+    let sysVoiced = false;
+    if (sysCh && sysCh.length >= n) {
+      let sysSumSq = 0;
+      for (let i = 0; i < n; i++) { const s = sysCh[i]; sysSumSq += s * s; }
+      if (Math.sqrt(sysSumSq / n) >= this.sysFloorRms) this.sysHangoverSamples = this.hangoverSamplesMax;
+      else {
+        this.sysHangoverSamples -= n;
+        if (this.sysHangoverSamples < 0) this.sysHangoverSamples = 0;
+      }
+      sysVoiced = this.sysHangoverSamples > 0;
+    }
 
     // --- metrics on the RAW quantum (before gating) ---
     let sumSq = 0;
@@ -127,17 +161,27 @@ class Pcm16Tap extends AudioWorkletProcessor {
     const cut = this.nearMicGateEnabled && !voiced;   // only cut samples when the operator asked for it
 
     // --- stateful linear resample to 16kHz, apply cut, accumulate, count voiced ---
+    // Hai đường được TRỘN ở đây, trước khi hạ mẫu: máy nghe vẫn chỉ thấy MỘT dòng tiếng như từ trước tới
+    // nay, nên không có socket thứ hai và không có đồng hồ tiền thứ hai. Việc phân biệt ai nói nằm ở hai
+    // con số voiced gửi kèm gói, không nằm ở việc chép hai lần.
+    // Cổng near-mic chỉ cắt phần MIC. Cắt cả tiếng máy là tự bịt tai với đúng nửa cuộc họp.
+    const mixSys = sysCh && sysCh.length >= n;
     for (let i = 0; i < n; i++) {
-      const cur = ch[i];
+      const cur = (cut ? 0 : ch[i]) + (mixSys ? sysCh[i] : 0);
       this.resampleAccumulator += this.ratioInc;
       while (this.resampleAccumulator >= 1) {
         this.resampleAccumulator -= 1;
         const frac = 1 - this.resampleAccumulator;
-        let interp = this.lastSample + (cur - this.lastSample) * frac;
-        if (cut) interp = 0;
+        const interp = this.lastSample + (cur - this.lastSample) * frac;
         const clamped = interp < -1 ? -1 : (interp > 1 ? 1 : interp);
         this.outBuffer[this.outCount++] = clamped < 0 ? clamped * 0x8000 : clamped * 0x7fff;
-        if (voiced) this.voicedCount++;
+        // voicedCount là bằng chứng CÓ NGƯỜI NÓI mà chốt chặn ảo giác M4 đọc. Nó phải tính cả hai đường:
+        // nếu chỉ đếm mic thì một câu do đầu cầu bên kia nói (mic bị khử vọng ăn mất) sẽ bị chính chốt
+        // chặn của ta vứt đi như một câu ma.
+        // (Không được dùng dấu nháy ngược trong khối này: cả worklet nằm trong một template literal.)
+        if (voiced || sysVoiced) this.voicedCount++;
+        if (voiced) this.micVoicedCount++;
+        if (sysVoiced) this.sysVoicedCount++;
         if (this.outCount >= 4096) this.flushPacket();
       }
       this.lastSample = cur;
@@ -151,7 +195,12 @@ registerProcessor('pcm16-tap', Pcm16Tap);
 
 export interface CapturePacket {
   pcm: ArrayBuffer;
+  /** Tiếng nói đo được ở BẤT KỲ đường nào — bằng chứng cho chốt chặn ảo giác. */
   voicedMs: number;
+  /** Riêng đường mic (phòng). */
+  micVoicedMs: number;
+  /** Riêng đường tiếng máy (đầu cầu bên kia). 0 khi không đấu nguồn thứ hai. */
+  sysVoicedMs: number;
 }
 
 export interface CaptureHandle {
@@ -163,7 +212,22 @@ export async function startPcm16Capture(
   deviceId: string | undefined,
   onPacket: (packet: CapturePacket) => void,
   onLevel: (v: number) => void,
-  options?: { nearMicGate?: boolean; micSensitivity?: MicSensitivity },
+  options?: {
+    nearMicGate?: boolean;
+    micSensitivity?: MicSensitivity;
+    /**
+     * Đường tiếng thứ hai: tiếng đang phát ra từ chính máy này (Teams/Zoom), lấy bằng
+     * `getDisplayMedia({ audio: true })` ở phía gọi.
+     *
+     * Phía gọi phải tự xin, vì `getDisplayMedia` chỉ mở được từ một cú bấm của người dùng — gọi nó trong
+     * lòng hàm này thì trình duyệt từ chối, và một phiên đang chạy không có cú bấm nào để mượn.
+     *
+     * Vòng đời cũng do phía gọi giữ: hàm này KHÔNG tắt track của luồng đó khi `stop()`. Người vận hành
+     * chọn "chia sẻ màn hình" một lần cho cả buổi; tự tắt nó mỗi lần nối lại máy nghe là bắt họ bấm lại
+     * hộp thoại chia sẻ giữa buổi lễ.
+     */
+    systemStream?: MediaStream | null;
+  },
 ): Promise<CaptureHandle> {
   // The operator's chosen microphone, never the browser default (`exact` — with `ideal`, Windows
   // switching its default device mid-event silently switches the mic under us). Mono; keep browser DSP.
@@ -191,16 +255,27 @@ export async function startPcm16Capture(
     const url = URL.createObjectURL(new Blob([WORKLET_SRC], { type: 'text/javascript' }));
     try { await ctx.audioWorklet.addModule(url); } finally { URL.revokeObjectURL(url); }
     const src = ctx.createMediaStreamSource(stream);
+    // Hai đầu vào LUÔN được khai báo, kể cả khi không có nguồn thứ hai: một đầu vào không ai nối vào thì
+    // `inputs[1]` chỉ là mảng rỗng, và worklet đã xử đúng ca đó. Khai báo theo điều kiện thì số đầu vào
+    // của node phụ thuộc thời điểm gọi, mà đồ thị âm thanh thì không dựng lại được sau khi đã chạy.
     const node = new AudioWorkletNode(ctx, 'pcm16-tap', {
-      numberOfInputs: 1,
+      numberOfInputs: 2,
       numberOfOutputs: 1,
       outputChannelCount: [1],
     });
     node.port.onmessage = (e: MessageEvent) => {
-      const d = e.data as { type?: string; pcm?: ArrayBuffer; voicedMs?: number; value?: number } | null;
+      const d = e.data as {
+        type?: string; pcm?: ArrayBuffer; voicedMs?: number; micVoicedMs?: number; sysVoicedMs?: number; value?: number;
+      } | null;
       if (!d) return;
-      if (d.type === 'packet' && d.pcm) onPacket({ pcm: d.pcm, voicedMs: d.voicedMs ?? 0 });
-      else if (d.type === 'level') onLevel(d.value ?? 0);
+      if (d.type === 'packet' && d.pcm) {
+        onPacket({
+          pcm: d.pcm,
+          voicedMs: d.voicedMs ?? 0,
+          micVoicedMs: d.micVoicedMs ?? 0,
+          sysVoicedMs: d.sysVoicedMs ?? 0,
+        });
+      } else if (d.type === 'level') onLevel(d.value ?? 0);
     };
     node.port.postMessage({
       type: 'configure',
@@ -209,14 +284,24 @@ export async function startPcm16Capture(
       nearMicGateEnabled: options?.nearMicGate ?? true,
       micSensitivity: options?.micSensitivity ?? 'auto',
     });
-    src.connect(node);
+    src.connect(node, 0, 0);
+    // Nguồn thứ hai chỉ được nối khi nó THẬT SỰ có track tiếng: `getDisplayMedia` vẫn trả về một luồng
+    // hợp lệ khi người vận hành quên tích "chia sẻ âm thanh hệ thống", và luồng đó chỉ có hình. Nối một
+    // luồng câm vào đây thì mọi câu đều bị gán cho mic, im lặng và không có gì báo.
+    let sysSrc: MediaStreamAudioSourceNode | null = null;
+    const sysStream = options?.systemStream ?? null;
+    if (sysStream && sysStream.getAudioTracks().length > 0) {
+      sysSrc = ctx.createMediaStreamSource(sysStream);
+      sysSrc.connect(node, 0, 1);
+    }
     node.connect(ctx.destination); // worklet writes no output → silence; keeps the graph pulling.
     const context = ctx;
     return {
       sampleRate: context.sampleRate,
       stop() {
         node.port.onmessage = null;
-        try { src.disconnect(); node.disconnect(); } catch { /* ignore */ }
+        try { src.disconnect(); sysSrc?.disconnect(); node.disconnect(); } catch { /* ignore */ }
+        // CHỈ tắt micro. Luồng chia sẻ màn hình do phía gọi giữ và tắt — xem chú thích ở `systemStream`.
         stream.getTracks().forEach((t) => t.stop());
         void context.close();
       },

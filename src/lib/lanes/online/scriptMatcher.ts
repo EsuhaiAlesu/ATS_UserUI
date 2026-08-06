@@ -76,6 +76,16 @@ export type ScriptMatchConfig = {
     outOfOrderPenalty: number;
     /** How many consecutive script lines may be merged into one candidate (1 = no merging). */
     maxMergeLines: number;
+    /**
+     * How much of the LINE the heard sentence must actually account for before it may be spoken.
+     *
+     * Dice is symmetric — it answers "how alike are these two", not "has the whole line been said yet" —
+     * and a prefix scores far higher on it than it deserves: 2p/(p+L) puts three quarters of a line at
+     * 0.86, over the 0.82 snap bar, while the last quarter is still in the MC's mouth. See `coverageOf`.
+     */
+    coverageFloor: number;
+    /** …and how much of the line's LAST THIRD, which is the part a prefix can never have. */
+    tailFloor: number;
 };
 
 // The three thresholds below were measured over 139 real sessions (6,950 utterances), not chosen by
@@ -115,6 +125,16 @@ export const DEFAULT_SCRIPT_MATCH_CONFIG: ScriptMatchConfig = {
     orderBonus: 0.04,
     outOfOrderPenalty: 0.06,
     maxMergeLines: 6,
+    // Deliberately BETWEEN the suggest bar and the snap bar. When the two sides are the same length,
+    // recall and Dice measure almost the same thing, so a floor just under `snapThreshold` cannot take
+    // away a match that would otherwise have been correct — the only thing it removes is the prefix
+    // corner, where Dice is high precisely BECAUSE the heard text is short.
+    // Measured on a 63-character ceremonial line: a three-quarter read scores 0.774 here, a complete read
+    // through a bad microphone 0.919. The bar sits between them, but only just — which is why the TAIL is
+    // the gate that actually does the work (0.467 against 1.0 on the same two reads) and this one is the
+    // backup that catches a prefix long enough to score well and still be unfinished.
+    coverageFloor: 0.78,
+    tailFloor: 0.55,
 };
 
 const clamp01 = (value: number) => Math.max(0, Math.min(1, value));
@@ -174,6 +194,64 @@ export function diceCoefficient(left: string, right: string): number {
     }
     const total = gramTotal(a) + gramTotal(b);
     return total === 0 ? 0 : (2 * shared) / total;
+}
+
+export type ScriptCoverage = {
+    /** Share of the LINE's bigrams the heard sentence accounts for. Linear in "how much has been said". */
+    recall: number;
+    /** The same measure over the line's LAST QUARTER — the part a prefix cannot possibly have yet. */
+    tailRecall: number;
+};
+
+/**
+ * A QUARTER, measured — not a third, which was the first guess and was wrong.
+ *
+ * With a third, the tail of a 63-character line starts at character 42, and the three-quarter prefix that
+ * this whole gate exists to stop already reaches character 49. It therefore scored 0.60 on the tail and
+ * sailed through. A quarter starts at 47, past where that prefix ends, so the same read scores ~0.15 —
+ * while a complete read through a bad microphone still scores ~0.7. That gap is the whole mechanism.
+ */
+const TAIL_SHARE = 4;
+/** The tail is never shorter than this, so a very short line still has something to measure. */
+const TAIL_MIN_CHARS = 4;
+
+/** Share of `lineNormalized`'s bigrams present in an already-built bag of heard bigrams. */
+function recallInto(heardGrams: Map<string, number>, lineNormalized: string): number {
+    if (lineNormalized.length < 2) return 0;
+    const line = bigrams(lineNormalized);
+    const total = gramTotal(line);
+    if (total === 0) return 0;
+    let shared = 0;
+    for (const [gram, count] of line) {
+        const other = heardGrams.get(gram);
+        if (other) shared += Math.min(count, other);
+    }
+    return shared / total;
+}
+
+/**
+ * Has the whole line actually been said yet?
+ *
+ * Dice cannot answer that. It is symmetric, so a prefix is rewarded for being SHORT: with a prefix of
+ * length p against a line of length L it returns 2p/(p+L), which puts a third of a line at 0.50 and three
+ * quarters at 0.86. Recall of the line's bigrams is linear instead — a third of the line reads as ~0.33 —
+ * and when the two sides are the same length the two measures nearly coincide, which is what makes this
+ * safe to place just under an already-calibrated Dice threshold.
+ *
+ * `tailRecall` exists because recall alone cannot separate "read three quarters of it" (0.74) from "read
+ * all of it through a bad microphone" (0.80) — those two numbers are too close to put a bar between. The
+ * end of the line separates them completely: the first has not been spoken at all, the second has. Note
+ * it never reaches a clean zero — character bigrams collide by chance in any language — so the bar
+ * belongs in the gap (~0.2 against ~0.7), not at the floor.
+ */
+export function coverageOf(heard: string, line: string): ScriptCoverage {
+    const h = normalizeForMatch(heard);
+    const l = normalizeForMatch(line);
+    if (h.length < 2 || l.length < 2) return { recall: 0, tailRecall: 0 };
+    const heardGrams = bigrams(h);
+    const recall = round2(recallInto(heardGrams, l));
+    const tail = l.slice(-Math.min(l.length, Math.max(TAIL_MIN_CHARS, Math.ceil(l.length / TAIL_SHARE))));
+    return { recall, tailRecall: tail.length < 2 ? recall : round2(recallInto(heardGrams, tail)) };
 }
 
 type Candidate = {
@@ -380,6 +458,14 @@ export function createScriptMatcher(
         }
         if (adjusted < config.snapThreshold) {
             return { ...result, band: 'suggest', reason: `gần giống nhưng chưa đủ chắc (${result.score})` };
+        }
+        // Similar enough — but "similar" is not "finished". Dice rewards a prefix for being SHORT, so
+        // this is where a line the MC is still halfway through is stopped, one bar under the threshold it
+        // just cleared. Downgraded to `suggest` rather than silenced: the operator should still see which
+        // line the ceremony is on, and the sentence takes the ordinary translate-and-refine path.
+        const cover = coverageOf(text, candidate.source);
+        if (cover.recall < config.coverageFloor || cover.tailRecall < config.tailFloor) {
+            return { ...result, band: 'suggest', reason: `mới nghe được ${Math.round(cover.recall * 100)}% dòng` };
         }
         // Winner and runner-up neck and neck means the script holds two near-identical lines — if they
         // cannot be told apart, do not guess.

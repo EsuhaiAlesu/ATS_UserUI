@@ -115,6 +115,8 @@ describe('guidedRelease — lane nối đúng như bản sao trên', () => {
 
     // trượt thì RƠI XUỐNG, không return — đây là ca 5 ở phía mã nguồn
     expect(lane).toContain('guidedMisses += 1;')
-    expect(lane).toContain('void speakSnap(verdict.target, verdict.language, lid, order)')
+    // R5 (06/08): speakSnap nay nhận thêm chiều NGUỒN, để cổng "hiện tách khỏi đọc" có thứ mà đối chiếu
+    // với phán quyết của router. Ý của khẳng định này không đổi — nhả dẫn tay vẫn phải ĐỌC LÊN.
+    expect(lane).toContain('void speakSnap(verdict.target, verdict.language, guidedSource, lid, order)')
   })
 })
