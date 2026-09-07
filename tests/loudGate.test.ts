@@ -29,8 +29,8 @@ const ALL_MODES: LoudGateMode[] = ['auto', 'standard', 'low', 'verylow']
 const read = (p: string) => readFileSync(resolve(__dirname, p), 'utf8')
 
 describe('loudGate — lưu trữ', () => {
-  it('chưa lưu gì → "auto"', () => {
-    expect(loadLoudGate()).toBe('auto')
+  it('chưa lưu gì → "verylow" — bàn giao: gần như tắt hẳn chốt đủ to', () => {
+    expect(loadLoudGate()).toBe('verylow')
   })
 
   it('cả bốn giá trị đều đi-về được', () => {
@@ -40,9 +40,9 @@ describe('loudGate — lưu trữ', () => {
     }
   })
 
-  it('giá trị rác trong kho → "auto"', () => {
+  it('giá trị rác trong kho → "verylow"', () => {
     store.set(LOUD_GATE_KEY, 'loudest')
-    expect(loadLoudGate()).toBe('auto')
+    expect(loadLoudGate()).toBe('verylow')
   })
 
   it('lưu giá trị lạ → false và KHÔNG ghi gì', () => {
@@ -53,7 +53,7 @@ describe('loudGate — lưu trữ', () => {
   it('getItem ném lỗi → trả mặc định, không ném ra ngoài', () => {
     vi.stubGlobal('localStorage', { ...stub, getItem: () => { throw new Error('blocked') } })
     expect(() => loadLoudGate()).not.toThrow()
-    expect(loadLoudGate()).toBe('auto')
+    expect(loadLoudGate()).toBe('verylow')
   })
 
   it('setItem ném lỗi → trả false, không ném ra ngoài', () => {

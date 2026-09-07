@@ -18,15 +18,19 @@
 //      bao giờ cắt ở dấu chấm của `www.esuhai.com` hay `Tp.HCM`.
 //
 // Bốn nấc, không phải một con số, cùng lý do với `speechRhythm` và `guidedMatch`: người chỉnh cái này
-// mười phút trước buổi lễ không ngồi cân mili-giây. Mặc định là TẮT: đây là đường đi mới của mọi câu,
-// nên nó phải được bật một cách cố ý, sau khi đã chạy thử.
+// mười phút trước buổi lễ không ngồi cân mili-giây.
+//
+// MẶC ĐỊNH, chốt 26/08/2026 khi bàn giao luồng online: nấc `careful` (0,90s). Trước ngày này mặc định là
+// `off` vì cơ chế còn mới và chưa chạy thật lần nào. Nay nó đã chạy qua các buổi họp nội bộ, và bên nhận
+// bàn giao cần một cấu hình chạy được ngay từ lần mở đầu tiên chứ không phải một danh sách nút phải tự
+// dò. `careful` là nấc chậm nhất trong ba nấc có bật — chờ gần một giây cho chắc máy nghe thôi sửa chữ.
 //
 // Pure module: no React, no fetch, no DOM.
 
 export type LivePromote = 'off' | 'careful' | 'normal' | 'fast';
 
 export const LIVE_PROMOTE_KEY = 'proyaku_online_live_promote';
-export const LIVE_PROMOTE_DEFAULT: LivePromote = 'off';
+export const LIVE_PROMOTE_DEFAULT: LivePromote = 'careful';
 
 /**
  * Sàn ký tự trước khi một tiền tố được coi là đáng nhả.

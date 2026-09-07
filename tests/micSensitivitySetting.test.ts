@@ -38,8 +38,8 @@ const readCode = (p: string) => read(p)
   .join('\n')
 
 describe('micSensitivity — vòng đời lưu trữ', () => {
-  it('chưa lưu gì → "auto"', () => {
-    expect(loadMicSensitivity()).toBe('auto')
+  it('chưa lưu gì → "far" — bàn giao: mặc định nghe được nhiều nhất', () => {
+    expect(loadMicSensitivity()).toBe('far')
   })
 
   it('lưu rồi đọc lại: "far"', () => {
@@ -54,9 +54,9 @@ describe('micSensitivity — vòng đời lưu trữ', () => {
     }
   })
 
-  it('giá trị rác trong kho → "auto"', () => {
+  it('giá trị rác trong kho → "far"', () => {
     store.set(MIC_SENSITIVITY_KEY, 'loud')
-    expect(loadMicSensitivity()).toBe('auto')
+    expect(loadMicSensitivity()).toBe('far')
   })
 
   it('lưu giá trị lạ → trả false và KHÔNG ghi gì', () => {
@@ -64,10 +64,10 @@ describe('micSensitivity — vòng đời lưu trữ', () => {
     expect(store.has(MIC_SENSITIVITY_KEY)).toBe(false)
   })
 
-  it('getItem ném lỗi → vẫn trả "auto", không ném ra ngoài', () => {
+  it('getItem ném lỗi → vẫn trả "far", không ném ra ngoài', () => {
     vi.stubGlobal('localStorage', { ...stub, getItem: () => { throw new Error('blocked') } })
     expect(() => loadMicSensitivity()).not.toThrow()
-    expect(loadMicSensitivity()).toBe('auto')
+    expect(loadMicSensitivity()).toBe('far')
   })
 
   it('setItem ném lỗi → trả false, không ném ra ngoài (chế độ riêng tư / hết quota)', () => {

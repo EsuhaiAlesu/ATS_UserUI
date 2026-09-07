@@ -18,7 +18,11 @@
 export type SpeechRhythm = 'slow' | 'normal' | 'fast' | 'adaptive' | 'vendor';
 
 export const SPEECH_RHYTHM_KEY = 'proyaku_online_speech_rhythm';
-export const SPEECH_RHYTHM_DEFAULT: SpeechRhythm = 'normal';
+// 26/08/2026, khi bàn giao: mặc định chuyển 'normal' → 'vendor' ("Chạy liền mạch, chỉ ngắt khi hết câu").
+// Lý do: cắt lượt giữa lúc đang nói là hỏng không sửa được ở tầng chữ, còn chậm 2 giây thì chỉ là chậm.
+// LƯU Ý cho người đọc sau: hằng số này KHÔNG còn được dùng như dấu hiệu "nấc bình thường" ở bất cứ đâu —
+// `onlineLane.stableCommitWindows()` nay hỏi thẳng `rhythm === 'normal'`. Đừng nối lại hai thứ đó.
+export const SPEECH_RHYTHM_DEFAULT: SpeechRhythm = 'vendor';
 
 // The TWO CLIENT-SIDE numbers, and in practice THEY are what cuts a sentence. The recogniser's own
 // `commit_strategy=vad` only closes a turn after ~1.5s of silence, but `scribeManualCommit` closes far

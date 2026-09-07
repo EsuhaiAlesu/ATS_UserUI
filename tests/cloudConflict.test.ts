@@ -384,10 +384,13 @@ describe('bảng cảnh báo — thứ duy nhất nói "việc của bạn chưa
 });
 
 describe('cửa sổ màn khán giả không dính gì tới việc đồng bộ', () => {
-  it('26 · /wall và /wall-mockup bị loại ra — không tự lấy về, không tự tải lại giữa buổi', async () => {
+  // `/stream` và `/reveal` là hai màn CÙNG LOẠI với `/wall` — mở toàn màn hình cho cả hội trường nhìn,
+  // không giữ dữ liệu Chuẩn bị nào của riêng nó. Chúng bị bỏ sót ở lần viết đầu, nên vẫn có thể tự tải
+  // lại giữa buổi vì một cái kho ở đâu đó trống.
+  it('26 · mọi màn quay ra khán giả đều bị loại — không tự lấy về, không tự tải lại giữa buổi', async () => {
     vi.resetModules();
     const { isAudienceWindow } = await import('../src/lib/cloudBoot');
-    for (const p of ['/wall', '/wall-mockup', '/wall/left']) expect(isAudienceWindow(p), p).toBe(true);
+    for (const p of ['/wall', '/wall-mockup', '/wall/left', '/stream', '/reveal']) expect(isAudienceWindow(p), p).toBe(true);
     for (const p of ['/', '/settings', '/online-lab', '/chuong-trinh']) expect(isAudienceWindow(p), p).toBe(false);
   });
 
@@ -399,5 +402,61 @@ describe('cửa sổ màn khán giả không dính gì tới việc đồng bộ
     await bootCloud('/wall');
     expect(calls).toHaveLength(0);
     expect(dom.getElementById('proyaku-cloud-alert')).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Cái làm cho TOÀN BỘ nhóm ca 14–18 ở trên không bao giờ chạy trên máy thật.
+//
+// Ca 17 chứng minh: máy trắng thì tự lấy về. Nhưng trong `main.tsx`, `migrateToEventScoped()` chạy TRƯỚC
+// `bootCloud()`, và nó gọi `ensureDefaultEvent()` vô điều kiện — tức là TẠO một buổi. Nên tới lượt
+// `hasLocalPrep()` được hỏi, máy nào cũng đã có đúng một buổi và câu trả lời luôn là "không trắng".
+// Người mở link trên máy mới nhìn thấy một buổi rỗng do máy tự đẻ ra, chứ không phải buổi đã chuẩn bị.
+//
+// Nhóm ca này hỏi theo ĐÚNG THỨ TỰ THẬT: di trú xong rồi mới hỏi máy có trắng không.
+describe('di trú không được bịa ra một buổi trên máy chưa ai dùng', () => {
+  async function loadMigrate() {
+    vi.resetModules();
+    return import('../src/lib/migrate');
+  }
+
+  it('28 · máy trắng: di trú xong, máy VẪN trắng', async () => {
+    const m = await loadMigrate();
+    m.migrateToEventScoped();
+    const c = await loadCloud();
+    expect(c.hasLocalPrep()).toBe(false);
+    expect(JSON.parse(store.get('proyaku_schedule') ?? '[]')).toEqual([]);
+    expect(store.get('proyaku_migrated_events')).toBe('v1'); // vẫn đánh dấu: ở đây thật sự không có gì để di trú
+  });
+
+  it('29 · máy trắng + kho CÓ: di trú xong vẫn lấy về được — ca 17 chạy đúng trên máy thật', async () => {
+    const m = await loadMigrate();
+    m.migrateToEventScoped();
+    const c = await loadCloud();
+    installFetch((url) => {
+      if (url.includes('/prep/manifest')) return { body: { schedule: { count: 2, savedAt: 1, savedBy: 'm-khac' }, speakers: { count: 0 }, settings: { count: 0 }, script: [], docs: [], storeDir: '/data' } };
+      if (url.includes('/prep/schedule')) return { body: { conferences: [{ id: 'tren-kho' }], savedAt: 55 } };
+      if (url.includes('/prep/speakers')) return { body: { profiles: [], savedAt: 55 } };
+      return { body: { values: {} } };
+    });
+    await expect(c.adoptFromCloudIfEmpty()).resolves.toBe(true);
+    expect(store.get('proyaku_schedule')).toBe(JSON.stringify([{ id: 'tren-kho' }]));
+  });
+
+  it('30 · máy CÓ kịch bản cũ ⇒ vẫn tạo chỗ cho nó và chép sang, y như trước', async () => {
+    const m = await loadMigrate();
+    store.set('proyaku_script', '[{"src":"a"}]');
+    m.migrateToEventScoped();
+    const list = JSON.parse(store.get('proyaku_schedule') ?? '[]') as { id: string }[];
+    expect(list).toHaveLength(1);
+    expect(store.get(`proyaku_script:${list[0].id}`)).toBe('[{"src":"a"}]');
+  });
+
+  it('31 · máy đã có buổi mà chưa có con trỏ ⇒ vẫn đặt con trỏ, không đẻ thêm buổi', async () => {
+    const m = await loadMigrate();
+    store.set('proyaku_schedule', JSON.stringify([{ id: 'buoi-cu', title: 'Buổi cũ', date: '2030-01-01' }]));
+    m.migrateToEventScoped();
+    expect(JSON.parse(store.get('proyaku_schedule') ?? '[]')).toHaveLength(1);
+    expect(store.get('proyaku_active_event')).toBe('buoi-cu');
   });
 });

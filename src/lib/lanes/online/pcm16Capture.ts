@@ -38,7 +38,7 @@ class Pcm16Tap extends AudioWorkletProcessor {
     this.inputSampleRate = sampleRate;   // AudioWorkletGlobalScope global (device rate)
     this.outputSampleRate = 16000;
     this.ratioInc = this.outputSampleRate / this.inputSampleRate; // output samples per input sample
-    this.nearMicGateEnabled = true;
+    this.nearMicGateEnabled = false; // 26/08: mặc định TẮT — chốt này chỉ CẮT tiếng, không dính tới bằng chứng có người nói
     this.micSensitivity = 'auto';
     this.resolveVoiceFloor = (${resolveVoiceFloor.toString()});
 
@@ -281,7 +281,7 @@ export async function startPcm16Capture(
       type: 'configure',
       inputSampleRate: ctx.sampleRate,
       outputSampleRate: 16000,
-      nearMicGateEnabled: options?.nearMicGate ?? true,
+      nearMicGateEnabled: options?.nearMicGate ?? false,
       micSensitivity: options?.micSensitivity ?? 'auto',
     });
     src.connect(node, 0, 0);

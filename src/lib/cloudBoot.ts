@@ -11,9 +11,16 @@
 import { adoptFromCloudIfEmpty, checkRemoteNewer, startSettingsWatch } from './cloudSync';
 import { mountCloudAlert } from './cloudAlert';
 
-/** `/wall`, `/wall-mockup` and anything else under that prefix. */
+// Every full-screen surface pointed at the room rather than at the operator. `/wall` was the only one when
+// this was written; `/stream` (the two-language stream page) and `/reveal` (the ceremonial reveal) are the
+// same kind of window and were simply missed — both are opened on a hall screen for the whole ceremony,
+// both hold no Chuẩn bị data of their own, and both would happily reload themselves mid-sentence because
+// a store somewhere was empty.
+const AUDIENCE_PATHS = ['/wall', '/stream', '/reveal'] as const;
+
+/** `/wall`, `/wall-mockup`, `/stream`, `/reveal` — and anything nested under them. */
 export function isAudienceWindow(pathname: string): boolean {
-    return pathname === '/wall' || pathname.startsWith('/wall/') || pathname.startsWith('/wall-');
+    return AUDIENCE_PATHS.some((p) => pathname === p || pathname.startsWith(`${p}/`)) || pathname.startsWith('/wall-');
 }
 
 /**

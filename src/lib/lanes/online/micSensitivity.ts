@@ -13,7 +13,7 @@
 import type { MicSensitivity } from './pcm16Capture';
 
 export const MIC_SENSITIVITY_KEY = 'proyaku_online_mic_sense';
-export const MIC_SENSITIVITY_DEFAULT: MicSensitivity = 'auto';
+export const MIC_SENSITIVITY_DEFAULT: MicSensitivity = 'far';
 
 /** Vietnamese label + one sentence for whoever stands at the technical desk. Ordered most to least strict. */
 export const MIC_SENSITIVITY_OPTIONS: readonly { value: MicSensitivity; label: string; hint: string }[] = [
@@ -27,7 +27,12 @@ export function isMicSensitivity(v: unknown): v is MicSensitivity {
   return v === 'auto' || v === 'close' || v === 'medium' || v === 'far';
 }
 
-/** Read the stored choice. Absent / corrupt / storage blocked → 'auto' (adapts to whatever mic is used). */
+/**
+ * Read the stored choice. Absent / corrupt / storage blocked → 'far'.
+ *
+ * 26/08/2026, khi bàn giao: mặc định chuyển 'auto' → 'far'. Chủ trương là NGHE ĐƯỢC NHIỀU NHẤT rồi mới
+ * siết lại nếu ồn, chứ không phải siết sẵn rồi mất câu. 'far' là ngưỡng thấp nhất trong bốn nấc.
+ */
 export function loadMicSensitivity(): MicSensitivity {
   try {
     const v = localStorage.getItem(MIC_SENSITIVITY_KEY);

@@ -50,9 +50,12 @@ describe('speechRhythm — the anti-fragment knob', () => {
     }
   })
 
-  it('2 · mặc định là "normal" và nấc đó KHÔNG gửi gì lên — không ai bị đổi hành vi', () => {
-    expect(SPEECH_RHYTHM_DEFAULT).toBe('normal')
-    expect(rhythmPauseSecs(SPEECH_RHYTHM_DEFAULT)).toBeUndefined()
+  it('2 · mặc định là "vendor" — chạy liền mạch, không bao giờ cắt vì dấu câu (chốt bàn giao 26/08)', () => {
+    expect(SPEECH_RHYTHM_DEFAULT).toBe('vendor')
+    expect(rhythmPauseSecs(SPEECH_RHYTHM_DEFAULT)).toBe(PAUSE_SECS_MAX)
+    expect(rhythmUsesManualCommit(SPEECH_RHYTHM_DEFAULT)).toBe(false)
+    // Nấc "normal" vẫn phải giữ nguyên hành vi cũ cho ai chọn tay nó.
+    expect(rhythmPauseSecs('normal')).toBeUndefined()
   })
 
   it('3 · nấc nào có gửi giây thì giây đó nằm trong khoảng an toàn', () => {
@@ -110,7 +113,9 @@ describe('speechRhythm — the anti-fragment knob', () => {
     const profile = createSpeechPauseProfile()
     for (let i = 0; i < 12; i += 1) profile.observe(1_600, 'ja')
     const pick = (v: SpeechRhythm): number => {
-      if (v === SPEECH_RHYTHM_DEFAULT) return profile.windows('ja')!.sentenceMs
+      // 26/08: lane hỏi thẳng nấc 'normal', không hỏi qua hằng số mặc định — đổi mặc định không được
+      // lặng lẽ đổi hành vi của nấc mà người vận hành đã chọn tay.
+      if (v === 'normal') return profile.windows('ja')!.sentenceMs
       const rung = rhythmCommitWindows(v)
       if (!rung.adaptive) return rung.sentenceMs
       return profile.windows('ja', rung.maxMs)?.sentenceMs ?? rung.sentenceMs

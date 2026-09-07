@@ -20,8 +20,25 @@ describe('buildParagraphs', () => {
     expect(buildParagraphs([L({ lid: 'a', targetText: 'A', at: 0, dir: 'ja2vi' }), L({ lid: 'b', targetText: '日本', at: 1000, dir: 'vi2ja' })]).length).toBe(2)
   })
 
-  it('splits when the merged translation reaches 200 chars', () => {
+  it('splits when the merged Japanese translation reaches its 200-char cap', () => {
+    const long = 'あ'.repeat(150)
+    const p = buildParagraphs([L({ lid: 'a', dir: 'vi2ja', targetText: long, at: 0 }), L({ lid: 'b', dir: 'vi2ja', targetText: long, at: 1000 })])
+    expect(p.length).toBe(2)
+  })
+
+  // 07/08 — the cap became per-language. This length used to break a Vietnamese paragraph while the SAME
+  // amount of meaning in Japanese sailed through, because a Vietnamese sentence carries 2.24× the characters
+  // (measured on the 60 aligned rows of the real gala script). On the wall that read as every Vietnamese
+  // sentence being shoved onto a paragraph of its own while the Japanese side flowed. This case pins the
+  // fix from the audience's side rather than from the constant's side.
+  it('keeps Vietnamese flowing at a length that would break a Japanese paragraph', () => {
     const long = 'x'.repeat(150)
+    const p = buildParagraphs([L({ lid: 'a', targetText: long, at: 0 }), L({ lid: 'b', targetText: long, at: 1000 })])
+    expect(p.length).toBe(1)
+  })
+
+  it('splits Vietnamese too, once it reaches its own 370-char cap', () => {
+    const long = 'x'.repeat(300)
     expect(buildParagraphs([L({ lid: 'a', targetText: long, at: 0 }), L({ lid: 'b', targetText: long, at: 1000 })]).length).toBe(2)
   })
 

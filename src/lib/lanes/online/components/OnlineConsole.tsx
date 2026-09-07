@@ -13,7 +13,7 @@
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { useOnlineLane, fetchOnlineConfigStatus, summarizePrepDocs, ONLINE_SPEED_RANGE, SUBTITLE_FONT, type LaneStatus, type OnlineVoice, type AudienceLine, type WallOutput, type WallDock, HALL_CHAR_CM, WALL_M, clampWallM, hasPhysicalSize, hallMockupUrl, readingDistanceM, type HallWall, MIC_SENSITIVITY_OPTIONS, micSensitivityLabel, LOUD_GATE_OPTIONS, resolveLoudThreshold, type MicSensitivity, type LoudGateMode, splitMishearingLines, previewKeyterms, KEYTERM_MAX, KEYTERM_MAX_LEN, fetchOnlineGlossary, saveOnlineGlossary, parseGlossaryLines, formatGlossaryLines, fetchSessionBoxes, saveSessionBoxes, EMPTY_SESSION_BOXES, fetchMishearings, saveMishearings } from '../index'
+import { useOnlineLane, SHOW_ONLINE_TUNING, fetchOnlineConfigStatus, summarizePrepDocs, ONLINE_SPEED_RANGE, SUBTITLE_FONT, type LaneStatus, type OnlineVoice, type AudienceLine, type WallOutput, type WallDock, HALL_CHAR_CM, WALL_M, clampWallM, hasPhysicalSize, hallMockupUrl, readingDistanceM, type HallWall, MIC_SENSITIVITY_OPTIONS, micSensitivityLabel, LOUD_GATE_OPTIONS, resolveLoudThreshold, type MicSensitivity, type LoudGateMode, splitMishearingLines, previewKeyterms, KEYTERM_MAX, KEYTERM_MAX_LEN, fetchOnlineGlossary, saveOnlineGlossary, parseGlossaryLines, formatGlossaryLines, fetchSessionBoxes, saveSessionBoxes, EMPTY_SESSION_BOXES, fetchMishearings, saveMishearings } from '../index'
 import { useConferenceMode } from '../../../ConferenceModeContext'
 import { useActiveEvent } from '../../../ActiveEventContext'
 import { collectPrepPack, collectPrepDocuments, collectPrepHeader, collectSegmentBrief, type PrepPack } from '../../../prepData'
@@ -1347,42 +1347,47 @@ const OnlineConsole: React.FC = () => {
                   className="inline-flex items-center gap-1.5 rounded-lg border border-outline-variant text-on-surface-variant px-3 py-1.5 text-xs hover:text-primary hover:border-primary transition-colors disabled:opacity-50">
                   <span className="material-symbols-outlined text-[16px]" aria-hidden="true">refresh</span>Quét lại
                 </button>
-                <label className="flex items-center gap-2 font-label-caps text-label-caps text-on-surface-variant cursor-pointer">
-                  <input type="checkbox" checked={lane.nearMicGate} onChange={(e) => lane.setNearMicGate(e.target.checked)} disabled={lane.running} className="accent-secondary" />
-                  Noise gate (near-mic)
-                </label>
-                <div>
-                  <label htmlFor="online-console-micsense" className="flex items-center gap-2 font-label-caps text-label-caps text-on-surface-variant"
-                    title="Ngưỡng để máy coi là 'có tiếng nói'. Mic để xa (Jabra, speakerphone) → Tự động hoặc Mic xa. Chốt khi Bắt đầu — đổi lúc đang chạy thì áp dụng từ lần bắt đầu sau.">
-                    Độ nhạy micro
-                    <select id="online-console-micsense" value={lane.micSensitivity} onChange={(e) => lane.setMicSensitivity(e.target.value as MicSensitivity)} disabled={lane.running} className={SELECT_CLS}>
-                      {MIC_SENSITIVITY_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
-                    </select>
+                {/* BÀN GIAO 26/08/2026 — ba nút tinh chỉnh dưới đây được ẨN, không xoá. Cơ chế vẫn
+                    chạy y nguyên theo mặc định đã chốt (near-mic TẮT · Mic xa · Rất thấp).
+                    Bật lại: đổi MỘT dòng trong lanes/online/tuningVisibility.ts. */}
+                {SHOW_ONLINE_TUNING && (<>
+                  <label className="flex items-center gap-2 font-label-caps text-label-caps text-on-surface-variant cursor-pointer">
+                    <input type="checkbox" checked={lane.nearMicGate} onChange={(e) => lane.setNearMicGate(e.target.checked)} disabled={lane.running} className="accent-secondary" />
+                    Noise gate (near-mic)
                   </label>
-                  {/* Same key as the Settings page: here it is a quick change for this meeting, there it is
-                      the machine's default. */}
-                  <p className="text-[11px] leading-relaxed text-on-surface-variant/80 mt-1">
-                    Đang dùng: <strong>{micSensitivityLabel(lane.micSensitivity)}</strong> · mặc định của máy này đặt ở{' '}
-                    <button type="button" onClick={() => nav('/settings#ms')} className="underline hover:text-primary">Cài đặt → Độ nhạy micro</button>.
-                  </p>
-                </div>
-                {/* "Ngưỡng đủ to". NOT disabled while running, on purpose: this is the knob you turn WHILE
-                    listening — lower it one step and read the two numbers in Chẩn đoán immediately.
-                    Forcing a Dừng/Bắt đầu to try the next step would destroy the point of having it. */}
-                <div>
-                  <label htmlFor="online-console-loudgate" className="flex items-center gap-2 font-label-caps text-label-caps text-on-surface-variant"
-                    title="Âm lượng tối thiểu để máy tin là 'vừa có tiếng'. Quá 4 giây không lần nào chạm ngưỡng thì mọi câu nghe được đều bị vứt. Mic để xa thì hạ xuống. Đổi được ngay giữa buổi.">
-                    Ngưỡng đủ to
-                    <select id="online-console-loudgate" value={lane.loudGate} onChange={(e) => lane.setLoudGate(e.target.value as LoudGateMode)} className={SELECT_CLS}>
-                      {LOUD_GATE_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
-                    </select>
-                  </label>
-                  <p className="text-[11px] leading-relaxed text-on-surface-variant/80 mt-1">
-                    Đang áp: <strong>{resolveLoudThreshold(lane.loudGate, lane.micSensitivity).toFixed(4)}</strong>
-                    {' '}· đổi được ngay giữa buổi, không cần Bắt đầu lại. Nếu có người đang nói mà phụ đề
-                    đứng im, so <em>ngưỡng</em> với <em>VU đỉnh</em> ở khối Chẩn đoán rồi hạ một nấc.
-                  </p>
-                </div>
+                  <div>
+                    <label htmlFor="online-console-micsense" className="flex items-center gap-2 font-label-caps text-label-caps text-on-surface-variant"
+                      title="Ngưỡng để máy coi là 'có tiếng nói'. Mic để xa (Jabra, speakerphone) → Tự động hoặc Mic xa. Chốt khi Bắt đầu — đổi lúc đang chạy thì áp dụng từ lần bắt đầu sau.">
+                      Độ nhạy micro
+                      <select id="online-console-micsense" value={lane.micSensitivity} onChange={(e) => lane.setMicSensitivity(e.target.value as MicSensitivity)} disabled={lane.running} className={SELECT_CLS}>
+                        {MIC_SENSITIVITY_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+                      </select>
+                    </label>
+                    {/* Same key as the Settings page: here it is a quick change for this meeting, there it is
+                        the machine's default. */}
+                    <p className="text-[11px] leading-relaxed text-on-surface-variant/80 mt-1">
+                      Đang dùng: <strong>{micSensitivityLabel(lane.micSensitivity)}</strong> · mặc định của máy này đặt ở{' '}
+                      <button type="button" onClick={() => nav('/settings#ms')} className="underline hover:text-primary">Cài đặt → Độ nhạy micro</button>.
+                    </p>
+                  </div>
+                  {/* "Ngưỡng đủ to". NOT disabled while running, on purpose: this is the knob you turn WHILE
+                      listening — lower it one step and read the two numbers in Chẩn đoán immediately.
+                      Forcing a Dừng/Bắt đầu to try the next step would destroy the point of having it. */}
+                  <div>
+                    <label htmlFor="online-console-loudgate" className="flex items-center gap-2 font-label-caps text-label-caps text-on-surface-variant"
+                      title="Âm lượng tối thiểu để máy tin là 'vừa có tiếng'. Quá 4 giây không lần nào chạm ngưỡng thì mọi câu nghe được đều bị vứt. Mic để xa thì hạ xuống. Đổi được ngay giữa buổi.">
+                      Ngưỡng đủ to
+                      <select id="online-console-loudgate" value={lane.loudGate} onChange={(e) => lane.setLoudGate(e.target.value as LoudGateMode)} className={SELECT_CLS}>
+                        {LOUD_GATE_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+                      </select>
+                    </label>
+                    <p className="text-[11px] leading-relaxed text-on-surface-variant/80 mt-1">
+                      Đang áp: <strong>{resolveLoudThreshold(lane.loudGate, lane.micSensitivity).toFixed(4)}</strong>
+                      {' '}· đổi được ngay giữa buổi, không cần Bắt đầu lại. Nếu có người đang nói mà phụ đề
+                      đứng im, so <em>ngưỡng</em> với <em>VU đỉnh</em> ở khối Chẩn đoán rồi hạ một nấc.
+                    </p>
+                  </div>
+                </>)}
               </section>
 
               <div className="h-px bg-outline-variant"></div>

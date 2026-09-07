@@ -137,10 +137,20 @@ export function scanWallScreens(outputs: WallOutput[], screenCount: number): Wal
 // to, to decide whether a reused window actually needs re-navigating.
 const wallWindows = new Map<string, Window>()
 const wallUrls = new Map<string, string>()
+// …and the rectangle each was last actually moved to, so pressing the button again with nothing changed
+// does not count as a move. See the two guards in `openWallWindows`.
+const wallGeom = new Map<string, string>()
 
 // Reading `.closed` on a lost or cross-origin handle can throw — a handle we cannot inspect counts as closed.
 function isClosed(win: Window): boolean {
   try { return win.closed } catch { return true }
+}
+
+// A wall window showing fullscreen is where somebody deliberately put it — on ceremony night that is a
+// technician who dragged it onto the LED and pressed F. Same-origin, so `document` is readable; a browser
+// that refuses to answer says "not fullscreen" and the old behaviour stands.
+function isFullscreen(win: Window): boolean {
+  try { return win.document.fullscreenElement != null } catch { return false }
 }
 
 export interface WallGeometry { left: number; top: number; width: number; height: number }
@@ -205,14 +215,22 @@ export function openWallWindows(outputs: WallOutput[], screens: WallScreen[], fo
     const url = `/wall?dir=${o.view}&font=${fontSize}${src}${hall}`
     const { left, top, width, height } = wallWindowGeometry(o, screens, i, total, { width: availW, height: availH })
 
+    const geomKey = `${left},${top},${width},${height}`
     const existing = wallWindows.get(o.id)
     if (existing && !isClosed(existing)) {
       // Already open: re-navigate ONLY when the content changed (avoid flicker / a dropped BroadcastChannel
-      // mid-ceremony), then always move/resize it back onto its assigned screen.
+      // mid-ceremony), then move it back onto its assigned screen — but only when there is a move to make.
       if (wallUrls.get(o.id) !== url) {
         try { existing.location.replace(url); wallUrls.set(o.id, url) } catch { /* navigation blocked — leave as-is */ }
       }
-      try { existing.moveTo(left, top); existing.resizeTo(width, height) } catch { /* browsers restrict move/resize */ }
+      // Pressing "Mở màn" again is the operator's reflex after every small change — one more window, a font
+      // step, a second look. It used to yank EVERY open window back to the computed rectangle, so the wall
+      // a technician had already dragged onto the hall LED and put into fullscreen jumped out of fullscreen
+      // and back onto the laptop, in front of the room. Two narrow guards: a fullscreen window is never
+      // touched, and a rectangle identical to the one last applied is not a move at all.
+      if (!isFullscreen(existing) && wallGeom.get(o.id) !== geomKey) {
+        try { existing.moveTo(left, top); existing.resizeTo(width, height); wallGeom.set(o.id, geomKey) } catch { /* browsers restrict move/resize */ }
+      }
       try { existing.focus() } catch { /* ignore */ }
       opened++
       return
@@ -223,11 +241,11 @@ export function openWallWindows(outputs: WallOutput[], screens: WallScreen[], fo
     let win: Window | null = null
     try { win = window.open(url, `proyaku-wall-${o.id}`, `popup=yes,left=${left},top=${top},width=${width},height=${height}`) } catch { win = null }
     if (!win) {
-      wallWindows.delete(o.id); wallUrls.delete(o.id)
+      wallWindows.delete(o.id); wallUrls.delete(o.id); wallGeom.delete(o.id)
       blocked++
       return
     }
-    wallWindows.set(o.id, win); wallUrls.set(o.id, url)
+    wallWindows.set(o.id, win); wallUrls.set(o.id, url); wallGeom.set(o.id, geomKey)
     try { win.moveTo(left, top); win.resizeTo(width, height) } catch { /* browsers restrict move/resize */ }
     try { win.focus() } catch { /* ignore */ }
     opened++
@@ -241,7 +259,7 @@ export function openWallWindows(outputs: WallOutput[], screens: WallScreen[], fo
 export function getOpenWallIds(): string[] {
   const live: string[] = []
   for (const [id, win] of wallWindows) {
-    if (isClosed(win)) { wallWindows.delete(id); wallUrls.delete(id) }
+    if (isClosed(win)) { wallWindows.delete(id); wallUrls.delete(id); wallGeom.delete(id) }
     else live.push(id)
   }
   return live
@@ -254,4 +272,5 @@ export function closeWallWindows(): void {
   }
   wallWindows.clear()
   wallUrls.clear()
+  wallGeom.clear()
 }

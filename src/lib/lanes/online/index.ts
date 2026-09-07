@@ -307,7 +307,10 @@ export function useOnlineLane(): UseOnlineLane {
   const [outputDevices, setOutputDevices] = useState<MediaDeviceInfo[]>([])
   const [deviceId, setDeviceId] = useState('')
   const [outputDeviceId, setOutputDeviceIdState] = useState('')
-  const [nearMicGate, setNearMicGate] = useState(true)
+  // "Noise gate (near-mic)" — 26/08/2026 mặc định TẮT khi bàn giao. Chốt này cắt âm khi tiếng nghe có vẻ
+  // "ở xa", nên trên speakerphone giữa bàn nó vứt đúng thứ cần nghe. Chủ trương bàn giao là nghe được
+  // nhiều nhất; ai cần siết lại thì bật tay ở console.
+  const [nearMicGate, setNearMicGate] = useState(false)
   // "Độ nhạy micro" — persisted: the hall's mic does not change between rehearsal and the ceremony, so
   // the technician sets it ONCE in Cài đặt (`OnlineMicSettings`). Read through the shared module so the
   // two screens can never drift apart. Unknown/absent value → 'auto' (adapts to whatever mic is used).
@@ -380,7 +383,7 @@ export function useOnlineLane(): UseOnlineLane {
   micSensitivityRef.current = micSensitivity
   const loudGateRef = useRef<LoudGateMode>('auto')
   loudGateRef.current = loudGate
-  const nearMicGateRef = useRef(true)
+  const nearMicGateRef = useRef(false)
   nearMicGateRef.current = nearMicGate
   const speakEnabledRef = useRef(true)
   speakEnabledRef.current = speakEnabled
@@ -773,3 +776,6 @@ export { default as OnlineGuidedMatchSettings } from './components/OnlineGuidedM
 //   OnlineLivePromoteSettings — the Settings "Nhả câu sớm" section: cut sentences out of the live partial
 //   instead of waiting for the recogniser to close its turn. Default OFF.
 export { default as OnlineLivePromoteSettings } from './components/OnlineLivePromoteSettings'
+//   SHOW_ONLINE_TUNING — công tắc DUY NHẤT ẩn/hiện các nút tinh chỉnh của luồng ONLINE (bàn giao
+//   26/08/2026). Ẩn giao diện, KHÔNG tắt cơ chế: xem `tuningVisibility.ts`.
+export { SHOW_ONLINE_TUNING } from './tuningVisibility'

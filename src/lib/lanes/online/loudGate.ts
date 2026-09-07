@@ -32,7 +32,7 @@ export const LOUD_NOISE_REFERENCE_RMS = 0.002;
 export type LoudGateMode = 'auto' | 'standard' | 'low' | 'verylow';
 
 export const LOUD_GATE_KEY = 'proyaku_online_loud_gate';
-export const LOUD_GATE_DEFAULT: LoudGateMode = 'auto';
+export const LOUD_GATE_DEFAULT: LoudGateMode = 'verylow';
 
 // The two manual steps sit BELOW the bottom of the auto ladder — that is the whole reason they exist. The
 // operator tries auto first; if sentences are still lost there has to be somewhere further down to go,
@@ -74,7 +74,13 @@ export function resolveLoudThreshold(mode: LoudGateMode, sensitivity: MicSensiti
   return Math.round(LOUD_BASE_THRESHOLD * ratio * 10_000) / 10_000;
 }
 
-/** Read the stored choice. Absent / corrupt / storage blocked → auto. */
+/**
+ * Read the stored choice. Absent / corrupt / storage blocked → 'verylow'.
+ *
+ * 26/08/2026, khi bàn giao: mặc định chuyển 'auto' → 'verylow', cùng chủ trương với Độ nhạy micro —
+ * gần như tắt hẳn chốt này để không câu nào bị bỏ vì "chưa đủ to". Đổi lại: một tiếng động to trong
+ * phòng cũng đủ để máy tin là vừa có người nói.
+ */
 export function loadLoudGate(): LoudGateMode {
   try {
     const v = localStorage.getItem(LOUD_GATE_KEY);

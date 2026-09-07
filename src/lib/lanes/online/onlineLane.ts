@@ -36,7 +36,7 @@ import { createDirectionRouter, type DirectionRouter } from './directionRouter';
 import { createSpeakGate } from './speakGate';
 import { createSourceAttributor } from './sourceAttribution';
 import { fetchAsrSession, createAsrCodec, type AsrCodec } from './asrTransport';
-import { SPEECH_RHYTHM_DEFAULT, loadSpeechRhythm, rhythmCommitWindows, rhythmPauseSecs, rhythmUsesManualCommit, speechRhythmLabel } from './speechRhythm';
+import { loadSpeechRhythm, rhythmCommitWindows, rhythmPauseSecs, rhythmUsesManualCommit, speechRhythmLabel } from './speechRhythm';
 import { refineReasonText } from './refineFailure';
 
 const ONLINE_BASE = '/online-api';
@@ -1108,7 +1108,7 @@ export function createOnlineLane(events: LaneEvents, config: OnlineLaneConfig = 
           if (v >= loudThreshold) lastLoudAt = now;
         },
         {
-          nearMicGate: config.getNearMicGate?.() ?? true,
+          nearMicGate: config.getNearMicGate?.() ?? false,
           micSensitivity: config.getMicSensitivity?.() ?? 'auto',
           systemStream: config.getSystemStream?.() ?? null,
         },
@@ -1412,7 +1412,7 @@ export function createOnlineLane(events: LaneEvents, config: OnlineLaneConfig = 
     learned: boolean;
   } {
     const rhythm = loadSpeechRhythm();
-    if (rhythm === SPEECH_RHYTHM_DEFAULT) {
+    if (rhythm === 'normal') {
       const measured = pauseProfile.windows(pauseKey);
       return { windows: measured, learned: Boolean(measured) };
     }

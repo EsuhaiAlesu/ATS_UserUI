@@ -11,7 +11,7 @@
 // and long unbroken text wraps. This is a reskin only — no change to props, state or behaviour.
 
 import React, { useEffect } from 'react'
-import { ONLINE_STATUS_COLOR, useOnlineLane, type TtsGateMode } from '../index'
+import { ONLINE_STATUS_COLOR, useOnlineLane, SHOW_ONLINE_TUNING, type TtsGateMode } from '../index'
 
 const CARD = 'card-lux bg-surface-container border border-outline-variant rounded-xl p-4'
 const LABEL = 'font-label-caps text-label-caps text-on-surface-variant block mb-1.5'
@@ -63,10 +63,14 @@ const OnlinePanel: React.FC<{
             </button>
           </div>
 
-          <label className={`flex items-center gap-2 text-sm mb-3 ${running ? 'cursor-not-allowed opacity-60' : 'cursor-pointer'}`}>
-            <input type="checkbox" className="accent-secondary w-4 h-4" checked={lane.nearMicGate} disabled={running} onChange={(e) => lane.setNearMicGate(e.target.checked)} />
-            Noise gate (near-mic) — {lane.nearMicGate ? 'BẬT' : 'TẮT'}
-          </label>
+          {/* BÀN GIAO 26/08/2026 — nút tinh chỉnh, ẨN chứ không xoá. Mặc định near-mic đã TẮT.
+              Bật lại: đổi MỘT dòng trong lanes/online/tuningVisibility.ts. */}
+          {SHOW_ONLINE_TUNING && (
+            <label className={`flex items-center gap-2 text-sm mb-3 ${running ? 'cursor-not-allowed opacity-60' : 'cursor-pointer'}`}>
+              <input type="checkbox" className="accent-secondary w-4 h-4" checked={lane.nearMicGate} disabled={running} onChange={(e) => lane.setNearMicGate(e.target.checked)} />
+              Noise gate (near-mic) — {lane.nearMicGate ? 'BẬT' : 'TẮT'}
+            </label>
+          )}
 
           <span className={LABEL}>Chiều dịch</span>
           <div className="flex gap-2">

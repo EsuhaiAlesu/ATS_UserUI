@@ -11,7 +11,21 @@ export const clampSubtitleFont = (n: number): number =>
 
 // Rule 4 thresholds.
 const MERGE_GAP_MS = 7_000
-const MERGE_MAX_CHARS = 200
+// The length cap is PER TARGET LANGUAGE, because a character is not a unit of meaning. One shared cap of
+// 200 let Japanese merge about four utterances into a flowing paragraph while Vietnamese broke after one and
+// a half — on the wall that reads as every Vietnamese sentence being shoved into a paragraph of its own
+// while the Japanese side flows. Two independent measurements of the same asymmetry: the 60 aligned rows of
+// the real gala script put the Vietnamese side at 2.24× the characters of the Japanese one (median 129 vs
+// 49), and a Japanese glyph is about one em wide against a Latin half, so ~2× the characters occupy the
+// same width of wall.
+//
+// The number used here is deliberately NOT a third measurement: `SEGMENT_VI_CHAR_FACTOR` (1.85, in the
+// lane's transcriptSegmentation.ts) already scales the CUTTING ceiling for exactly this reason, measured on
+// live recogniser output. Cutting and paragraphing must not drift apart, so the same factor rules both. It
+// is duplicated rather than imported because this file is lane-neutral and may not reach into
+// src/lib/lanes/online/ (CLAUDE.md rule 2) — if one moves, move the other.
+const VI_CHAR_FACTOR = 1.85
+export const MERGE_MAX_CHARS = { ja: 200, vi: Math.round(200 * VI_CHAR_FACTOR) } as const
 
 // ── M10: how the wall window lays itself out at the size it actually IS ──
 // The same page serves a hall projector and a phone-shaped strip docked beside the operator's other apps.
@@ -83,13 +97,14 @@ export function buildParagraphs(lines: AudienceLine[]): SubtitleParagraph[] {
     const cur = groups[groups.length - 1]
     if (cur) {
       const prev = cur[cur.length - 1]
-      const joiner = joinerOf(targetLangOf(line.dir))
+      const lang = targetLangOf(line.dir)
+      const joiner = joinerOf(lang)
       const curLen = cur.reduce((n, l, i) => n + l.targetText.trim().length + (i ? joiner.length : 0), 0)
       const mergedLen = curLen + joiner.length + line.targetText.trim().length
       const canMerge =
         line.at - prev.at <= MERGE_GAP_MS &&
         line.dir === prev.dir &&
-        mergedLen < MERGE_MAX_CHARS &&
+        mergedLen < MERGE_MAX_CHARS[lang] &&
         !prev.interim // no unfinished tail
       if (canMerge) { cur.push(line); continue }
     }

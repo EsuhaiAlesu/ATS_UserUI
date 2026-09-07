@@ -37,8 +37,10 @@ const decide = (live: string, candidate: string, candidateAt: number, now: numbe
     })
 
 describe('nấc', () => {
-    it('1 · mặc định là TẮT — đường đi mới của mọi câu phải được bật cố ý', () => {
-        expect(LIVE_PROMOTE_DEFAULT).toBe('off')
+    it('1 · mặc định là THẬN TRỌNG (0,90s) — chốt bàn giao 26/08', () => {
+        expect(LIVE_PROMOTE_DEFAULT).toBe('careful')
+        expect(livePromoteStableMs(LIVE_PROMOTE_DEFAULT)).toBe(900)
+        expect(livePromoteLabel(LIVE_PROMOTE_DEFAULT)).toBe('Thận trọng')
         expect(livePromoteStableMs('off')).toBe(0)
         expect(livePromoteLabel('off')).toBe('Tắt')
     })
@@ -54,8 +56,12 @@ describe('nấc', () => {
         expect(livePromoteStableMs('normal')).toBeGreaterThan(livePromoteStableMs('fast'))
     })
 
-    it('3 · nấc lạ đọc thành TẮT, không phải "nhả ngay"', () => {
-        expect(livePromoteStableMs('khong-co-nac-nay' as never)).toBe(0)
+    // 26/08: mặc định đổi từ 'off' sang 'careful', nên giá trị lạ nay rơi về 'careful' chứ không về 0.
+    // Điều PHẢI giữ vẫn là điều cũ: giá trị lạ không bao giờ được thành nấc NHANH NHẤT. Nấc mặc định là
+    // nấc chậm nhất trong ba nấc có bật, nên tính chất đó còn nguyên.
+    it('3 · nấc lạ rơi về nấc mặc định, và không bao giờ thành nấc nhanh nhất', () => {
+        expect(livePromoteStableMs('khong-co-nac-nay' as never)).toBe(livePromoteStableMs(LIVE_PROMOTE_DEFAULT))
+        expect(livePromoteStableMs('khong-co-nac-nay' as never)).toBeGreaterThan(livePromoteStableMs('fast'))
     })
 })
 

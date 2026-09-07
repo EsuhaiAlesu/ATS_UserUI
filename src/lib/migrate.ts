@@ -12,12 +12,28 @@ export function migrateToEventScoped(): void {
     try {
         if (localStorage.getItem(FLAG)) return;   // already migrated
 
+        const legacy = localStorage.getItem('proyaku_script');
+
+        // NOTHING TO MIGRATE — and on a machine like this, migration must leave no trace at all.
+        //
+        // `ensureDefaultEvent()` used to run unconditionally, one line above this one. On a machine that
+        // has never been used it CREATES a meeting, and a machine holding one meeting is no longer empty:
+        // `adoptFromCloudIfEmpty()` runs a moment later in `bootCloud()`, asks `hasLocalPrep()`, is told
+        // yes by the meeting this function had just invented, and refuses to bring the store down. The
+        // person opening the link on a new laptop is left staring at an empty "Gala 20 năm" that nobody
+        // prepared — which is the exact failure "máy trắng tự lấy về" was built to prevent.
+        //
+        // The flag is still set: there is genuinely nothing here to migrate, now or ever. And the guard is
+        // deliberately narrow — a machine that HAS meetings but no legacy script keeps the old behaviour
+        // below (pick a default, set the workspace pointer), because there the pointer is worth setting
+        // and no meeting has to be invented to set it.
+        if (legacy == null && getEvents().length === 0) { localStorage.setItem(FLAG, 'v1'); return; }
+
         const defaultId = ensureDefaultEvent();
 
         // Attribute the legacy global script to the CONFIGURED event if it exists (else the default),
         // so the migrating user's prepared script lands where they expect — not on whichever event
         // merely happens to be nearest‑upcoming.
-        const legacy = localStorage.getItem('proyaku_script');
         let ownerId = defaultId;
         if (legacy != null) {
             const named = getEvents().find((e) => e.title.trim() && e.title.trim() === eventName().trim());
