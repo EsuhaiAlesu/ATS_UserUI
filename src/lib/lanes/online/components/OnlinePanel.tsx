@@ -1,7 +1,11 @@
 // src/lib/lanes/online/components/OnlinePanel.tsx — shared ONLINE-lane console UI.
 //
-// Driven entirely by the `useOnlineLane` facade; used by BOTH the hidden /online-lab bench and the
-// real live-screen ONLINE mode. Rendering only — no orchestration lives here.
+// Driven entirely by the `useOnlineLane` facade. Rendering only — no orchestration lives here.
+//
+// WHERE THIS IS ACTUALLY MOUNTED (it changed, and the old sentence here was wrong): only the hidden
+// /online-lab bench. The real live screen mounts `OnlineConsole` — the facade root's own console
+// shell, with its own MissingKeysModal and its own running/stop self-reporting. This file stays as
+// the SHAPE of the contract; do not wire it into a new live screen.
 // `onBeforeStart` (optional): a gate run before Start; return false to abort (e.g. the missing-key
 // popup on the real screen). The lab passes nothing → Start proceeds directly.
 //

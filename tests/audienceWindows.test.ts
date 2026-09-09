@@ -85,7 +85,7 @@ describe('scanWallScreens', () => {
 })
 
 // ---------------------------------------------------------------------------
-// Bấm "Mở màn" lần thứ hai — cái phản xạ của người điều khiển sau mỗi thay đổi nhỏ.
+// Bấm lại nút vàng "Xuất lại" — cái phản xạ của người điều khiển sau mỗi thay đổi nhỏ.
 //
 // Trước bản vá này, mỗi lần bấm là MỌI cửa sổ đang mở bị `moveTo` + `resizeTo` về đúng ô đã tính, vô
 // điều kiện. Trên sân khấu điều đó có nghĩa: tấm màn mà kỹ thuật đã kéo sang LED và bấm toàn màn hình
@@ -93,6 +93,10 @@ describe('scanWallScreens', () => {
 // cửa sổ đang toàn màn hình thì không đụng vào, và một ô y hệt ô lần trước thì không phải một cú dời.
 describe('openWallWindows — mở lại cửa sổ đã mở', () => {
   type StubWin = {
+    // Sổ ghi đi THEO cửa sổ, không phải theo biến ngoài: `boot()` cần ghi lại tham số của `window.open`,
+    // mà nó chỉ nhận được `win`. Ghi vào một biến ngoài tầm vực thì `push` ném lỗi, và lỗi đó bị chính
+    // `try/catch` quanh `window.open` nuốt mất — ca test hoá ra xanh/đỏ vì một lý do không ai thấy.
+    acts: string[]
     closed: boolean
     document: { fullscreenElement: unknown }
     location: { replace: (u: string) => void }
@@ -104,6 +108,7 @@ describe('openWallWindows — mở lại cửa sổ đã mở', () => {
 
   function makeWin(acts: string[]): StubWin {
     return {
+      acts,
       closed: false,
       document: { fullscreenElement: null },
       location: { replace: (u) => { acts.push(`replace ${u}`) } },
@@ -122,7 +127,10 @@ describe('openWallWindows — mở lại cửa sổ đã mở', () => {
     ;(globalThis as unknown as { window: unknown }).window = {
       screen: { availWidth: 1920, availHeight: 1080 },
       innerWidth: 1920, innerHeight: 1080,
-      open: () => win,
+      // Ghi lại CẢ tham số, không chỉ trả về cửa sổ. Nhánh mở-mới của TASK 136.3 tồn tại đúng vì nó hỏi
+      // bằng địa chỉ RỖNG (`window.open('', tên)`) — hỏi bằng địa chỉ thật là nạp lại trang và mất toàn
+      // màn hình. Stub bỏ qua tham số thì không ca nào thấy được sự khác nhau đó.
+      open: (u: string, n: string) => { win.acts.push(`open ${u === '' ? '(rong)' : u}|${n}`); return win },
     }
     return import('../src/lib/lanes/online/audienceWindows')
   }
@@ -164,5 +172,51 @@ describe('openWallWindows — mở lại cửa sổ đã mở', () => {
     mod.openWallWindows([out1], scr(1920), 40)
     expect(acts).toContain('moveTo 1920,0')
     expect(acts).toContain('resizeTo 1024,2048')
+  })
+
+  it('đang toàn màn hình mà đổi cỡ chữ ⇒ KHÔNG nạp lại trang, tường đứng yên trên LED', async () => {
+    // `&cm=` CHỈ vào url khi màn có số đo mét (`hasPhysicalSize`). Thiếu mét thì đổi cỡ chữ không đổi url,
+    // và ca test sẽ xanh vì một lý do khác hẳn cái nó tự nhận — gỡ hẳn chốt chặn ra nó vẫn xanh. Nên ca này
+    // dựng một màn CÓ mét, đúng như mọi màn ngoài đời. Trước đây lệnh nạp lại đứng TRƯỚC hai chốt chặn, nên
+    // một cú chỉnh cỡ chữ đủ để kéo màn LED ra khỏi toàn màn hình ngay giữa buổi.
+    const led: WallOutput = { ...out1, widthM: 6, heightM: 3 }
+    const acts: string[] = []
+    const win = makeWin(acts)
+    const mod = await boot(win)
+    mod.openWallWindows([led], scr(0), 40, 12)
+
+    // TIỀN ĐỀ, ca này phải tự chứng minh chứ không được tin. Chưa toàn màn hình thì đúng cú đổi cỡ chữ
+    // đó PHẢI nạp lại trang — đó là bằng chứng `&cm=` thật sự vào url. Thiếu bước này, ngày nào đó
+    // `&cm=` rời khỏi url là ca test xanh vì url không đổi, chứ không phải vì chốt chặn làm đúng việc:
+    // gỡ hẳn chốt chặn ra nó vẫn xanh, và cái hỏng đi thẳng lên LED giữa buổi.
+    acts.length = 0
+    mod.openWallWindows([led], scr(0), 40, 18)
+    expect(acts.some((a) => a.startsWith('replace'))).toBe(true)
+
+    win.document.fullscreenElement = {} // kỹ thuật đã kéo sang LED và bấm F
+    acts.length = 0
+    mod.openWallWindows([led], scr(0), 40, 24) // cùng một cú đổi cỡ chữ, url vẫn đổi THẬT
+    expect(acts.some((a) => a.startsWith('replace'))).toBe(false)
+    expect(acts.some((a) => a.startsWith('moveTo') || a.startsWith('resizeTo'))).toBe(false)
+  })
+
+  it('Bảng điều khiển vừa F5 ⇒ tường toàn màn hình không bị nạp lại, không bị kéo về', async () => {
+    // F5 xoá sạch Map trong module, nên cửa sổ tường quay lại bằng nhánh MỞ MỚI chứ không phải nhánh
+    // dùng lại. `window.open('', tên)` phải trả về cửa sổ cũ mà KHÔNG đụng vào nó.
+    const acts: string[] = []
+    const win = makeWin(acts)
+    const mod = await boot(win)
+    mod.openWallWindows([out1], scr(0), 40)
+
+    win.document.fullscreenElement = {}
+    acts.length = 0
+    const afterReload = await boot(win) // nạp lại module = đúng cảnh F5
+    const res = afterReload.openWallWindows([out1], scr(1920), 40)
+    expect(res.opened).toBe(1)
+    // Đây là khẳng định thật của ca này: lần hỏi ĐẦU TIÊN sau F5 phải đi kèm địa chỉ RỖNG, để lấy lại
+    // cửa sổ cũ mà không nạp lại nó. Hỏi bằng `/wall?...` là trang nạp lại và toàn màn hình bay ngay.
+    expect(acts[0]).toBe('open (rong)|proyaku-wall-center')
+    expect(acts.some((a) => a.startsWith('open /wall'))).toBe(false)
+    expect(acts.some((a) => a.startsWith('moveTo') || a.startsWith('resizeTo'))).toBe(false)
   })
 })

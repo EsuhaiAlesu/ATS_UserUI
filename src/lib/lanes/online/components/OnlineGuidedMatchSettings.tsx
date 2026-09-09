@@ -77,7 +77,8 @@ const OnlineGuidedMatchSettings: React.FC = () => {
         {value === 'open'
           ? ' — máy không đo gì cả, bấm dòng nào nhả dòng đó. Bấm nhầm dòng là ra câu khác trước mặt khán giả.'
           : ' — dòng NGẮN (dưới 8 ký tự, ví dụ “Một…”, “Kanpai!”) vẫn nhả được: máy chỉ đòi nghe đúng chừng đó chữ, nhưng đòi giống hơn (80%) vì câu ngắn dễ trùng ngẫu nhiên.'}{' '}
-        <strong>Có hiệu lực ngay</strong>, kể cả đang chạy giữa buổi. Lưu trên máy này.
+        <strong>Có hiệu lực ngay</strong>, kể cả đang chạy giữa buổi. Nấc này lưu trên máy này VÀ đi theo
+        bản sao lưu trên kho chung, nên một máy trắng có thể kéo về nấc của máy khác.
       </p>
     </div>
   )

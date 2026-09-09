@@ -1,6 +1,7 @@
 // src/lib/lanes/online/components/OnlineLivePromoteSettings.tsx — mục "Nhả câu sớm" ở màn Cài đặt.
 //
-// Đây là nấc đổi ĐƯỜNG ĐI của mọi câu, nên nó mặc định TẮT và phải được bật một cách cố ý.
+// Đây là nấc đổi ĐƯỜNG ĐI của mọi câu. Tới 26/08/2026 nó mặc định TẮT và phải được bật một cách cố ý;
+// từ bản bàn giao thì mặc định BẬT ở nấc chậm nhất — "Thận trọng" (`LIVE_PROMOTE_DEFAULT = 'careful'`).
 //
 // Vấn đề nó chữa: tới nay mọi thứ đứng sau một câu — phụ đề đậm, bản dịch tinh, giọng đọc — đều chờ máy
 // nghe **chốt lượt**. Trên micro hội trường có AGC thì máy nghe chốt rất thưa (đo 04/08: có phiên không

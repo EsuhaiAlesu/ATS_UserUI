@@ -17,7 +17,7 @@ import {
   OnlineGuidedMatchSettings,                              // Settings: "Độ khớp khi dẫn theo kịch bản"
   GUIDED_MATCH_OPTIONS, GUIDED_MATCH_DEFAULT, GUIDED_MATCH_KEY,
   loadGuidedMatch, saveGuidedMatch, guidedMatchFloor, guidedMatchLabel, type GuidedMatch,
-  OnlineLivePromoteSettings,                              // Settings: "Nhả câu sớm" (mặc định TẮT)
+  OnlineLivePromoteSettings,                              // Settings: "Nhả câu sớm" (26/08/2026: mặc định BẬT, nấc 'careful')
   LIVE_PROMOTE_OPTIONS, LIVE_PROMOTE_DEFAULT, LIVE_PROMOTE_KEY, LIVE_PROMOTE_MIN_CHARS,
   loadLivePromote, saveLivePromote, livePromoteStableMs, livePromoteLabel, decidePromotion,
   type LivePromote,
@@ -122,10 +122,13 @@ The panel accepts two optional props:
 
 ## Mode-switch pattern (live screen) — the never-both-captures rule
 
-`AudioRouting.tsx` renders EITHER the (unchanged) offline console OR the online panel, never both:
+`AudioRouting.tsx` renders EITHER the (unchanged) offline console OR the online console, never both.
+The live screen mounts `OnlineConsole` — the facade root's own console shell, with its own
+`MissingKeysModal` and its own running/stop self-reporting. `OnlinePanel` below is the SHAPE of the
+contract and is what `/online-lab` mounts; do not copy it into a new live screen:
 
 ```tsx
-const [mode, setMode] = useState<'offline' | 'online'>(/* localStorage, default 'offline' */)
+const [mode, setMode] = useState<'offline' | 'online'>(/* localStorage, default 'online' */)
 const offlineLive = isSessionActive(session.status)
 const [onlineRunning, setOnlineRunning] = useState(false)
 // NEVER two captures at once: block a mode change while EITHER lane is live.
@@ -136,13 +139,14 @@ return (
     {mode === 'offline'
       ? <OfflineConsole />                                   {/* unchanged offline experience */}
       : <OnlinePanel onBeforeStart={gateKeys} onRunningChange={setOnlineRunning} />}
-    <ModePill mode={mode} disabled={selectorDisabled} onChange={setMode} />
+    {/* The mode switch lives in the shell head bar since PROMPT-09; there is no `ModePill` in src. */}
   </div>
 )
 ```
 
 Switching to OFFLINE unmounts the online panel → its `useOnlineLane` unmount cleanup releases the mic
-BEFORE the offline lane can claim it (and vice-versa). Default mode is OFFLINE (zero regression).
+BEFORE the offline lane can claim it (and vice-versa). The default mode has been ONLINE since PROMPT-08;
+a stored choice still wins in both directions.
 
 ## Key configuration (Settings)
 
@@ -194,6 +198,26 @@ The per-meeting rhythm knob is **Settings → "Chế độ ONLINE — Nhịp nó
 component `OnlineRhythmSettings`, exported from the facade root). It is NOT in the console drawer and it
 is NOT hook state — the Settings page and the lane both go through `speechRhythm.ts` and one localStorage
 key, so they can never disagree.
+
+Since 07/09/2026 the five steps are presented as a **slider** (`input type="range"`) with −/+ buttons,
+matching the caption-size control in the same page, and the section sits OUTSIDE the
+`SHOW_ONLINE_TUNING` wrapper — the other three tuning sections stay hidden, this one does not, because
+rhythm changes per MEETING and the operator has to reach it in the hall. Left-to-right is
+`SLIDER_ORDER` = fast → normal → adaptive → slow → vendor, i.e. monotonic in the DECLARED wait
+(450 → 600 → 900 → 1100 → never). Two of those five are a starting point, not a promise:
+`onlineLane.stableCommitWindows()` special-cases BOTH 'normal' and 'adaptive' onto the measured pause
+profile, so 'normal' really runs 0,4–1,1s and 'adaptive' 0,4–2,0s once eight pauses are in — either can
+end up SHORTER than the step to its left. The chips print those ranges. That order lives in the
+component and must NOT be pushed back into
+`SPEECH_RHYTHM_OPTIONS`: `rhythmCommitWindows` falls back to index `[1]`, so any reordering that puts a
+different step at `[1]` silently moves the fallback off `normal`. (Reordering it to match SLIDER_ORDER
+exactly happens to leave `normal` there — do not read that as proof the array is safe to touch.)
+
+A compact copy of the same slider — `OnlineRhythmRail`, exported from the same component file, NOT from
+the facade root — sits in the console rail just above MÀN KHÁN GIẢ. It shares `SLIDER_ORDER` and the one
+localStorage key, has no −/+ and no toast, and the lane re-reads the step on every partial, so a drag
+mid-session changes this machine's sentence cut at once. The `pauseSecs` handed to the recogniser is
+latched during the handshake and only changes on the next Bắt đầu.
 
 Each step carries THREE numbers, split across the two halves of the pipeline:
 

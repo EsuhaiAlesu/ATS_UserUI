@@ -218,17 +218,33 @@ export function openWallWindows(outputs: WallOutput[], screens: WallScreen[], fo
     const geomKey = `${left},${top},${width},${height}`
     const existing = wallWindows.get(o.id)
     if (existing && !isClosed(existing)) {
+      // Ask this FIRST. `location.replace` swaps the document, and a brand-new document is never
+      // fullscreen, so the same question asked afterwards always answers "no".
+      const wasFullscreen = isFullscreen(existing)
       // Already open: re-navigate ONLY when the content changed (avoid flicker / a dropped BroadcastChannel
       // mid-ceremony), then move it back onto its assigned screen — but only when there is a move to make.
-      if (wallUrls.get(o.id) !== url) {
+      //
+      // A fullscreen wall is never re-navigated either. EVERY console-side change rides inside this ONE
+      // `url` — `dir`, `font`, `src`, `wm`, `hm`, `cm` — so nudging the text size one step changed the URL,
+      // and the re-navigation dropped the LED out of fullscreen in front of the room: the very thing the
+      // geometry guard below was added to stop. So the freeze covers all six, not the text size alone.
+      // `wallUrls` is deliberately left stale, so nothing is lost — but nothing is automatic either: the
+      // change lands on the NEXT PRESS of "Xuất lại" made while the window is not fullscreen. Nothing
+      // re-runs this function when the WALL leaves fullscreen: the only caller is the button's click
+      // handler, and the two `fullscreenchange` listeners in the codebase (OnlineConsole, AudioRouting)
+      // watch the CONSOLE's own document, which learns nothing about a child window. Meanwhile the wall
+      // page answers most of it on its own keys: +/− for the text size, S for the source line. `dir` and
+      // the metres have no key — for those the technician presses F first.
+      if (!wasFullscreen && wallUrls.get(o.id) !== url) {
         try { existing.location.replace(url); wallUrls.set(o.id, url) } catch { /* navigation blocked — leave as-is */ }
       }
-      // Pressing "Mở màn" again is the operator's reflex after every small change — one more window, a font
-      // step, a second look. It used to yank EVERY open window back to the computed rectangle, so the wall
-      // a technician had already dragged onto the hall LED and put into fullscreen jumped out of fullscreen
-      // and back onto the laptop, in front of the room. Two narrow guards: a fullscreen window is never
-      // touched, and a rectangle identical to the one last applied is not a move at all.
-      if (!isFullscreen(existing) && wallGeom.get(o.id) !== geomKey) {
+      // Pressing the gold "Xuất lại" button again is the operator's reflex after every small change —
+      // one more window, a font step, a second look. It used to yank EVERY open window back to the
+      // computed rectangle, so the wall a technician had already dragged onto the hall LED and put into
+      // fullscreen jumped out of fullscreen and back onto the laptop, in front of the room. Two narrow
+      // guards: a fullscreen window is never touched, and a rectangle identical to the one last applied
+      // is not a move at all.
+      if (!wasFullscreen && wallGeom.get(o.id) !== geomKey) {
         try { existing.moveTo(left, top); existing.resizeTo(width, height); wallGeom.set(o.id, geomKey) } catch { /* browsers restrict move/resize */ }
       }
       try { existing.focus() } catch { /* ignore */ }
@@ -238,8 +254,31 @@ export function openWallWindows(outputs: WallOutput[], screens: WallScreen[], fo
 
     // Not open (or the handle went dead): open a fresh popup with the position hint window.open honours only
     // on first creation.
+    //
+    // "The handle went dead" also covers an F5 on the console. These Maps live in the module, so a reload
+    // empties them while the wall is still up on the LED — and `window.open(url, name)` would find that
+    // window BY NAME and navigate it, which drops fullscreen. So ask with an EMPTY url first: per spec that
+    // hands back an existing named window without touching it, and opens a blank popup only when there is
+    // none. A wall somebody already put on the LED is adopted back into the Map and left exactly as it is.
+    //
+    // Cost of the probe, stated openly: on a press where no wall is up, `window.open` runs TWICE — once
+    // blank, once with the url. Both use the same NAME, so the second navigates the same window instead of
+    // opening a second one. The one visible artifact is a blocker that allows the blank open and then eats
+    // the second: an empty popup is left on screen and this call reports `blocked`. It heals on the next
+    // press — the probe finds that blank window by name, it is not fullscreen, and the url open navigates
+    // it. Losing fullscreen on the LED in front of the room is the worse failure, so the probe stays.
+    const name = `proyaku-wall-${o.id}`
+    const feat = `popup=yes,left=${left},top=${top},width=${width},height=${height}`
+    let probe: Window | null = null
+    try { probe = window.open('', name, feat) } catch { probe = null }
+    if (probe && !isClosed(probe) && isFullscreen(probe)) {
+      wallWindows.set(o.id, probe)
+      try { probe.focus() } catch { /* ignore */ }
+      opened++
+      return
+    }
     let win: Window | null = null
-    try { win = window.open(url, `proyaku-wall-${o.id}`, `popup=yes,left=${left},top=${top},width=${width},height=${height}`) } catch { win = null }
+    try { win = window.open(url, name, feat) } catch { win = null }
     if (!win) {
       wallWindows.delete(o.id); wallUrls.delete(o.id); wallGeom.delete(o.id)
       blocked++

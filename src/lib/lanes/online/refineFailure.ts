@@ -6,7 +6,7 @@
 
 export function refineReasonText(reason: string): string {
   if (reason === 'no-key') return 'chưa cài khoá dịch — báo người quản trị';
-  if (reason === 'timeout') return 'bên dịch trả lời quá chậm — vẫn đang giữ bản dịch nháp trên màn';
+  if (reason === 'timeout') return 'bên dịch trả lời quá chậm — nếu đã có bản nháp thì màn vẫn giữ bản nháp';
   if (reason === 'bad-json') return 'bên dịch trả về nội dung không đọc được';
   const http = /^upstream-http-(\d{3})$/.exec(reason);
   if (http) {

@@ -136,7 +136,11 @@ describe('loudGate — chốt chặn ở mã nguồn', () => {
   })
 
   it('lane đọc núm NGAY TRONG callback mức tín hiệu (đọc live từng khung)', () => {
-    expect(read('../src/lib/lanes/online/onlineLane.ts')).toContain("config.getLoudGate?.() ?? 'auto'")
+    // Bỏ chú thích TRƯỚC KHI tìm. `toContain` trên cả tệp vẫn xanh khi dòng thật bị bọc vào `/* */` —
+    // chốt chặn còn nằm đó cho phép grep nhìn thấy, nhưng không còn chạy nữa. Đây là ca DUY NHẤT ghim
+    // việc lane đọc núm live từng khung, nên nó không được thủng.
+    const src = read('../src/lib/lanes/online/onlineLane.ts').replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '')
+    expect(src).toContain('config.getLoudGate?.() ?? LOUD_GATE_DEFAULT')
   })
 
   it('ô "Ngưỡng đủ to" KHÔNG bị khoá khi đang chạy; ô "Độ nhạy micro" thì CÓ', () => {

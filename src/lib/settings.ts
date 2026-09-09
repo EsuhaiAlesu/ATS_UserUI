@@ -54,13 +54,30 @@ const LOCAL_PREFIXES = ['proyaku_script:', 'proyaku_script_sync:', 'proyaku_glos
     // mang sang máy gala sẽ mất bối cảnh, và phải gọi lại model (mất tiền, mất thời gian) ngay tại chỗ.
     'proyaku_prep_ai:'];
 
+// CHỈ dùng cho XUẤT, cố ý KHÔNG dùng cho XOÁ.
+//
+// Toàn bộ cài đặt của luồng ONLINE dùng chung tiền tố `proyaku_online_`: nhịp nói, ngưỡng đủ to, độ nhạy
+// micro, nhả câu sớm, giọng đọc, bố trí màn khán giả, cỡ chữ tường… Thiếu tiền tố này thì tệp
+// "Xuất cấu hình (JSON)" KHÔNG mang theo một nấc nào — mười bốn khoá biến mất khỏi bản xuất.
+//
+// Vì sao nút "Xoá dữ liệu cục bộ" KHÔNG được quét tiền tố này. Mười trong mười bốn khoá đó cũng nằm trong
+// `cloudSync.SETTINGS_KEYS`, và máy chủ ghi kho `settings` TRỌN GÓI (`writeStore('settings', { values })`),
+// không trộn. Nếu nút Xoá dọn luôn chúng thì `settingsSnapshot()` hụt mười khoá; lần khởi động kế tiếp mà
+// không với tới kho (mạng rớt, hoặc kho còn trắng) thì `adoptFromCloudIfEmpty()` không kéo về được, nhưng
+// `startSettingsWatch()` vẫn chạy — và bản đẩy đầu tiên sẽ xoá mười nấc đó khỏi KHO CHUNG, tức là của mọi
+// máy. Chốt so-sánh-rồi-ghi cũng không cứu được: `proyaku_cloud_base` không nằm trong danh sách xoá nên
+// máy vẫn tự nhận là đang giữ bản mới nhất. Một dòng ở đây là bán kính sát thương của một cái nút, nên
+// đừng gộp hai danh sách lại "cho gọn".
+const EXPORT_ONLY_PREFIXES = ['proyaku_online_'];
+
 // Every proyaku key currently present: the static list + anything matching a per‑event prefix.
-function allLocalKeys(): string[] {
+function allLocalKeys(extraPrefixes: readonly string[] = []): string[] {
     const keys = new Set(LOCAL_KEYS);
+    const prefixes = extraPrefixes.length > 0 ? [...LOCAL_PREFIXES, ...extraPrefixes] : LOCAL_PREFIXES;
     try {
         for (let i = 0; i < localStorage.length; i++) {
             const k = localStorage.key(i);
-            if (k && LOCAL_PREFIXES.some((p) => k.startsWith(p))) keys.add(k);
+            if (k && prefixes.some((p) => k.startsWith(p))) keys.add(k);
         }
     } catch { /* ignore */ }
     return [...keys];
@@ -68,7 +85,7 @@ function allLocalKeys(): string[] {
 
 export function exportLocalData(): string {
     const out: Record<string, unknown> = {};
-    for (const k of allLocalKeys()) {
+    for (const k of allLocalKeys(EXPORT_ONLY_PREFIXES)) {
         try {
             const v = localStorage.getItem(k);
             if (v != null) { try { out[k] = JSON.parse(v); } catch { out[k] = v; } }

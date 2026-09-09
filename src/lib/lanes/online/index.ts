@@ -78,7 +78,7 @@ export {
   loadGuidedMatch, saveGuidedMatch, guidedMatchFloor, guidedMatchLabel,
 } from './guidedMatch'
 // "Nhả câu sớm": cắt câu từ dòng partial thay vì chờ máy nghe chốt lượt. Cùng hình dạng với hai nấc trên —
-// Cài đặt chọn nấc, lane đọc LẠI ở từng partial. Mặc định TẮT: nó đổi đường đi của mọi câu.
+// Cài đặt chọn nấc, lane đọc LẠI ở từng partial. Từ 26/08/2026 mặc định là 'careful' (BẬT, nấc chậm nhất).
 export type { LivePromote } from './livePromote'
 export {
   LIVE_PROMOTE_KEY, LIVE_PROMOTE_DEFAULT, LIVE_PROMOTE_OPTIONS, LIVE_PROMOTE_MIN_CHARS,
@@ -313,7 +313,8 @@ export function useOnlineLane(): UseOnlineLane {
   const [nearMicGate, setNearMicGate] = useState(false)
   // "Độ nhạy micro" — persisted: the hall's mic does not change between rehearsal and the ceremony, so
   // the technician sets it ONCE in Cài đặt (`OnlineMicSettings`). Read through the shared module so the
-  // two screens can never drift apart. Unknown/absent value → 'auto' (adapts to whatever mic is used).
+  // two screens can never drift apart. Unknown/absent value → MIC_SENSITIVITY_DEFAULT, which since
+  // 26/08/2026 is 'far' (a hall microphone at a distance) and NOT 'auto'.
   const [micSensitivity, setMicSensitivityState] = useState<MicSensitivity>(() => loadMicSensitivity())
   // "Ngưỡng đủ to" — persisted per machine like the sensitivity, because it answers the same question
   // (how far is this microphone from the mouth). Read live by the lane, so it can be turned mid-session.
@@ -774,7 +775,8 @@ export { default as OnlineRhythmSettings } from './components/OnlineRhythmSettin
 //   closely the machine must recognise the armed line before it releases the approved translation.
 export { default as OnlineGuidedMatchSettings } from './components/OnlineGuidedMatchSettings'
 //   OnlineLivePromoteSettings — the Settings "Nhả câu sớm" section: cut sentences out of the live partial
-//   instead of waiting for the recogniser to close its turn. Default OFF.
+//   instead of waiting for the recogniser to close its turn. Since 26/08/2026 the default is ON at the
+//   slowest step: LIVE_PROMOTE_DEFAULT = 'careful'.
 export { default as OnlineLivePromoteSettings } from './components/OnlineLivePromoteSettings'
 //   SHOW_ONLINE_TUNING — công tắc DUY NHẤT ẩn/hiện các nút tinh chỉnh của luồng ONLINE (bàn giao
 //   26/08/2026). Ẩn giao diện, KHÔNG tắt cơ chế: xem `tuningVisibility.ts`.

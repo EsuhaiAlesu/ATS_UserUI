@@ -173,4 +173,31 @@ describe('cloudSync — đọc đúng khoá, kéo về đúng chỗ', () => {
     expect(read('src/lib/script.ts')).toContain(`${c.CLOUD_KEYS.script}:`);
     expect(read('src/lib/docs.ts')).toContain(`${c.CLOUD_KEYS.docs}:`);
   });
+
+  it('13 · "Xuất cấu hình" mang theo khoá proyaku_online_*, còn "Xoá dữ liệu cục bộ" KHÔNG chạm tới', async () => {
+    // Hai nửa của cùng một mục *Dữ liệu*, và chúng cố ý KHÔNG đối xứng.
+    //
+    // Bản XUẤT phải có cài đặt online: thiếu thì mang máy sang hội trường là mất sạch nhịp nói, ngưỡng đủ
+    // to, độ nhạy micro, giọng đọc, bố trí màn khán giả, cỡ chữ tường — đặt lại bằng tay dưới áp lực.
+    //
+    // Nút XOÁ thì phải để chúng lại. Mười trong mười bốn khoá đó nằm trong `SETTINGS_KEYS`, và kho chung
+    // được ghi TRỌN GÓI chứ không trộn; một máy vừa xoá sạch mà đẩy lên là xoá luôn nấc của MỌI máy khác.
+    // Xem chú thích dài ở `EXPORT_ONLY_PREFIXES` trong `src/lib/settings.ts`.
+    //
+    // Ca này gọi HÀM THẬT, không grep chuỗi: bọc tiền tố vào `/* */` là mã chết hoàn toàn mà phép grep
+    // vẫn xanh — đúng cái bẫy đã bắt được một lần.
+    store.set('proyaku_online_speech_rhythm', '"vendor"');
+    store.set('proyaku_online_wall_char_cm', '12');
+    store.set('proyaku_settings', '{"eventName":"Gala"}');
+    const s = await import('../src/lib/settings');
+
+    const dumped = JSON.parse(s.exportLocalData()) as Record<string, unknown>;
+    expect(dumped['proyaku_online_speech_rhythm']).toBe('vendor');
+    expect(dumped['proyaku_online_wall_char_cm']).toBe(12);
+
+    s.clearLocalData();
+    expect(localStorage.getItem('proyaku_online_speech_rhythm')).toBe('"vendor"');
+    expect(localStorage.getItem('proyaku_online_wall_char_cm')).toBe('12');
+    expect(localStorage.getItem('proyaku_settings')).toBeNull();
+  });
 });

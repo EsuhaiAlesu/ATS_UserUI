@@ -248,3 +248,112 @@ describe('nấc thứ năm phải tự mô tả đúng', () => {
     expect(doc).not.toContain('Each of the four steps')
   })
 })
+
+// PROMPT-19 (07/09/2026) — nhịp nói bày bằng THANH KÉO và trở lại màn Cài đặt.
+describe('thanh kéo nhịp nói', () => {
+  const ui = readFileSync(new URL('../src/lib/lanes/online/components/OnlineRhythmSettings.tsx', import.meta.url), 'utf8')
+  const settings = readFileSync(new URL('../src/pages/Settings.tsx', import.meta.url), 'utf8')
+
+  it('27 · thanh kéo đi đúng năm nấc, xếp theo thời gian chờ TĂNG DẦN', () => {
+    expect(ui).toContain("const SLIDER_ORDER: readonly SpeechRhythm[] = ['fast', 'normal', 'adaptive', 'slow', 'vendor']")
+    // Bốn nấc còn chốt theo dấu câu phải đơn điệu tăng, nếu không thì kéo sang phải lại hoá ra chờ ít hơn.
+    const waits = (['fast', 'normal', 'adaptive', 'slow'] as SpeechRhythm[]).map((v) => rhythmCommitWindows(v).sentenceMs)
+    expect(waits).toEqual([...waits].sort((a, b) => a - b))
+    expect(new Set(waits).size).toBe(waits.length)
+    // Nấc cuối là nấc KHÁC LOẠI: nó không chờ lâu hơn, nó không chốt vì dấu câu.
+    expect(rhythmUsesManualCommit('vendor')).toBe(false)
+    // Và nấc 'normal' KHÔNG chờ cố định 600ms như hàng của nó trong bảng: `stableCommitWindows` trong
+    // `onlineLane` hỏi thẳng `rhythm === 'normal'` rồi giao cho bộ tự đo (0,4–1,1s). Chữ hiện ra phải nói
+    // đúng điều đó, ở CẢ HAI chỗ — lời chú dưới thanh kéo và câu báo lúc chọn.
+    expect(SPEECH_RHYTHM_OPTIONS[1].value).toBe('normal')
+    expect(SPEECH_RHYTHM_OPTIONS[1].hint).toContain('0,4–1,1s')
+    expect(ui).toContain("const selfMeasures = w.adaptive || v === 'normal'")
+  })
+
+  it('28 · thứ tự bày KHÔNG được lấy từ SPEECH_RHYTHM_OPTIONS — nấc dự phòng vẫn phải là Bình thường', () => {
+    // `rhythmCommitWindows` rơi về SPEECH_RHYTHM_OPTIONS[1] theo CHỈ SỐ. Nếu ai đó xếp lại mảng gốc cho
+    // khớp ĐÚNG thanh kéo thì [1] tình cờ vẫn là 'normal'; mọi phép xếp lại khác thì đẩy một nấc lạ vào
+    // vị trí đó và nấc dự phòng lặng lẽ đổi theo. Nên ghim TRỌN cả hai mảng, không ghim mỗi [1].
+    expect(SPEECH_RHYTHM_OPTIONS[1].value).toBe('normal')
+    expect(SPEECH_RHYTHM_OPTIONS.map((o) => o.value)).toEqual(['slow', 'normal', 'fast', 'adaptive', 'vendor'])
+    expect(rhythmCommitWindows('khong-co-nac-nay' as SpeechRhythm)).toEqual(rhythmCommitWindows('normal'))
+  })
+
+  it('29 · vị trí thanh kéo không bao giờ rơi về mép trái vì một giá trị lạ', () => {
+    // Hai lưới khác nhau, đừng lẫn. Chữ lạ trong localStorage đã bị `loadSpeechRhythm()` đưa về
+    // SPEECH_RHYTHM_DEFAULT ('vendor', mép PHẢI) từ trước khi tới đây. Lưới Ở ĐÂY là lưới của KIỂU DỮ
+    // LIỆU: nếu một nấc hợp lệ nào đó vắng mặt trong SLIDER_ORDER thì `indexOf` trả -1, và -1 phải rơi
+    // về 'normal' chứ không rơi về mép trái — mép trái là nấc cắt sớm nhất, đúng cái hỏng mà nút này
+    // sinh ra để tránh.
+    // ĐẾM, không phải `toContain`: tệp này có HAI bản thanh kéo (bản màn Cài đặt và bản rail Bảng điều
+    // khiển), nên hỏi "có xuất hiện không" là xanh ngay cả khi một trong hai bản bị phá.
+    // Và BỎ CHÚ THÍCH TRƯỚC KHI ĐẾM: chỉ đếm chữ thô thì cách vá kiểu "bọc dòng cũ vào /* */ rồi viết
+    // dòng hỏng bên dưới" vẫn xanh — chốt chặn còn nằm đó nhưng không còn chạy nữa.
+    const code = ui.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '')
+    const guard = "SLIDER_ORDER.indexOf(value) >= 0 ? SLIDER_ORDER.indexOf(value) : SLIDER_ORDER.indexOf('normal')"
+    expect(code.split(`const at = ${guard}`).length - 1).toBe(2)
+    expect(code).not.toContain('Math.max(0, SLIDER_ORDER.indexOf(value))')
+    // CÓ chốt chặn chưa đủ, phải THẬT SỰ DÙNG nó. Chốt còn nguyên mà ô thanh kéo lại đọc thẳng
+    // `SLIDER_ORDER.indexOf(value)` thì mép trái vẫn quay lại y như cũ. Nên ghim luôn cái mà MỖI ô
+    // `type="range"` nhận vào: cả hai đều phải nhận `at`.
+    const binds = [...code.matchAll(/type="range"[\s\S]*?value=\{([^}]*)\}/g)].map((m) => m[1].trim())
+    expect(binds).toEqual(['at', 'at'])
+  })
+
+  it('30 · là thanh kéo thật, không còn năm ô tròn', () => {
+    // Cũng đếm: hai bản thanh kéo, hai lần. Bản rail bị trả về năm ô tròn thì ca này phải đỏ.
+    expect(ui.split('type="range"').length - 1).toBe(2)
+    expect(ui.split('aria-label="Nhịp nói của buổi"').length - 1).toBe(2)
+    expect(ui).not.toContain('role="radiogroup"')
+    expect(ui).not.toContain('type="radio"')
+  })
+
+  it('31 · khối "Nhịp nói của buổi" nằm NGOÀI vòng ẩn SHOW_ONLINE_TUNING', () => {
+    const rh = settings.indexOf('<Section id="rh"')
+    const hidden = settings.indexOf('{SHOW_ONLINE_TUNING && (<>')
+    expect(rh).toBeGreaterThan(-1)
+    expect(hidden).toBeGreaterThan(-1)
+    expect(rh).toBeLessThan(hidden)
+    // Đúng MỘT khối rh. Bỏ sót bước xoá khối cũ thì kho còn lại một khối chết trùng id HTML mà không
+    // cổng nào bắt được — mã vẫn dịch, test vẫn xanh, số ca vẫn đủ.
+    expect(settings.split('<Section id="rh"').length - 1).toBe(1)
+    // Ba khối kia vẫn ẩn.
+    for (const id of ['ms', 'gm', 'lp']) {
+      expect(settings.indexOf(`<Section id="${id}"`)).toBeGreaterThan(hidden)
+    }
+  })
+})
+
+// PROMPT-19 TASK 130 — thanh kéo cũng có mặt ở rail trái của Bảng điều khiển.
+describe('thanh kéo nhịp nói trên rail Bảng điều khiển', () => {
+  const ui = readFileSync(new URL('../src/lib/lanes/online/components/OnlineRhythmSettings.tsx', import.meta.url), 'utf8')
+  const con = readFileSync(new URL('../src/lib/lanes/online/components/OnlineConsole.tsx', import.meta.url), 'utf8')
+
+  it('32 · bản rail dùng CHUNG khoá lưu và CHUNG thứ tự nấc với màn Cài đặt', () => {
+    // Hai nơi mà lệch nhau thì người vận hành chỉnh ở màn này, màn kia vẫn nói số cũ — đúng kiểu lỗi
+    // không ai tìm ra giữa buổi lễ. Chung tệp, chung SLIDER_ORDER, chung loadSpeechRhythm/saveSpeechRhythm.
+    expect(ui).toContain('export const OnlineRhythmRail: React.FC = () =>')
+    const from = ui.indexOf('export const OnlineRhythmRail')
+    const to = ui.indexOf('const OnlineRhythmSettings: React.FC')
+    expect(from).toBeGreaterThan(-1)
+    expect(to).toBeGreaterThan(from)
+    const rail = ui.slice(from, to)
+    expect(rail).toContain('loadSpeechRhythm()')
+    expect(rail).toContain('saveSpeechRhythm(next)')
+    expect(rail).toContain('SLIDER_ORDER')
+    // Rail không tự dựng danh sách nấc riêng.
+    expect(rail).not.toContain('SPEECH_RHYTHM_OPTIONS')
+  })
+
+  it('33 · rail nằm trong Bảng điều khiển, TRÊN nhóm Màn khán giả, và không đi qua mặt tiền', () => {
+    // Cùng thư mục components/ thì import thẳng; mặt tiền chỉ để cho mã NGOÀI lane dùng.
+    expect(con).toContain("import { OnlineRhythmRail } from './OnlineRhythmSettings'")
+    const rail = con.indexOf('<OnlineRhythmRail />')
+    const wall = con.indexOf('{/* B · MÀN KHÁN GIẢ */}')
+    expect(rail).toBeGreaterThan(-1)
+    expect(wall).toBeGreaterThan(-1)
+    expect(rail).toBeLessThan(wall)
+    // Đúng một chỗ — rail không được dựng hai lần.
+    expect(con.split('<OnlineRhythmRail />').length - 1).toBe(1)
+  })
+})

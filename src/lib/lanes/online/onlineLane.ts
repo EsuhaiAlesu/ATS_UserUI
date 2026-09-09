@@ -11,7 +11,8 @@
 
 import type { LaneController, LaneEvents, LaneLine, LaneStatus } from '../types';
 import { startPcm16Capture, type CaptureHandle, type CapturePacket, type MicSensitivity } from './pcm16Capture';
-import { resolveLoudThreshold, type LoudGateMode } from './loudGate';
+import { LOUD_GATE_DEFAULT, resolveLoudThreshold, type LoudGateMode } from './loudGate';
+import { MIC_SENSITIVITY_DEFAULT } from './micSensitivity';
 import { endsProvisionalSentence, endsWithStrongSentenceBreak, findFirstCommaClauseBreak, findLastStrongSentenceBreak, segmentCharLimit, stripProvisionalSentenceEnd } from './transcriptSegmentation';
 import { planParagraphCut } from './paragraphStream';
 import { ASR_FINAL_MIN_VOICED_MS, ASR_PARTIAL_MIN_VOICED_MS, hasClearSpeechEvidence, isInventedNumber, isNonSpeechAnnotation } from './asrSpeechEvidence';
@@ -235,9 +236,12 @@ export interface OnlineLaneConfig {
   // "Độ nhạy micro" — which voice floor the capture worklet treats as speech. Read ONCE at Bắt đầu
   // (it is baked into the worklet's configure message), so the console disables it while running.
   getMicSensitivity?: () => MicSensitivity;
-  // "Ngưỡng đủ to" — read LIVE on every VU frame, unlike the sensitivity above. It is a knob the operator
-  // turns WHILE listening ("phụ đề đứng im dù có người đang nói → hạ một nấc"), so making them stop and
-  // restart the session to try the next step would defeat the point. Nothing is baked into the worklet.
+  // "Ngưỡng đủ to" — read LIVE on every VU frame, unlike the sensitivity above. It is a knob whoever has
+  // the tuning UI turns WHILE listening (subtitles frozen while somebody is clearly speaking → one step
+  // down), so making them stop and restart the session to try the next step would defeat the point.
+  // Nothing is baked into the worklet. On the handover build SHOW_ONLINE_TUNING is false, so the knob is
+  // off screen and the console's diagnostics line names the symptom only — it no longer prescribes a step
+  // nobody can reach.
   getLoudGate?: () => LoudGateMode;
   getSpeakEnabled?: () => boolean; // Phase 3: speak refined translations via TTS
   // M13 "Ngưng nghe" — read LIVE on every captured frame, because its whole purpose is to be flipped
@@ -350,7 +354,9 @@ export interface OnlineDiagnostics {
   // "Đủ to". These two are a PAIR and only mean anything together: `loudThreshold` is the level a VU
   // frame must reach to count as sound, `recentLevelPeak` is the loudest frame of the last 3 seconds.
   // Peak below threshold while somebody is speaking = every final of this stretch will be thrown away as
-  // `long-silence`, and lowering the knob one step is the fix. Neither number is actionable alone.
+  // `long-silence`, and lowering the knob one step is the fix — for whoever can see the knob. On the
+  // handover build it is hidden behind SHOW_ONLINE_TUNING, so the fix in the hall is a closer microphone
+  // or a hotter source. Neither number is actionable alone.
   loudThreshold: number;
   recentLevelPeak: number;
   // M9 — script matching. `scriptLines` is 0 when no script was loaded, which is the one state the
@@ -1100,16 +1106,19 @@ export function createOnlineLane(events: LaneEvents, config: OnlineLaneConfig = 
           const now = Date.now();
           // Read the knob on EVERY frame: the operator turns it mid-session while watching the two
           // numbers this same callback feeds into the diagnostics (threshold in force vs VU peak).
+          // Nhánh `??` này là lưới an toàn của kiểu dữ liệu: mặt tiền (`lanes/online/index.ts`) luôn cấp
+          // đủ ba getter nên nó chưa từng chạy. Vẫn phải nói ĐÚNG mặc định của bản bàn giao — trước đây
+          // ghi 'auto' là con số của thời trước 26/08/2026, đọc vào là hiểu sai máy đang đặt gì.
           loudThreshold = resolveLoudThreshold(
-            config.getLoudGate?.() ?? 'auto',
-            config.getMicSensitivity?.() ?? 'auto',
+            config.getLoudGate?.() ?? LOUD_GATE_DEFAULT,
+            config.getMicSensitivity?.() ?? MIC_SENSITIVITY_DEFAULT,
           );
           recentLevels.push({ at: now, v });
           if (v >= loudThreshold) lastLoudAt = now;
         },
         {
           nearMicGate: config.getNearMicGate?.() ?? false,
-          micSensitivity: config.getMicSensitivity?.() ?? 'auto',
+          micSensitivity: config.getMicSensitivity?.() ?? MIC_SENSITIVITY_DEFAULT,
           systemStream: config.getSystemStream?.() ?? null,
         },
       );

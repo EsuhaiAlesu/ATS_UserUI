@@ -85,7 +85,7 @@ export const SPEECH_RHYTHM_OPTIONS: readonly {
     longMs: 800,
     adaptive: false,
     manualCommit: true,
-    hint: 'Giữ nguyên cài đặt sẵn của máy chủ và hai mốc chờ gốc. Chọn cái này nếu không chắc.',
+    hint: 'Giữ cài đặt sẵn của máy chủ. Máy tự đo nhịp của người đang nói (0,4–1,1s) sau khoảng 8 lần ngắt; trước đó chờ 0,6s. Chọn cái này nếu không chắc.',
   },
   {
     value: 'fast',

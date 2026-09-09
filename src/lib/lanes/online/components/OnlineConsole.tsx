@@ -26,6 +26,7 @@ import { SPEAKER_MODES, guidedAllowed, guidedBlockedReason } from '../guidedScri
 import { guidedMatchFloor, guidedMatchLabel, loadGuidedMatch } from '../guidedMatch'
 import { segmentListens, segmentLanguage, segmentSpeakerName, segmentLabel, resolveScriptAnchor, anchorMessage } from '../../../segments'
 import SubtitleParagraphs from '../../../../components/SubtitleParagraphs'
+import { OnlineRhythmRail } from './OnlineRhythmSettings'
 
 type CfgStatus = Awaited<ReturnType<typeof fetchOnlineConfigStatus>>
 
@@ -798,6 +799,12 @@ const OnlineConsole: React.FC = () => {
               onClick={() => lane.setListenPaused(!lane.listenPaused)} />
           )}
 
+          {/* A2 · NHỊP NÓI — nút tinh chỉnh DUY NHẤT có mặt ở màn đang chạy.
+              Đặt ngay dưới "Ngưng nghe" vì cùng trả lời một câu: máy đang NGHE thế nào. Kéo sang trái
+              thì chữ lên nhanh nhưng dễ vụn câu, sang phải thì không cắt giữa câu nhưng chậm hơn.
+              Có hiệu lực ngay giữa buổi — lane đọc lại nấc trên mỗi partial. */}
+          <OnlineRhythmRail />
+
           {/* B · MÀN KHÁN GIẢ */}
           <div className="space-y-0.5">
             <div className="px-2 pb-1 font-label-caps text-[10px] text-on-surface-variant/55 tracking-[0.16em]">MÀN KHÁN GIẢ</div>
@@ -885,7 +892,9 @@ const OnlineConsole: React.FC = () => {
           {lane.error && (
             <div className="shrink-0 mx-4 mt-4 border border-error text-error font-label-caps text-label-caps px-4 py-2.5 rounded-DEFAULT flex items-center gap-2 z-20">
               <span className="material-symbols-outlined text-base" aria-hidden="true">error</span>
-              <span className="truncate">{lane.error}</span>
+              {/* KHÔNG `truncate`: chữ báo lỗi là câu duy nhất nói vì sao buổi đang hỏng, cắt cụt nó ở
+                  giữa là bỏ mất đúng phần cần đọc. Xuống dòng thì hộp cao thêm một dòng, thế thôi. */}
+              <span className="break-words">{lane.error}</span>
             </div>
           )}
 
@@ -1375,7 +1384,7 @@ const OnlineConsole: React.FC = () => {
                       Forcing a Dừng/Bắt đầu to try the next step would destroy the point of having it. */}
                   <div>
                     <label htmlFor="online-console-loudgate" className="flex items-center gap-2 font-label-caps text-label-caps text-on-surface-variant"
-                      title="Âm lượng tối thiểu để máy tin là 'vừa có tiếng'. Quá 4 giây không lần nào chạm ngưỡng thì mọi câu nghe được đều bị vứt. Mic để xa thì hạ xuống. Đổi được ngay giữa buổi.">
+                      title="Âm lượng tối thiểu để máy tin là 'vừa có tiếng'. Quá 4–5,5 giây (tuỳ nấc Nhịp nói) không lần nào chạm ngưỡng thì mọi câu nghe được đều bị vứt. Mic để xa thì hạ xuống. Đổi được ngay giữa buổi.">
                       Ngưỡng đủ to
                       <select id="online-console-loudgate" value={lane.loudGate} onChange={(e) => lane.setLoudGate(e.target.value as LoudGateMode)} className={SELECT_CLS}>
                         {LOUD_GATE_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
@@ -1491,11 +1500,15 @@ const OnlineConsole: React.FC = () => {
                     {/* These two MUST be read together. `ngưỡng đủ to` is the level a frame has to reach
                         before the machine believes sound just happened; `VU đỉnh 3s` is the loudest frame
                         of the last three seconds. Peak BELOW threshold while somebody is speaking = this
-                        whole stretch will be discarded as long-silence → lower "Ngưỡng đủ to" one step.
-                        The line turns red at exactly that moment, so nobody has to compare by eye. */}
+                        whole stretch will be discarded as long-silence.
+                        The line turns red at exactly that moment, so nobody has to compare by eye.
+                        It names the SYMPTOM, not a cure: on the handover build SHOW_ONLINE_TUNING is
+                        false, so "Ngưỡng đủ to" is not on screen to be lowered. What the operator can
+                        actually do in the hall is move the microphone closer or raise the source level;
+                        the escape hatch for the knob itself is written up in the handover note. */}
                     <div className={diag.recentLevelPeak > 0 && diag.recentLevelPeak < diag.loudThreshold ? 'text-error' : undefined}>
                       ngưỡng đủ to {diag.loudThreshold.toFixed(4)} · VU đỉnh 3s {diag.recentLevelPeak.toFixed(4)}
-                      {diag.recentLevelPeak > 0 && diag.recentLevelPeak < diag.loudThreshold ? ' · ĐỈNH DƯỚI NGƯỠNG — hạ một nấc' : ''}
+                      {diag.recentLevelPeak > 0 && diag.recentLevelPeak < diag.loudThreshold ? ' · ĐỈNH DƯỚI NGƯỠNG — tiếng vào quá nhỏ, đưa mic lại gần' : ''}
                     </div>
                     {/* M13 — hai chốt chống "có tiếng to nhưng không phải giọng người". `ngưng nghe` là
                         do kỹ thuật viên tự bấm (tổng thời gian đã ngưng trong buổi); `bỏ tiếng không

@@ -145,18 +145,22 @@ const Settings: React.FC = () => {
                         <OnlineKeysSettings />
                     </Section>
 
-                    {/* BÀN GIAO 26/08/2026 — bốn khối tinh chỉnh dưới đây được ẨN, không xoá.
-                        Sáu nút đã đặt sẵn ở giá trị chạy được ngay; người vận hành buổi lễ không cần
-                        thấy chúng nữa. Bật lại: đổi MỘT dòng trong lanes/online/tuningVisibility.ts. */}
+                    {/* CHẾ ĐỘ ONLINE — NHỊP NÓI CỦA BUỔI (theo từng buổi — nút chống vụn câu).
+                        07/09/2026: khối này được ĐƯA RA khỏi vòng ẩn. Ba khối kia đặt một lần rồi thôi,
+                        còn nhịp nói đổi theo TỪNG BUỔI — lễ có MC đọc kịch bản khác hẳn họp nội bộ vừa
+                        nghĩ vừa nói — nên người vận hành phải với tới được nó ngay tại hội trường. */}
+                    <Section id="rh" icon="graphic_eq" title="Chế độ ONLINE — Nhịp nói của buổi" desc="Máy chờ im lặng bao lâu mới chốt một câu. Kéo sang trái: chữ lên nhanh, dễ vụn câu. Kéo sang phải: không cắt giữa câu, chậm hơn.">
+                        <OnlineRhythmSettings />
+                    </Section>
+
+                    {/* BÀN GIAO 26/08/2026 — ba khối tinh chỉnh dưới đây được ẨN, không xoá.
+                        Năm nút đã đặt sẵn ở giá trị chạy được ngay; người vận hành buổi lễ không cần
+                        thấy chúng nữa. Bật lại: đổi MỘT dòng trong lanes/online/tuningVisibility.ts.
+                        Khối "Nhịp nói của buổi" KHÔNG còn ở đây — xem ngay trên. */}
                     {SHOW_ONLINE_TUNING && (<>
                         {/* CHẾ ĐỘ ONLINE — ĐỘ NHẠY MICRO (theo máy / theo hội trường) */}
                         <Section id="ms" icon="mic" title="Chế độ ONLINE — Độ nhạy micro" desc="Máy này đang nghe bằng loại micro nào. Đặt một lần theo phòng, không phải đặt lại mỗi buổi.">
                             <OnlineMicSettings />
-                        </Section>
-
-                        {/* CHẾ ĐỘ ONLINE — NHỊP NÓI CỦA BUỔI (theo từng buổi — nút chống vụn câu) */}
-                        <Section id="rh" icon="graphic_eq" title="Chế độ ONLINE — Nhịp nói của buổi" desc="Máy chờ im lặng bao lâu mới chốt một câu. Chờ ngắn thì câu bị cắt vụn, chờ lâu thì phụ đề lên chậm.">
-                            <OnlineRhythmSettings />
                         </Section>
 
                         {/* CHẾ ĐỘ ONLINE — ĐỘ KHỚP KHI DẪN THEO KỊCH BẢN (TASK 57) */}
@@ -165,7 +169,7 @@ const Settings: React.FC = () => {
                         </Section>
 
                         {/* CHE DO ONLINE — NHA CAU SOM */}
-                        <Section id="lp" icon="bolt" title="Chế độ ONLINE — Nhả câu sớm" desc="Cắt câu ngay từ dòng chữ mờ đang chạy, không đợi máy nghe báo hết lượt. Mặc định TẮT.">
+                        <Section id="lp" icon="bolt" title="Chế độ ONLINE — Nhả câu sớm" desc="Cắt câu ngay từ dòng chữ mờ đang chạy, không đợi máy nghe báo hết lượt. Từ 26/08/2026 mặc định BẬT ở nấc Thận trọng.">
                             <OnlineLivePromoteSettings />
                         </Section>
                     </>)}
