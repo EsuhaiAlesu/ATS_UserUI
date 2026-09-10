@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
+import { readFileSync } from 'node:fs'
 import {
   DEFAULT_WALL_OUTPUTS, loadWallOutputs, saveWallOutputs, scanWallScreens,
   type WallOutput,
@@ -218,5 +219,91 @@ describe('openWallWindows — mở lại cửa sổ đã mở', () => {
     expect(acts[0]).toBe('open (rong)|proyaku-wall-center')
     expect(acts.some((a) => a.startsWith('open /wall'))).toBe(false)
     expect(acts.some((a) => a.startsWith('moveTo') || a.startsWith('resizeTo'))).toBe(false)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// PROMPT-20 · việc 1 — làn OFFLINE đang kéo tường của làn ONLINE ra khỏi toàn màn hình.
+//
+// Hai làn đặt CÙNG MỘT tên cửa sổ `proyaku-wall-${id}` trên CÙNG bộ id center/left/right, nên trình duyệt
+// coi cửa sổ của hai làn là MỘT. Làn ONLINE đã có chốt chặn từ TASK 136; làn OFFLINE thì không có gì —
+// nó `moveTo`/`resizeTo` vô điều kiện. Hậu quả ở hội trường: tường ONLINE đang toàn màn hình trên LED, ai
+// đó gạt sang OFFLINE rồi bấm "Mở màn phụ đề" là cửa sổ đó bị lôi về màn chính trước mặt phòng.
+//
+// `openSubOutputs` nằm TRONG một component React và không được export; bộ test này chạy ở môi trường node
+// không có DOM, nên không gọi thẳng được. Xuất nó ra chỉ để test thì sinh cảnh báo `only-export-components`
+// mới và làm đỏ cổng oxlint. Nên hai ca dưới đây soi MÃ NGUỒN — cùng kỹ thuật mà cả kho đã dùng cho những
+// khẳng định kiểu này. Để chúng không thành ca trang trí, mã được BỎ CHÚ THÍCH trước khi dò (bọc một dòng
+// vào `/* */` cũng phải đỏ, y như xoá hẳn), và ca ghim cả THỨ TỰ chứ không chỉ sự có mặt.
+describe('làn OFFLINE không được đụng vào tường đang toàn màn hình (PROMPT-20 việc 1)', () => {
+  // Bỏ chú thích TRƯỚC khi dò: bọc một dòng vào `/* */` là chuỗi vẫn nằm trong tệp, nên dò trên bản thô
+  // thì mã chết mà ca vẫn xanh — đúng cái bẫy đã sập nhiều lần trong dự án này.
+  const routing = readFileSync(new URL('../src/pages/AudioRouting.tsx', import.meta.url), 'utf8')
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .split('\n')
+    .filter((l) => !l.trim().startsWith('//'))
+    .join('\n')
+  // Và ghim NGUYÊN VĂN đã gộp khoảng trắng, không ghim từng mảnh rời.
+  //
+  // Vì sao phải chặt tới mức này: vòng nghiệm thu đã chứng minh bộ khẳng định kiểu `toContain` từng mảnh
+  // bị qua mặt dễ dàng mà không đụng một chữ nào của các mảnh đó — chèn `return false;` NGAY TRƯỚC dòng
+  // `try`, hoặc thêm `&& false` vào điều kiện, hoặc chèn một lệnh dời cửa sổ TRƯỚC chốt: mọi chuỗi được
+  // dò vẫn còn nguyên, mã đã chết, và cả 15 ca vẫn xanh. So nguyên khối thì mọi kiểu chèn đều đỏ.
+  //
+  // Cái giá phải trả, nói thẳng: sửa hợp lệ ba khối này cũng làm đỏ. Đó là CỐ Ý — đây là bản đóng băng v1
+  // trước khi bàn giao, không phải mã đang phát triển; ba khối này không được đổi mà không ai hay.
+  const nen = (t: string) => t.split(/\s+/).filter(Boolean).join(' ')
+
+  it('phép hỏi "đang toàn màn hình không" phải hỏi THẬT — nguyên khối, không chèn được gì vào', () => {
+    const i = routing.indexOf('function isWallFullscreen')
+    expect(i).toBeGreaterThan(-1)
+    expect(nen(routing.slice(i, routing.indexOf('\n}', i) + 2))).toBe(
+      'function isWallFullscreen(win: Window): boolean { try { return win.document.fullscreenElement != null; } catch { return false; } }',
+    )
+    // Bản sao cục bộ, KHÔNG với sang làn online: luật hai làn cấm mọi tệp ngoài `lanes/online/` nhập sâu
+    // vào trong, và `isFullscreen` bên ấy cố ý không export.
+    expect(routing).not.toMatch(/from\s+['"][^'"]*lanes\/online\/audienceWindows/)
+  })
+
+  it('lối 1 · cửa sổ làn này đang nhớ: toàn màn hình thì thoát TRƯỚC mọi lệnh dời/đổi cỡ/điều hướng', () => {
+    const chot = routing.indexOf('if (isWallFullscreen(prev.win))')
+    const dieuHuong = routing.indexOf('prev.win.location.replace(url)')
+    const doi = routing.indexOf('prev.win.moveTo(left, top)')
+    expect(chot).toBeGreaterThan(-1)
+    expect(dieuHuong).toBeGreaterThan(-1)
+    expect(doi).toBeGreaterThan(-1)
+    // Nguyên khối: chèn thêm bất cứ lệnh nào vào giữa chốt là đỏ.
+    expect(nen(routing.slice(chot, routing.indexOf('\n', chot)))).toBe(
+      'if (isWallFullscreen(prev.win)) { opened++; return; }',
+    )
+    // Thứ tự mới là điều đáng ghim: đặt chốt SAU lệnh dời thì nó vô dụng, mà mọi khẳng định "có mặt" vẫn xanh.
+    expect(chot).toBeLessThan(dieuHuong)
+    expect(chot).toBeLessThan(doi)
+    // Và giữa đầu nhánh `prev` với chốt KHÔNG được có lệnh nào đụng vào cửa sổ.
+    const dauNhanh = routing.indexOf('if (prev && !prev.win.closed) {')
+    expect(dauNhanh).toBeGreaterThan(-1)
+    expect(dauNhanh).toBeLessThan(chot)
+    expect(routing.slice(dauNhanh, chot)).not.toMatch(/prev\.win\.(moveTo|resizeTo|focus|location)/)
+  })
+
+  it('lối 2 · dò bằng url RỖNG trước, nhận về thì ghi url RỖNG — không ghi url chưa hề được nạp', () => {
+    const i = routing.indexOf('let probe: Window | null = null;')
+    const j = routing.indexOf('let win: Window | null = null;')
+    expect(i).toBeGreaterThan(-1)
+    expect(j).toBeGreaterThan(i)   // dò PHẢI đi trước; hỏi bằng url là trang nạp lại, toàn màn hình bay ngay
+    expect(nen(routing.slice(i, j))).toBe(
+      "let probe: Window | null = null; try { probe = window.open('', name, feat); } catch { probe = null; } "
+      + 'let probeAlive = false; try { probeAlive = probe != null && !probe.closed; } catch { probeAlive = false; } '
+      + "if (probeAlive && probe && isWallFullscreen(probe)) { wallWinsRef.current[o.id] = { win: probe, url: '' }; opened++; return; }",
+    )
+    // `url: ''` là chỗ vòng nghiệm thu bắt được lỗi thật, nên ghim riêng một lần nữa cho rõ ý.
+    //
+    // Cửa sổ nhận về đang chiếu trang của làn KIA, không phải `url`. Ghi `url` vào sổ thì lần bấm sau lối 1
+    // thấy `prev.url === url` và không bao giờ điều hướng — cửa sổ kẹt vĩnh viễn ở trang làn kia trong khi
+    // nút vẫn báo mở thành công. Làn ONLINE tránh đúng bẫy này bằng cách không đụng tới `wallUrls`.
+    expect(routing).toContain("wallWinsRef.current[o.id] = { win: probe, url: '' };")
+    expect(routing).not.toContain('wallWinsRef.current[o.id] = { win: probe, url };')
+    // Hai làn phải dùng ĐÚNG một tên, nếu không thì cả chốt này canh nhầm cửa sổ.
+    expect(routing).toContain('const name = `proyaku-wall-${o.id}`;')
   })
 })

@@ -168,6 +168,21 @@ const loadSubOutputs = (): SubOutput[] => {
     return DEFAULT_SUB_OUTPUTS;
 };
 
+/**
+ * Is this wall window showing fullscreen — i.e. did somebody deliberately put it on the hall LED?
+ *
+ * Deliberately a local copy rather than an import: the ONLINE lane has its own `isFullscreen` inside
+ * `lanes/online/audienceWindows.ts`, and that file must NOT be reached into from here (CLAUDE.md rule 2 —
+ * nothing outside `lanes/online/` may import anything but the facade root). Forty characters duplicated is
+ * the cheaper price.
+ *
+ * Same-origin, so `document` is readable. A browser that refuses to answer says "not fullscreen" and the
+ * old move/resize behaviour stands — the guard may only ever SKIP work, never invent it.
+ */
+function isWallFullscreen(win: Window): boolean {
+    try { return win.document.fullscreenElement != null; } catch { return false; }
+}
+
 // The existing OFFLINE conference console — unchanged. The default export below wraps it with the
 // ONLINE/OFFLINE mode switch (FIX-07). When OFFLINE is selected this renders exactly as before.
 const OfflineConsole: React.FC = () => {
@@ -553,15 +568,50 @@ const OfflineConsole: React.FC = () => {
             const width = scr ? scr.availWidth : colW;
             const height = scr ? scr.availHeight : sh;
             const url = `/stream?${q}&display=1&fill=${fill}`;
+            // MỘT tên cửa sổ cho CẢ HAI làn. Làn ONLINE mở tường bằng đúng chuỗi này
+            // (`lanes/online/audienceWindows.ts`), trên đúng bộ id center/left/right. Nên trình duyệt coi
+            // cửa sổ của hai làn là MỘT — và đó là lý do hai chốt chặn bên dưới phải có mặt ở đây nữa.
+            const name = `proyaku-wall-${o.id}`;
+            const feat = `popup=yes,left=${left},top=${top},width=${width},height=${height}`;
             const prev = wallWinsRef.current[o.id];
             if (prev && !prev.win.closed) {
+                // LỐI 1 — cửa sổ chính làn này đang nhớ. Đang toàn màn hình thì KHÔNG đụng vào bất cứ thứ
+                // gì: không điều hướng, không dời, không đổi cỡ, không cả focus. Kỹ thuật viên đã kéo nó
+                // sang màn LED và bấm F; mọi thao tác ở đây đều kéo nó ra khỏi toàn màn hình trước mặt
+                // phòng. Chỉ đếm là đã mở rồi thôi.
+                if (isWallFullscreen(prev.win)) { opened++; return; }
                 // Cửa sổ đang mở: chỉ điều hướng lại khi ĐỔI nội dung (tránh nháy/ngắt WS), luôn đưa về đúng màn + kích thước.
                 if (prev.url !== url) { try { prev.win.location.replace(url); prev.url = url; } catch { /* điều hướng bị chặn — bỏ qua */ } }
                 try { prev.win.moveTo(left, top); prev.win.resizeTo(width, height); } catch { /* trình duyệt hạn chế move/resize */ }
                 prev.win.focus?.();
                 opened++;
             } else {
-                const win = window.open(url, `proyaku-wall-${o.id}`, `popup=yes,left=${left},top=${top},width=${width},height=${height}`);
+                // LỐI 2 — cửa sổ do làn KIA mở, hoặc do chính làn này mở trước một lần F5. `wallWinsRef`
+                // sống trong component nên tải lại trang là quên sạch, trong khi tường vẫn đang chạy trên
+                // LED — và `window.open(url, name)` sẽ tìm thấy nó THEO TÊN rồi điều hướng, tức mất toàn
+                // màn hình. Nên hỏi bằng url RỖNG trước: theo đặc tả, cách đó trả về cửa sổ cùng tên mà
+                // không đụng vào nó, và chỉ mở một popup trắng khi chưa có cửa sổ nào. Thứ dò được đang
+                // toàn màn hình thì nhận về và để yên.
+                let probe: Window | null = null;
+                try { probe = window.open('', name, feat); } catch { probe = null; }
+                let probeAlive = false;
+                try { probeAlive = probe != null && !probe.closed; } catch { probeAlive = false; }
+                if (probeAlive && probe && isWallFullscreen(probe)) {
+                    // Ghi CỬA SỔ, nhưng ghi url RỖNG — và đây là chỗ dễ viết sai nhất của cả bản vá.
+                    //
+                    // Cửa sổ vừa nhận về đang chiếu trang của làn KIA (hoặc trang trước lần F5), KHÔNG
+                    // phải `url`. Ghi `url` vào sổ là nói dối chính mình: lần bấm sau, lối 1 hỏi
+                    // `prev.url !== url`, thấy BẰNG NHAU nên không điều hướng — và cửa sổ kẹt vĩnh viễn ở
+                    // trang của làn kia, trong khi nút vẫn báo mở thành công. Để rỗng thì phép so ấy luôn
+                    // khác, nên ngay khi kỹ thuật viên thoát toàn màn hình, lần bấm kế tiếp đưa nó về
+                    // đúng /stream. Làn ONLINE giải cùng bài này bằng cách không đụng tới `wallUrls`
+                    // (`lanes/online/audienceWindows.ts`); ở đây sổ là một đối tượng nên phần url để rỗng.
+                    wallWinsRef.current[o.id] = { win: probe, url: '' };
+                    opened++;
+                    return;
+                }
+                let win: Window | null = null;
+                try { win = window.open(url, name, feat); } catch { win = null; }
                 if (win) {
                     wallWinsRef.current[o.id] = { win, url };
                     try { win.moveTo(left, top); win.resizeTo(width, height); } catch { /* ignore */ }

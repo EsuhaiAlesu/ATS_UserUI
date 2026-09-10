@@ -164,6 +164,13 @@ export function rhythmPauseSecs(v: SpeechRhythm): number | undefined {
  * `maxMs` only means anything when `adaptive`: it is the ceiling `recommendStableWindows` is allowed to
  * return. On a non-learning step the two numbers are fixed and the profile is ignored entirely — when
  * the operator has said what they want, the machine does not second-guess them.
+ *
+ * ONE exception, and it is not visible from this file: `onlineLane.stableCommitWindows()` asks
+ * `rhythm === 'normal'` FIRST and hands that step to the measured profile (0,4–1,1s), before it ever
+ * calls this function. So 'normal' reads as non-learning here while behaving as a learning step at
+ * runtime, and the 600/800 pair below is only its fallback for a speaker nobody has measured yet. The
+ * hint text for that step says 0,4–1,1s for exactly this reason; tests/speechRhythm.test.ts ca 27 pins
+ * both halves together so the promise and the behaviour cannot drift apart again.
  */
 export function rhythmCommitWindows(v: SpeechRhythm): {
   sentenceMs: number;

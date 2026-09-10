@@ -253,6 +253,14 @@ describe('nấc thứ năm phải tự mô tả đúng', () => {
 describe('thanh kéo nhịp nói', () => {
   const ui = readFileSync(new URL('../src/lib/lanes/online/components/OnlineRhythmSettings.tsx', import.meta.url), 'utf8')
   const settings = readFileSync(new URL('../src/pages/Settings.tsx', import.meta.url), 'utf8')
+  // Đọc MÃ, không đọc chú thích — cùng nếp `readCode` của guidedMatch/micSensitivity. Bọc một dòng vào
+  // `/* */` là chuỗi vẫn nằm trong tệp, nên dò thẳng trên bản thô thì cái bẫy đó lọt: mã chết mà ca vẫn
+  // xanh. Bỏ chú thích trước rồi mới dò thì dòng bị bọc biến mất và ca đỏ lên, đúng như nó phải thế.
+  const laneCode = readFileSync(new URL('../src/lib/lanes/online/onlineLane.ts', import.meta.url), 'utf8')
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .split('\n')
+    .filter((l) => !l.trim().startsWith('//'))
+    .join('\n')
 
   it('27 · thanh kéo đi đúng năm nấc, xếp theo thời gian chờ TĂNG DẦN', () => {
     expect(ui).toContain("const SLIDER_ORDER: readonly SpeechRhythm[] = ['fast', 'normal', 'adaptive', 'slow', 'vendor']")
@@ -268,6 +276,23 @@ describe('thanh kéo nhịp nói', () => {
     expect(SPEECH_RHYTHM_OPTIONS[1].value).toBe('normal')
     expect(SPEECH_RHYTHM_OPTIONS[1].hint).toContain('0,4–1,1s')
     expect(ui).toContain("const selfMeasures = w.adaptive || v === 'normal'")
+
+    // PROMPT-20 · việc 2 — ba dòng dưới đây là chỗ ca này TRƯỚC ĐÂY thiếu, và thiếu theo kiểu tệ nhất.
+    //
+    // Ba khẳng định ở trên bắt MÀN HÌNH phải hứa "0,4–1,1s". Không khẳng định nào bắt MÁY phải thực hiện
+    // lời hứa đó. Đo được, không suy đoán: giết hẳn nhánh `rhythm === 'normal'` trong `stableCommitWindows`
+    // thì nấc Bình thường rơi về 600ms cố định trong khi màn hình vẫn ghi "0,4–1,1s" — mà cả 1166 ca vẫn
+    // xanh và `tsc -b` vẫn thoát 0. Ca test khi đó đang canh gác cho một câu nói dối.
+    //
+    // Nên ghim thêm chính đoạn mã sinh ra con số ấy. Dò trên `laneCode` (đã bỏ chú thích) nên bọc dòng
+    // thật vào `/* */` cũng đỏ, đúng như đổi hẳn điều kiện.
+    const than = laneCode.slice(laneCode.indexOf('function stableCommitWindows'))
+    // Mốc đóng là dòng `  }` ĐỨNG MỘT MÌNH. Kiểu trả về của hàm này cũng kết bằng `  } {`, nên cắt ở
+    // `\n  }` trần là dừng ngay giữa chữ ký, chưa vào tới thân hàm.
+    const thanHam = than.slice(0, than.indexOf('\n  }\n'))
+    expect(thanHam).toContain("if (rhythm === 'normal') {")          // nấc này rẽ riêng, không dùng bảng
+    expect(thanHam).toContain('pauseProfile.windows(pauseKey)')       // và giao cho bộ tự đo, không tham số trần
+    expect(thanHam).toContain('learned: Boolean(measured)')           // đo được thì báo là ĐO ĐƯỢC
   })
 
   it('28 · thứ tự bày KHÔNG được lấy từ SPEECH_RHYTHM_OPTIONS — nấc dự phòng vẫn phải là Bình thường', () => {
