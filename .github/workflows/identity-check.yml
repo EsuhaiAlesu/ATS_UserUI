@@ -1,0 +1,36 @@
+# Chặn PR có commit dùng email chưa liên kết GitHub hoặc không thuộc domain công ty.
+# Kết hợp với ruleset "required status check: identity-check" để bắt buộc.
+name: identity-check
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+permissions:
+  contents: read
+  pull-requests: read
+jobs:
+  identity-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/github-script@v7
+        env:
+          ALLOWED_DOMAINS: esuhai.com,esuhai.vn,alesu.vn
+        with:
+          script: |
+            const allowed = process.env.ALLOWED_DOMAINS.split(",").map((s) => s.trim().toLowerCase());
+            const commits = await github.paginate(github.rest.pulls.listCommits, {
+              owner: context.repo.owner, repo: context.repo.repo, pull_number: context.payload.pull_request.number, per_page: 100,
+            });
+            const problems = [];
+            for (const c of commits) {
+              const email = (c.commit.author?.email || "").toLowerCase();
+              const domain = email.split("@")[1] || "";
+              const sha = c.sha.slice(0, 7);
+              if (!c.author) problems.push(`${sha}: email "${email}" chưa liên kết với tài khoản GitHub nào → thêm email vào GitHub Settings › Emails`);
+              else if (!domain.endsWith("noreply.github.com") && !allowed.includes(domain)) problems.push(`${sha}: email "${email}" không thuộc domain công ty (${allowed.join(", ")})`);
+            }
+            if (problems.length) {
+              core.summary.addHeading("Commit không đạt kiểm tra danh tính").addList(problems).write();
+              core.setFailed(problems.join("\n"));
+            } else {
+              core.info(`OK: ${commits.length} commit đều có danh tính hợp lệ.`);
+            }
