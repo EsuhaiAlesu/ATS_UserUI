@@ -1,0 +1,7 @@
+# CODEOWNERS – sinh bởi scripts/github/03-codeowners.mjs (2026-10-09)
+# Ứng dụng: Diatalent & Agent Translator · đội: prod-ai-diatalent · tier: product
+# Dòng sau cùng khớp sẽ thắng. Chỉ team tech-leads được sửa file này.
+# Chế độ tech-leads: mọi PR cần approve của @EsuhaiAlesu/tech-leads (Đoàn Thái Hiên, Tin Tran, CEO.Offices, Pon Le).
+
+*                            @EsuhaiAlesu/tech-leads
+/.github/CODEOWNERS          @EsuhaiAlesu/tech-leads
